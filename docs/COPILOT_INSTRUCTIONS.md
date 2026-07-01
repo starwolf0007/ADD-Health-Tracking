@@ -52,43 +52,43 @@ flutter test
 flutter run
 ```
 
-Full sequence with context and known open friction points: `docs/COMPILE_PATH.md`. Two flagged, not-yet-verified items to check first if anything fails: the `googleapis_auth` `AccessCredentials`/`AccessToken` constructor shape in `lib/platform/calendar/calendar_service.dart`, and `NetworkType.notRequired` vs `NetworkType.not_required` in `lib/platform/background/background_scheduler.dart`.
+Full sequence with context and known open friction points: `docs/COMPILE_PATH.md`. Two flagged, not-yet-verified items to check first if anything fails:
+- The `googleapis_auth` `AccessCredentials`/`AccessToken` constructor shape in `lib/platform/calendar/calendar_service.dart`
+- `NetworkType.notRequired` vs `NetworkType.not_required` in `lib/platform/background/background_scheduler.dart`
 
 **Report exact compiler/analyzer output, not a paraphrase of it.** "It didn't compile" is not useful; the actual error text is.
 
 ## If the first compile fails
 
-Don't panic. The repo is in a working state relative to what's been *verified* — nothing has actually run yet, so compile errors are expected and often indicate the friction points flagged above. When you hit an error:
+Don't panic. Nothing has actually run yet, so compile errors are expected and often just confirm the friction points already flagged above. When you hit one:
 
 1. **Paste the full error text** — not a summary. Include file paths and line numbers.
-2. **Check the two flagged open items first** — they're known unknowns that depend on package versions Bryan's environment actually has installed.
-3. **Fix one error at a time, then re-run `flutter analyze`** — don't batch-fix multiple errors in one commit. It's slower, but you'll know which fix actually worked.
-4. **If an error claims a file or method doesn't exist**, check that file actually exists in the repo before assuming a design is broken. A parallel implementation once introduced references to files that were never actually created — they existed only in prose.
+2. **Check the two flagged open items first** — they're known unknowns that depend on package versions actually installed in Bryan's environment.
+3. **Fix one error at a time, then re-run `flutter analyze`** — don't batch-fix multiple errors in one pass. Slower, but you'll know which fix actually worked.
+4. **If an error claims a file or method doesn't exist, check that the file actually exists in the repo before assuming the design is broken.** This project had a real, extended problem with confident architecture descriptions that never corresponded to real files — if you hit a missing reference, the far more likely explanation is a stale claim, not a bug in something that was actually built.
 
-After each fix, report the status with the exact command you ran and the output. That creates a real audit trail of what's been validated.
+Report status with the exact command you ran and its output after each fix — that's the real audit trail.
 
 ## How to propose changes
 
-The spec is long, dense, and intentionally opinionated. Before proposing anything:
+The spec is long and intentionally opinionated. Before proposing anything:
 
-1. **Search the spec for your idea.** Most "obvious improvements" are in §1–§15 with documented reasons for rejection.
-2. **If you find it already rejected, don't re-propose it.** The reasoning is there; re-discussing it wastes time.
-3. **If your idea isn't in the spec, propose it with the friction it solves and the friction it introduces.** "Nice to have" doesn't clear the bar; "reduces Bryan's decision load during task capture" does.
-4. **Link to the spec sections that would need to change.** Don't describe the change in isolation — describe the change relative to what's already been decided.
+1. **Search the spec for your idea first.** Most "obvious improvements" are already in there with a documented reason they were rejected.
+2. **If it's already rejected, don't re-propose it.** The reasoning is on record; re-litigating it wastes time.
+3. **If it's genuinely new, propose it with the friction it removes and the friction it adds.** "Nice to have" doesn't clear the bar; "reduces a specific, named decision point" does.
+4. **Reference the spec sections that would need to change.** Describe the change relative to what's already decided, not in isolation.
 
-This sounds rigid, but it's not — it's the antidote to the decision fatigue that killed process before. Clear trade-offs, clear rationale, clear audit trail.
+## Composition root
 
-## Composition root & dependency injection
+All state wiring lives in `lib/app/providers.dart` — the **one** place `lib/intelligence/` gets imported. Every other layer imports toward the center (Presentation → Executive → Platform → Domain), never outward.
 
-All state wiring happens in `lib/app/providers.dart`. This is the **one** place where `lib/intelligence/` is imported. All other layers import toward the center (Presentation → Executive → Platform → Domain), never outward.
+The Lexi system prompt lives in `lib/intelligence/lexi_system_prompt_mobile.md` (source of truth) and `lib/core/lexi_mobile_prompt.dart` (generated Dart constant). Edit the markdown, regenerate the constant — don't edit the generated file in place. Same one-source-of-truth discipline as the Drift schema.
 
-On-device Lexi wires through a platform channel to a local LLM (Gemini Nano or Apple Foundation Models). The system prompt lives in `lib/core/lexi_mobile_prompt.dart` — do not edit it in place. Update `lib/intelligence/lexi_system_prompt_mobile.md` and regenerate the Dart constant. Same discipline as Drift schema changes — one source of truth, auto-generated where possible.
+## Current status — checked against the real repo, not asserted
 
-## Current status (as of this handoff)
+- **Implemented, not yet Verified:** the six-file reconciliation (spec §15) is real, complete local work — but it has not been merged into `origin/main`, and nothing in this repo has been compiled. Calling reconciliation "Verified" would repeat the exact failure this file exists to prevent. It becomes Verified when `flutter analyze`/`flutter run` actually succeed against it.
+- **Real, content-verified (a different check than compiler-verified):** the Lexi system prompt — confirmed byte-for-byte accurate against the committed file. Worth keeping this distinction precise: verified-as-transcribed-correctly is not the same claim as verified-as-compiling. Neither is a substitute for the other.
+- **Implemented, not yet Verified:** Tasks, Habits, Stats, background jobs, Google/Health integration (all dormant/gated as designed).
+- **Proposed:** the on-device Lexi bridge — no stable Flutter package exists yet; this is a real, open gap, not a deferred nicety.
 
-- **Verified:** Repo reconciliation (all divergent branches merged into one canonical lineage)
-- **Verified:** Lexi system prompt (locked to mobile-optimized JSON protocol, zero image-gen overhead)
-- **Implemented, not yet Verified:** All core features (Tasks, Habits, Stats, Background jobs, Google/Health integration)
-- **Proposed:** On-device Lexi bridge (no stable Flutter package; platform channel is the workaround)
-
-Your first run will move something from Implemented to Verified or surface what needs fixing. That's the moment we actually know whether this thing works.
+The first real run moves something from Implemented to Verified, or surfaces what needs fixing. That's the actual moment this project finds out whether it works — nothing before it does.
