@@ -1,6 +1,5 @@
 name: neuroflow
-description: Calm-functional ADHD execution app (native Flutter).
-publish_to: 'none'
+description: ADHD/ADD habit, routine, and executive-function companion.
 version: 0.1.0+1
 
 environment:
@@ -11,31 +10,38 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # State / DI — Executive + Presentation layers (ChatGPT review lane)
+  # State management
   flutter_riverpod: ^2.5.1
   riverpod_annotation: ^2.3.5
 
-  # Persistence (Platform) — local-first source of truth (Grok review lane)
+  # Local database (Drift / SQLite)
   drift: ^2.18.0
   sqlite3_flutter_libs: ^0.5.20
   path_provider: ^2.1.3
   path: ^1.9.0
 
-  # Notifications + background scheduling (Platform) — the reason we went native.
-  # Phase 1 decision (post-review): SKIP `SCHEDULE_EXACT_ALARM`. Use WorkManager
-  # for periodic background checks (sweep, inferred-signal eval) + INEXACT
-  # local notifications. Exact alarms are a fast-follow if inexact proves too
-  # loose in practice — not required for v1.
+  # Notifications & background
   flutter_local_notifications: ^17.1.2
   timezone: ^0.9.3
   workmanager: ^0.5.2
 
-  # Capture rails (Platform / Intelligence)
-  google_mlkit_text_recognition: ^0.13.0   # on-device OCR — §10 resolved
-  google_sign_in: ^6.2.1                    # native Google OAuth
-  googleapis: ^13.1.0                       # Tasks / Calendar
-  flutter_secure_storage: ^9.2.1            # Keychain/Keystore token store — §12.3
-  uuid: ^4.4.0                               # Task id generation (capture sheet)
+  # Google Tasks sync
+  google_sign_in: ^6.2.1
+  googleapis: ^13.1.0
+
+  # Secure storage (tokens, sensitive prefs — §2.8)
+  flutter_secure_storage: ^9.2.1
+
+  # OCR capture
+  google_mlkit_text_recognition: ^0.13.0
+
+  # IDs
+  uuid: ^4.4.0
+
+  # NOTE: Two pieces intentionally have no stable package yet:
+  #   1. On-device LLM / Lexi (Gemini Nano on Android) — no stable Flutter binding
+  #   2. Local NLP date parsing — no production-ready Flutter package
+  # Both are Phase 2 / §14 items. Stubs are in executive/planner.dart.
 
 dev_dependencies:
   flutter_test:
@@ -45,8 +51,5 @@ dev_dependencies:
   riverpod_generator: ^2.4.0
   flutter_lints: ^4.0.0
 
-# NOTE (builder): two pieces have NO stable package and are written as platform channels:
-#   1. On-device LLM (Lexi): Apple Foundation Models (iOS) / Gemini Nano (Android) — §14 top risk.
-#   2. Local NLP date parsing: a small chrono-style parser, vendored or written; non-LLM (§5).
 flutter:
   uses-material-design: true
