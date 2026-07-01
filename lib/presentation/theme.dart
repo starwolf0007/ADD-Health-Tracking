@@ -1,89 +1,116 @@
 // lib/presentation/theme.dart
 //
-// PRESENTATION LAYER. The §13 locked tokens, realized as Flutter constants.
-// Nothing in lib/presentation/ should hardcode a color outside this file —
-// that's what "single source of truth for mockup and build" means in practice.
+// Design token source of truth. All colours and text styles live here.
+// Spec v1.3 locked tokens:
+//   Background  : #0c0c0d  (near-black, not pure #000000)
+//   Accent      : #2FB083  (muted emerald / teal)
+//   Energy icons: monochrome glyphs, shape-distinguished (no colour coding)
+//   Heartbeat   : static fill, updates on state transition only (no idle anim)
+//   Typography  : sans primary / mono for live numerals
 
 import 'package:flutter/material.dart';
 
 class AppColors {
-  AppColors._();
-
-  /// Near-black, not pure #000000 — pure black causes more halation/smear on
-  /// OLED while scrolling (§13, locked v1.3).
+  // -- Locked spec v1.3 tokens --
   static const background = Color(0xFF0C0C0D);
-
-  /// One step up from background — cards, sheets. Still restrained, never
-  /// competes with the accent.
-  static const surface = Color(0xFF18181A);
-  static const surfaceRaised = Color(0xFF222225);
-
-  /// The ENTIRE signal layer. One value, one meaning: action / the thing to
-  /// do now. Never spent on decoration (§13).
+  static const surface = Color(0xFF161618);
+  static const surfaceVariant = Color(0xFF1E1E21);
   static const accent = Color(0xFF2FB083);
+  static const accentDim = Color(0xFF1E7A5A);
 
-  /// Text + the monochrome energy glyphs (§13: shape, not color).
-  static const textPrimary = Color(0xFFEDEDEF);
-  static const textSecondary = Color(0xFF9A9AA2);
-  static const textFaint = Color(0xFF5C5C63);
+  // Text
+  static const textPrimary = Color(0xFFF0F0F0);
+  static const textSecondary = Color(0xFF8A8A8E);
+  static const textMuted = Color(0xFF555559);
 
-  static const divider = Color(0xFF2A2A2D);
+  // Semantic (mode indicator only — not energy coding)
+  static const positive = Color(0xFF2FB083); // same as accent
+  static const warning = Color(0xFFB08B2F);
+
+  AppColors._();
+}
+
+class AppTextStyles {
+  // Sans-serif primary (system default: Roboto on Android)
+  static const displayLarge = TextStyle(
+    fontSize: 28,
+    fontWeight: FontWeight.w300,
+    color: AppColors.textPrimary,
+    letterSpacing: -0.5,
+  );
+
+  static const titleMedium = TextStyle(
+    fontSize: 18,
+    fontWeight: FontWeight.w500,
+    color: AppColors.textPrimary,
+  );
+
+  static const bodyMedium = TextStyle(
+    fontSize: 15,
+    fontWeight: FontWeight.w400,
+    color: AppColors.textPrimary,
+    height: 1.4,
+  );
+
+  static const bodySmall = TextStyle(
+    fontSize: 13,
+    fontWeight: FontWeight.w400,
+    color: AppColors.textSecondary,
+  );
+
+  // Monospace — live numerals (heartbeat count, timers)
+  static const monoLarge = TextStyle(
+    fontSize: 32,
+    fontWeight: FontWeight.w300,
+    color: AppColors.accent,
+    fontFeatures: [FontFeature.tabularFigures()],
+    fontFamily: 'monospace',
+  );
+
+  static const monoSmall = TextStyle(
+    fontSize: 13,
+    color: AppColors.textSecondary,
+    fontFeatures: [FontFeature.tabularFigures()],
+    fontFamily: 'monospace',
+  );
+
+  AppTextStyles._();
 }
 
 class AppTheme {
-  AppTheme._();
-
   static ThemeData dark() {
     return ThemeData(
       brightness: Brightness.dark,
       scaffoldBackgroundColor: AppColors.background,
       colorScheme: const ColorScheme.dark(
-        surface: AppColors.background,
+        // background / onBackground are deprecated in Flutter 3.22+.
+        // scaffoldBackgroundColor above handles the canvas; surface covers cards.
+        surface: AppColors.background, // scaffold canvas
+        surfaceContainerHighest: AppColors.surface, // card / sheet surfaces
         primary: AppColors.accent,
-        onPrimary: Colors.white,
-        secondary: AppColors.accent,
+        secondary: AppColors.accentDim,
+        onSurface: AppColors.textPrimary,
+        onPrimary: AppColors.background,
       ),
-      // Sans-serif primary; the spec leaves monospace-for-numerals as a
-      // recommendation, not yet locked (§13 note) — default platform sans
-      // for everything in this phase, revisit if/when typography is locked.
-      textTheme: const TextTheme(
-        headlineMedium: TextStyle(
-          color: AppColors.textPrimary,
-          fontWeight: FontWeight.w700,
-          fontSize: 26,
-        ),
-        titleMedium: TextStyle(
-          color: AppColors.textPrimary,
-          fontWeight: FontWeight.w600,
-          fontSize: 17,
-        ),
-        bodyMedium: TextStyle(
-          color: AppColors.textSecondary,
-          fontSize: 14,
-        ),
-        bodySmall: TextStyle(
-          color: AppColors.textFaint,
-          fontSize: 12,
-        ),
-      ),
-      iconTheme: const IconThemeData(color: AppColors.textSecondary, size: 20),
-      dividerColor: AppColors.divider,
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.accent,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-        ),
-      ),
-      floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: AppColors.accent,
-        foregroundColor: Colors.white,
+      cardTheme: const CardTheme(
+        color: AppColors.surface,
         elevation: 0,
+        margin: EdgeInsets.zero,
       ),
-    );
-  }
-}
+      dividerTheme: const DividerThemeData(
+        color: AppColors.surfaceVariant,
+        thickness: 1,
+      ),
+      textTheme: const TextTheme(
+        displayLarge: AppTextStyles.displayLarge,
+        titleMedium: AppTextStyles.titleMedium,
+        bodyMedium: AppTextStyles.bodyMedium,
+        bodySmall: AppTextStyles.bodySmall,
+      ),
+      appBarTheme: const AppBarTheme(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        titleTextStyle: AppTextStyles.titleMedium,
+      ),
+      floatingActionButtonTheme: const FloatingActionBut

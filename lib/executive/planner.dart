@@ -1,153 +1,106 @@
 // lib/executive/planner.dart
 //
-// EXECUTIVE LAYER. Imports DOMAIN ONLY. It must NOT import lib/intelligence/.
+// Executive layer — the "brain" of NeuroFlow.
+// Owns mode detection, Quick Wins auto-swap, and plan refinement seam.
 //
-// The invariant (spec §3): Executive never depends on Intelligence being
-// available. It runs a complete DeterministicPlanner. Intelligence (Lexi
-// on-device / optional cloud) implements the `PlanAdvisor` seam below and is
-// injected as an OPTIONAL enhancer — if it's null, cold, slow, or offline, the
-// Executive has already produced a full answer. AI is decoration on a complete
-// engine, never a dependency.
+// Architecture rules enforced here:
+//   • Executive never imports Flutter (no BuildContext, no widgets).
+//   • TodayController (in providers.dart) is the SOLE call site for
+//     PlanAdvisor.refine(). Executive never calls Intelligence directly.
+//   • PlanAdvisor interface is always non-null; default is NoOpPlanAdvisor.
 
 import '../domain/task.dart';
 
-/// Everything the planner needs to decide, captured deterministically.
-class ContextSnapshot {
-  final DateTime now;
-  final int? todayMood; // 1..5, null = not logged
-  final DateTime? lastInteraction; // for inferred low-engagement
-  final int inferredQuietHour; // default 11 — past this with tasks pending = lighter-day signal (§10)
+// ---------------------------------------------------------------------------
+// Mode
+// ---------------------------------------------------------------------------
 
-  const ContextSnapshot({
-    required this.now,
-    this.todayMood,
-    this.lastInteraction,
-    this.inferredQuietHour = 11,
+enum DayMode {
+  normal, // Standard Today view — primary task + context
+  quickWins, // Auto-swapped lighter-day mode — ≤3 low-energy tasks
+}
+
+// ---------------------------------------------------------------------------
+// Plan — what the Executive hands back to TodayController
+// ---------------------------------------------------------------------------
+
+class Plan {
+  final DayMode mode;
+  final Task? primaryTask; // null means nothing pending
+  final List<Task> quickWins; // populated only in quickWins mode
+  final String reason; // human-readable string for the UI reassurance line
+
+  const Plan({
+    required this.mode,
+    this.primaryTask,
+    this.quickWins = const [],
+    required this.reason,
   });
 }
 
-class NextBestAction {
-  final Task? task; // null = nothing to surface (a calm, valid state)
-  final String reason; // short, for the UI's one-line "why this"
-  const NextBestAction(this.task, this.reason);
-}
+// ---------------------------------------------------------------------------
+// PlanAdvisor seam (§14 AI tiering)
+//
+// Phase 1: NoOpPlanAdvisor — deterministic, never AI-dependent.
+// Phase 2: LexiPlanAdvisor wraps on-device Gemini Nano / Apple Foundation.
+// Phase 3: CloudPlanAdvisor wraps cloud Gemini (explicit user opt-in only).
+//
+// TodayController holds the active advisor and calls refine() ONCE per cycle.
+// ---------------------------------------------------------------------------
 
-/// Optional Intelligence seam. Implemented in lib/intelligence/ (Lexi). The
-/// Executive depends on THIS interface, defined here in its own layer — not on
-/// the Intelligence module.
-///
-/// Null-object pattern (post-review change, replaces nullable-PlanAdvisor):
-/// callers always hold a non-null PlanAdvisor — DEFAULT to [NoOpPlanAdvisor]
-/// rather than null + scattered null-checks. This makes "Intelligence absent"
-/// a normal, type-safe code path instead of a special case every call site has
-/// to remember to guard. The Riverpod provider for PlanAdvisor defaults to
-/// NoOpPlanAdvisor and is overridden once the Lexi bridge (§14) is wired.
 abstract class PlanAdvisor {
-  /// May reorder/annotate, but must degrade safely; returning the input
-  /// unchanged is always a valid implementation. Never required to do work.
-  Future<List<Task>> refine(List<Task> deterministicOrder, ContextSnapshot ctx);
+  /// Optionally refine a deterministic plan with AI insight.
+  /// Must never throw — return [plan] unchanged on any error.
+  Future<Plan> refine(Plan plan, List<Task> allPending);
 }
 
-/// The default PlanAdvisor. Identity function — hands back the deterministic
-/// order untouched. This is what the app runs on until the on-device Lexi
-/// bridge (§14, top build risk) lands, and what it falls back to instantly if
-/// that bridge is cold, slow, or the device has no on-device model support.
 class NoOpPlanAdvisor implements PlanAdvisor {
   const NoOpPlanAdvisor();
 
   @override
-  Future<List<Task>> refine(List<Task> deterministicOrder, ContextSnapshot ctx) async {
-    return deterministicOrder;
-  }
+  Future<Plan> refine(Plan plan, List<Task> allPending) async => plan;
 }
 
-abstract class Planner {
-  bool shouldEnterQuickWins(ContextSnapshot ctx);
+// ---------------------------------------------------------------------------
+// Executive engine
+// ---------------------------------------------------------------------------
 
-  /// The deterministic candidate list, in priority order, for whichever mode
-  /// applies (Quick Wins capped list, or the normal actionable order). This is
-  /// what gets handed to PlanAdvisor.refine() at the orchestration layer —
-  /// Planner itself never calls Intelligence.
-  List<Task> orderedCandidates(List<Task> open, ContextSnapshot ctx);
+class Executive {
+  // Thresholds for auto Quick Wins detection.
+  static const int _quickWinsMaxCount = 3;
+  static const EnergyLevel _quickWinsMaxEnergy = EnergyLevel.low;
 
-  List<Task> quickWins(List<Task> open);
-  NextBestAction nextAction(List<Task> open, ContextSnapshot ctx);
-}
-
-/// Complete, AI-free engine. This is what ships first and what runs whenever
-/// Intelligence is unavailable.
-class DeterministicPlanner implements Planner {
-  /// Spec §6 cap.
-  static const int quickWinCap = 3;
-
-  @override
-  bool shouldEnterQuickWins(ContextSnapshot ctx) {
-    // Trigger 1 — explicit rough mood check-in (§6).
-    if (ctx.todayMood != null && ctx.todayMood! <= 2) return true;
-
-    // Trigger 2 — inferred low-engagement, kept conservative (§10):
-    // past the quiet hour, with no interaction yet today.
-    final pastQuietHour = ctx.now.hour >= ctx.inferredQuietHour;
-    final noInteractionToday = ctx.lastInteraction == null ||
-        !_sameDay(ctx.lastInteraction!, ctx.now);
-    return pastQuietHour && noInteractionToday;
-  }
-
-  @override
-  List<Task> quickWins(List<Task> open) {
-    final candidates = open
-        .where((t) =>
-            t.isOpen &&
-            t.energy == EnergyTag.lowEnergy &&
-            t.priority == Priority.normal)
-        .toList();
-
-    // Lowest estimated effort first; unknown effort sorts as "medium" (§6).
-    candidates.sort((a, b) =>
-        _effort(a).compareTo(_effort(b)));
-
-    return candidates.take(quickWinCap).toList();
-  }
-
-  @override
-  List<Task> orderedCandidates(List<Task> open, ContextSnapshot ctx) {
-    if (shouldEnterQuickWins(ctx)) {
-      return quickWins(open);
-    }
-    final actionable = open.where((t) => t.isOpen).toList()..sort(_byUrgency);
-    return actionable;
-  }
-
-  @override
-  NextBestAction nextAction(List<Task> open, ContextSnapshot ctx) {
-    final inQuickWins = shouldEnterQuickWins(ctx);
-    final ordered = orderedCandidates(open, ctx);
-
-    if (ordered.isEmpty) {
-      return NextBestAction(
-        null,
-        inQuickWins ? "Nothing easy is tracked. Resting counts." : "Today's clear.",
+  /// Produce a deterministic Plan from the current pending task list.
+  /// This is intentionally synchronous and pure — no I/O, no AI.
+  Plan evaluate(List<Task> pending) {
+    if (pending.isEmpty) {
+      return const Plan(
+        mode: DayMode.normal,
+        primaryTask: null,
+        reason: 'All clear — nothing pending.',
       );
     }
-    return NextBestAction(
-      ordered.first,
-      inQuickWins ? "A small one for a lighter day." : "Top of today.",
+
+    // Auto Quick Wins: if all pending tasks are low-energy AND there are ≤3,
+    // swap to Quick Wins mode automatically (spec v1.3 §QW auto-mode).
+    final allLowEnergy =
+        pending.every((t) => t.energy == _quickWinsMaxEnergy);
+    if (allLowEnergy && pending.length <= _quickWinsMaxCount) {
+      return Plan(
+        mode: DayMode.quickWins,
+        quickWins: pending,
+        reason: 'Lighter load today — showing your easiest wins first.',
+      );
+    }
+
+    // Normal mode: surface the lowest-energy pending task first.
+    final sorted = List<Task>.from(pending)
+      ..sort((a, b) => a.energy.index.compareTo(b.energy.index));
+
+    return Plan(
+      mode: DayMode.normal,
+      primaryTask: sorted.first,
+      reason: '',
     );
   }
-
-  // High priority first, then soonest due, then oldest.
-  int _byUrgency(Task a, Task b) {
-    if (a.priority != b.priority) {
-      return a.priority == Priority.high ? -1 : 1;
-    }
-    final ad = a.due, bd = b.due;
-    if (ad != null && bd != null) return ad.compareTo(bd);
-    if (ad != null) return -1;
-    if (bd != null) return 1;
-    return a.createdAt.compareTo(b.createdAt);
-  }
-
-  int _effort(Task t) => t.estimatedMinutes ?? 15; // unknown == medium
-  bool _sameDay(DateTime a, DateTime b) =>
-      a.year == b.year && a.month == b.month && a.day == b.day;
 }
