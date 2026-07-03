@@ -18,6 +18,7 @@ import '../executive/planner.dart';
 import '../providers.dart';
 import 'habits_widget.dart';
 import 'routine_screen.dart';
+import 'settings_screen.dart';
 import 'theme.dart';
 
 class TodayScreen extends ConsumerWidget {
@@ -27,17 +28,27 @@ class TodayScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final todayAsync = ref.watch(todayControllerProvider);
     final completedAsync = ref.watch(completedTodayCountProvider);
+    final nameAsync = ref.watch(displayNameProvider);
 
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.background,
         elevation: 0,
-        title: const _HeartbeatHeader(completedAsync: null),
+        title: _GreetingHeader(nameAsync: nameAsync),
         actions: [
           // Heartbeat count lives in trailing position — §13 token
           _HeartbeatCount(completedAsync: completedAsync),
-          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined,
+                color: AppColors.textSecondary, size: 20),
+            tooltip: 'Settings',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => const SettingsScreen(),
+              ),
+            ),
+          ),
         ],
       ),
       body: todayAsync.when(
@@ -81,15 +92,17 @@ class TodayScreen extends ConsumerWidget {
 // Header
 // ---------------------------------------------------------------------------
 
-class _HeartbeatHeader extends StatelessWidget {
-  final AsyncValue<int>? completedAsync;
+class _GreetingHeader extends StatelessWidget {
+  final AsyncValue<String> nameAsync;
 
-  const _HeartbeatHeader({required this.completedAsync});
+  const _GreetingHeader({required this.nameAsync});
 
   @override
   Widget build(BuildContext context) {
+    final name = nameAsync.valueOrNull ?? '';
+    final greeting = name.isNotEmpty ? 'Hey, $name' : 'Today';
     return Text(
-      'Today',
+      greeting,
       style: AppTextStyles.titleMedium.copyWith(color: AppColors.textPrimary),
     );
   }
@@ -433,4 +446,129 @@ class _CaptureSheetState extends State<_CaptureSheet> {
                 foregroundColor: AppColors.background,
                 elevation: 0,
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRect
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('Add'),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _submit() {
+    final title = _controller.text.trim();
+    if (title.isEmpty) return;
+
+    final task = Task.create(title: title, energy: _energy);
+    widget.ref.read(todayControllerProvider.notifier).addTask(task);
+    Navigator.of(context).pop();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Due routines section — shown between tasks and habits
+// ---------------------------------------------------------------------------
+
+/// Shows routines that are due right now (time-of-day aware).
+/// Hidden when no routines are due — zero visual noise.
+class _DueRoutinesSection extends ConsumerWidget {
+  const _DueRoutinesSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final dueAsync = ref.watch(dueRoutinesProvider);
+
+    return dueAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (routines) {
+        if (routines.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Text('Routines', style: AppTextStyles.bodySmall),
+            ),
+            ...routines.map(
+              (r) => _RoutineCard(
+                routine: r,
+                onTap: () => launchRoutine(context, ref, r),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// Single tappable routine card.
+/// Shows progress state when a routine is already in progress.
+class _RoutineCard extends StatelessWidget {
+  final Routine routine;
+  final VoidCallback onTap;
+
+  const _RoutineCard({required this.routine, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final inProgress = routine.completedCount > 0 && !routine.isComplete;
+    final totalMinutes = routine.steps.fold<int>(
+      0,
+      (sum, s) => sum + (s.durationMinutes ?? 0),
+    );
+    final stepLabel = inProgress
+        ? '${routine.completedCount} / ${routine.steps.length} steps'
+        : '${routine.steps.length} steps · ~$totalMinutes min';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            // Accent border when already in progress — signals continuation
+            border: inProgress
+                ? Border.all(
+                    color: AppColors.accent.withValues(alpha: 0.35),
+                    width: 1,
+                  )
+                : null,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(routine.name, style: AppTextStyles.bodyMedium),
+                    const SizedBox(height: 2),
+                    Text(stepLabel, style: AppTextStyles.bodySmall),
+                  ],
+                ),
+              ),
+              Text(
+                inProgress ? 'Continue' : 'Start',
+                style: AppTextStyles.bodySmall
+                    .copyWith(color: AppColors.accent),
+              ),
+              const SizedBox(width: 2),
+              const Icon(
+                Icons.chevron_right,
+                size: 16,
+                color: AppColors.accent,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}

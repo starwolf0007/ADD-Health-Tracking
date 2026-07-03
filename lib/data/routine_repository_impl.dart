@@ -162,4 +162,11 @@ class DriftRoutineRepository implements RoutineRepository {
       case RoutineAnchor.morning:
         return 'morning';
       case RoutineAnchor.midday:
-   
+        return 'midday';
+      case RoutineAnchor.evening:
+        return 'evening';
+      case RoutineAnchor.custom:
+        return 'custom';
+    }
+  }
+}

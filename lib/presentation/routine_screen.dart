@@ -375,4 +375,14 @@ class _CelebrationView extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 Future<void> launchRoutine(
-   
+    BuildContext context, WidgetRef ref, Routine routine) async {
+  await Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => RoutineScreen(
+        routine: routine,
+        onFinished: () => Navigator.of(context).pop(),
+      ),
+    ),
+  );
+}

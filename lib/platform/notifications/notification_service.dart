@@ -80,4 +80,40 @@ class NotificationService {
     );
   }
 
-  /// Immediate morning briefing notification 
+  /// Immediate morning briefing notification — fired by WorkManager callback.
+  /// Shows once per morning; no sound (ADHD: don't startle awake).
+  /// Safe to call from a background isolate after init() has been called.
+  Future<void> showMorningBriefing({required int pendingCount}) async {
+    if (pendingCount <= 0) return; // nothing to brief about — stay quiet
+
+    final body = pendingCount == 1
+        ? 'You have 1 task today. Tap to see what\'s first.'
+        : 'You have $pendingCount tasks today. Tap to see what\'s first.';
+
+    await _plugin.show(
+      _idMorningBriefing,
+      'Good morning',
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _channelId,
+          _channelName,
+          importance: Importance.defaultImportance,
+          priority: Priority.defaultPriority,
+          playSound: false, // quiet notification — ADHD: no startle
+        ),
+        iOS: const DarwinNotificationDetails(
+          presentSound: false,
+        ),
+      ),
+    );
+  }
+
+  Future<void> cancelReminder(int id) async {
+    await _plugin.cancel(id);
+  }
+
+  Future<void> cancelAll() async {
+    await _plugin.cancelAll();
+  }
+}

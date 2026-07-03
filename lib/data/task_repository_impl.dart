@@ -4,15 +4,22 @@
 // Local Drift is the source of truth (§12.3).
 // Google Tasks is the mirror / async sync queue — never reads from it.
 
+import 'package:drift/drift.dart';
+
 import '../domain/task.dart';
+import '../platform/sync/sync_operation.dart';
+import '../platform/sync/sync_queue_repository.dart';
 import 'database.dart';
 import 'task_repository.dart';
-import 'package:drift/drift.dart';
 
 class DriftTaskRepository implements TaskRepository {
   final AppDatabase _db;
+  final SyncQueueRepository? _syncQueue;
 
-  DriftTaskRepository(this._db);
+  /// [syncQueue] is optional — passing null disables sync enqueueing.
+  /// The WorkManager isolate omits it; the main isolate supplies it.
+  DriftTaskRepository(this._db, {SyncQueueRepository? syncQueue})
+      : _syncQueue = syncQueue;
 
   // ------------------------------------------------------------------
   // Mappers
@@ -62,20 +69,67 @@ class DriftTaskRepository implements TaskRepository {
 
   @override
   Future<void> save(Task task) async {
+    final isNew = await _isNewTask(task.id);
     await _db.upsertTask(_taskToCompanion(task));
-    // TODO(sync): enqueue Google Tasks mirror update
+    if (_syncQueue != null) {
+      if (isNew) {
+        await _syncQueue!.enqueue(SyncOperation.forCreate(
+          taskId: task.id,
+          taskTitle: task.title,
+          taskNotes: task.notes,
+        ));
+      } else {
+        final googleTaskId = await _getGoogleTaskId(task.id);
+        await _syncQueue!.enqueue(SyncOperation.forUpdate(
+          taskId: task.id,
+          taskTitle: task.title,
+          taskNotes: task.notes,
+          googleTaskId: googleTaskId,
+        ));
+      }
+    }
   }
 
   @override
   Future<void> markComplete(String id) async {
+    final googleTaskId = await _getGoogleTaskId(id);
     await _db.markComplete(id);
-    // TODO(sync): enqueue Google Tasks completion update
+    if (_syncQueue != null) {
+      await _syncQueue!.enqueue(SyncOperation.forComplete(
+        taskId: id,
+        googleTaskId: googleTaskId,
+      ));
+    }
   }
 
   @override
   Future<void> delete(String id) async {
+    final googleTaskId = await _getGoogleTaskId(id);
     await _db.deleteTask(id);
-    // TODO(sync): enqueue Google Tasks delete
+    if (_syncQueue != null && googleTaskId != null) {
+      await _syncQueue!.enqueue(SyncOperation.forDelete(
+        taskId: id,
+        googleTaskId: googleTaskId,
+      ));
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // Sync helpers
+  // ------------------------------------------------------------------
+
+  Future<bool> _isNewTask(String id) async {
+    final row = await (select(_db.tasks)
+          ..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+    return row == null;
+  }
+
+  Future<String?> _getGoogleTaskId(String id) async {
+    final row = await (select(_db.tasks)
+          ..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+    return row?.googleTaskId;
   }
 
   // ------------------------------------------------------------------

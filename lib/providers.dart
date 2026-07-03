@@ -26,6 +26,11 @@ import 'domain/routine.dart';
 import 'domain/task.dart';
 import 'executive/lexi_plan_advisor.dart';
 import 'executive/planner.dart';
+import 'platform/settings_service.dart';
+import 'platform/sync/google_tasks_sync_service.dart';
+import 'platform/sync/sync_queue_repository.dart';
+import 'platform/sync/sync_queue_repository_impl.dart';
+import 'platform/wear/wear_sync_service.dart';
 
 // ---------------------------------------------------------------------------
 // Platform layer
@@ -37,12 +42,45 @@ final databaseProvider = Provider<AppDatabase>((ref) {
   return db;
 });
 
+final settingsServiceProvider = Provider<SettingsService>((ref) {
+  return SettingsService();
+});
+
+// ---------------------------------------------------------------------------
+// Sync layer
+// ---------------------------------------------------------------------------
+
+final syncQueueRepositoryProvider = Provider<SyncQueueRepository>((ref) {
+  return DriftSyncQueueRepository(ref.watch(databaseProvider));
+});
+
+/// Google Tasks sync service — dormant until user connects Google Tasks.
+/// Call GoogleTasksSyncService.saveToken() after OAuth to activate.
+final googleTasksSyncServiceProvider = Provider<GoogleTasksSyncService>((ref) {
+  return GoogleTasksSyncService(ref.watch(syncQueueRepositoryProvider));
+});
+
+/// Wear OS sync service — pushes primary task to Pixel Watch 4.
+/// No-ops gracefully if watch is unpaired or running on simulator.
+final wearSyncServiceProvider = Provider<WearSyncService>((ref) {
+  return WearSyncService();
+});
+
+/// User's display name — drives the greeting on TodayScreen.
+/// Async because it reads from FlutterSecureStorage.
+final displayNameProvider = FutureProvider<String>((ref) async {
+  return ref.watch(settingsServiceProvider).getDisplayName();
+});
+
 // ---------------------------------------------------------------------------
 // Data layer
 // ---------------------------------------------------------------------------
 
 final taskRepositoryProvider = Provider<TaskRepository>((ref) {
-  return DriftTaskRepository(ref.watch(databaseProvider));
+  return DriftTaskRepository(
+    ref.watch(databaseProvider),
+    syncQueue: ref.watch(syncQueueRepositoryProvider),
+  );
 });
 
 final routineRepositoryProvider = Provider<RoutineRepository>((ref) {
@@ -131,4 +169,101 @@ class TodayState {
 
 // ---------------------------------------------------------------------------
 // TodayController — the Presentation ↔ Executive bridge
-// ------------------------------
+// ---------------------------------------------------------------------------
+
+class TodayController extends AsyncNotifier<TodayState> {
+  /// Tasks snoozed for this session only (no DB write).
+  /// Cleared on app restart or when the stream rebuilds from a new day reset.
+  final Set<String> _snoozedIds = {};
+
+  @override
+  Future<TodayState> build() async {
+    // Watch pending tasks; rebuild whenever they change.
+    final pending = await ref
+        .watch(taskRepositoryProvider)
+        .watchPending()
+        .first;
+
+    final nextState = await _computeState(pending);
+
+    // Push to watch after every state change — no-ops if unpaired.
+    ref.read(wearSyncServiceProvider).pushPrimaryTask(nextState);
+
+    return nextState;
+  }
+
+  Future<TodayState> _computeState(List<Task> pending) async {
+    final executive = ref.read(executiveProvider);
+    final advisor = ref.read(planAdvisorProvider);
+
+    // Filter out session-snoozed tasks before planning.
+    final active = _snoozedIds.isEmpty
+        ? pending
+        : pending.where((t) => !_snoozedIds.contains(t.id)).toList();
+
+    // 1. Deterministic plan from Executive.
+    final raw = executive.evaluate(active);
+
+    // 2. Optional AI refinement — TodayController is the ONLY call site.
+    final refined = await advisor.refine(raw, active);
+
+    return TodayState(
+      mode: refined.mode,
+      primaryTask: refined.primaryTask,
+      quickWins: refined.quickWins,
+      reason: refined.reason,
+      isLoading: false,
+    );
+  }
+
+  /// Mark a task complete and recompute plan.
+  Future<void> complete(String taskId) async {
+    await ref.read(taskRepositoryProvider).markComplete(taskId);
+  }
+
+  /// Add a new task from the capture sheet.
+  Future<void> addTask(Task task) async {
+    await ref.read(taskRepositoryProvider).save(task);
+  }
+
+  /// Snooze a task for this session only (no DB write).
+  /// Called by WearActionHandler when user swipes "Too hard" on watch,
+  /// and available from the phone UI too.
+  void snoozeForSession(String taskId) {
+    _snoozedIds.add(taskId);
+    // Force a recompute by invalidating self — stream will rebuild state
+    // with the snoozed task excluded.
+    ref.invalidateSelf();
+  }
+}
+
+final todayControllerProvider =
+    AsyncNotifierProvider<TodayController, TodayState>(TodayController.new);
+
+/// Heartbeat line stream — completed-today count.
+final completedTodayCountProvider = StreamProvider<int>((ref) {
+  return ref.watch(taskRepositoryProvider).watchCompletedTodayCount();
+});
+
+// ---------------------------------------------------------------------------
+// Routine providers
+// ---------------------------------------------------------------------------
+
+/// All active routines — drives the routine cards on Today screen.
+final activeRoutinesProvider = StreamProvider<List<Routine>>((ref) {
+  return ref.watch(routineRepositoryProvider).watchActive();
+});
+
+/// Routines due right now (time-of-day aware).
+final dueRoutinesProvider = FutureProvider<List<Routine>>((ref) {
+  return ref.watch(routineRepositoryProvider).fetchDueNow();
+});
+
+// ---------------------------------------------------------------------------
+// Habit providers
+// ---------------------------------------------------------------------------
+
+/// All active habits with recent check-ins — drives HabitsWidget.
+final activeHabitsProvider = StreamProvider<List<Habit>>((ref) {
+  return ref.watch(habitRepositoryProvider).watchActive();
+});

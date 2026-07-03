@@ -113,4 +113,13 @@ class AppTheme {
         scrolledUnderElevation: 0,
         titleTextStyle: AppTextStyles.titleMedium,
       ),
-      floatingActionButtonTheme: const FloatingActionBut
+      floatingActionButtonTheme: const FloatingActionButtonThemeData(
+        backgroundColor: AppColors.accent,
+        foregroundColor: AppColors.background,
+        elevation: 0,
+      ),
+    );
+  }
+
+  AppTheme._();
+}

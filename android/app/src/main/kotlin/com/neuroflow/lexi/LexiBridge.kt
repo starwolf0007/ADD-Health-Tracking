@@ -28,7 +28,9 @@ class LexiBridge: FlutterPlugin, MethodChannel.MethodCallHandler {
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "isAvailable" -> result.success(false) // stub: no native LLM yet
+            "checkGeminiNanoAvailable" -> result.success(false) // stub: no native LLM yet
+            "generateResponse" -> result.success(null) // stub: no native LLM yet
+            "isAvailable" -> result.success(false)
             "ping" -> result.success("lexi-stub")
             else -> result.notImplemented()
         }
