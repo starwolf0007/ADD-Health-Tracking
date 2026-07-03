@@ -45,3 +45,8 @@ lib/data/database.g.dart
 # OS
 .DS_Store
 Thumbs.db
+
+# Repo archives / junk (reconciliation §3)
+*.bundle
+*.tar.gz
+download

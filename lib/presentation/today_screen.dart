@@ -1,134 +1,142 @@
 // lib/presentation/today_screen.dart
 //
-// Today screen — the single surface users see on open.
-// Consumes todayControllerProvider (AsyncNotifier) and renders:
-//   • Normal mode  : Next Best Action card + reason line
-//   • Quick Wins   : ≤3 low-effort task cards with reassurance line
-//   • Empty        : All-clear state
-//   • Heartbeat    : Live completed-today count (mono font, state-transition
-//                    only — no idle animation per spec v1.3)
-//   • FAB          : Capture sheet (§13 — one gesture from anywhere)
+// Today — the single surface users see on open (§13).
+//
+// Redesign principles (all within locked v1.3 tokens):
+//   • ONE thing dominates. In normal mode the Next Best Action is a full
+//     display-scale card; everything else on screen is quiet. The app's whole
+//     pitch is "here is the one thing" — the layout now says that too.
+//   • Heartbeat line is real. The built HeartbeatLine widget was orphaned;
+//     it now sits under the header, filled by completed ÷ (completed+pending),
+//     updating only on state transitions (no idle motion).
+//   • Completion gives feedback. Marking done shows a one-line snackbar with
+//     the day's count — small dopamine, no confetti, calm-functional.
+//   • Quick Wins mode LOOKS lighter: reassurance line + up to three small
+//     cards instead of one big one.
+//   • Every tap target ≥ 48px. Complete controls are real InkWells with
+//     ripple + semantics, not bare GestureDetectors.
+//   • Zero widget duplication: EnergyGlyph, HeartbeatLine, and the capture
+//     sheet come from widgets/ — the former inline copies are deleted.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../app/focus_timer.dart';
+import '../app/providers.dart';
 import '../domain/routine.dart';
 import '../domain/task.dart';
 import '../executive/planner.dart';
-import '../providers.dart';
-import 'habits_widget.dart';
 import 'routine_screen.dart';
-import 'settings_screen.dart';
 import 'theme.dart';
+import 'widgets/capture_sheet.dart';
+import 'widgets/energy_glyph.dart';
+import 'widgets/heartbeat_line.dart';
 
 class TodayScreen extends ConsumerWidget {
   const TodayScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final todayAsync = ref.watch(todayControllerProvider);
-    final completedAsync = ref.watch(completedTodayCountProvider);
-    final nameAsync = ref.watch(displayNameProvider);
+    final planAsync = ref.watch(todayControllerProvider);
+    final completed = ref.watch(completedTodayCountProvider).valueOrNull ?? 0;
+    final pending =
+        ref.watch(pendingTasksProvider).valueOrNull?.length ?? 0;
+    final total = completed + pending;
+    final fraction = total == 0 ? 0.0 : completed / total;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
-        elevation: 0,
-        title: _GreetingHeader(nameAsync: nameAsync),
+        toolbarHeight: 64,
+        title: const _Header(),
         actions: [
-          // Heartbeat count lives in trailing position — §13 token
-          _HeartbeatCount(completedAsync: completedAsync),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined,
-                color: AppColors.textSecondary, size: 20),
-            tooltip: 'Settings',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const SettingsScreen(),
-              ),
-            ),
-          ),
+          _HeartbeatCount(count: completed),
+          const SizedBox(width: AppSpace.xl),
         ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(11),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(
+                AppSpace.xl, 0, AppSpace.xl, AppSpace.sm),
+            child: HeartbeatLine(value: fraction),
+          ),
+        ),
       ),
-      body: todayAsync.when(
+      body: planAsync.when(
         loading: () => const _LoadingBody(),
-        error: (e, _) => _ErrorBody(error: e),
-        data: (state) => SingleChildScrollView(
+        error: (e, _) => _ErrorBody(
+          onRetry: () => ref.invalidate(todayControllerProvider),
+        ),
+        data: (plan) => SingleChildScrollView(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              _TodayBody(state: state),
+              _PlanBody(plan: plan),
               const _DueRoutinesSection(),
-              const SizedBox(height: 8),
-              const HabitsWidget(),
               const SizedBox(height: 100), // FAB clearance
             ],
           ),
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _showCaptureSheet(context, ref),
-        tooltip: 'Add task',
+        onPressed: () => showCaptureSheet(context),
+        tooltip: 'Capture a task',
         child: const Icon(Icons.add),
       ),
-    );
-  }
-
-  void _showCaptureSheet(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.surface,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (_) => _CaptureSheet(ref: ref),
     );
   }
 }
 
 // ---------------------------------------------------------------------------
-// Header
+// Header — title + date anchor
 // ---------------------------------------------------------------------------
 
-class _GreetingHeader extends StatelessWidget {
-  final AsyncValue<String> nameAsync;
+class _Header extends StatelessWidget {
+  const _Header();
 
-  const _GreetingHeader({required this.nameAsync});
+  static const _days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  static const _months = [
+    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final name = nameAsync.valueOrNull ?? '';
-    final greeting = name.isNotEmpty ? 'Hey, $name' : 'Today';
-    return Text(
-      greeting,
-      style: AppTextStyles.titleMedium.copyWith(color: AppColors.textPrimary),
+    final now = DateTime.now();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text('Today', style: AppTextStyles.titleMedium),
+        const SizedBox(height: 2),
+        Text(
+          '${_days[now.weekday - 1]}, ${_months[now.month - 1]} ${now.day}',
+          style: AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted),
+        ),
+      ],
     );
   }
 }
 
 class _HeartbeatCount extends StatelessWidget {
-  final AsyncValue<int> completedAsync;
+  final int count;
 
-  const _HeartbeatCount({required this.completedAsync});
+  const _HeartbeatCount({required this.count});
 
   @override
   Widget build(BuildContext context) {
-    final count = completedAsync.valueOrNull ?? 0;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.check_circle_outline,
-            size: 14, color: count > 0 ? AppColors.accent : AppColors.textMuted),
-        const SizedBox(width: 4),
-        Text(
-          '$count',
-          style: AppTextStyles.monoSmall.copyWith(
-            color: count > 0 ? AppColors.accent : AppColors.textMuted,
-          ),
-        ),
-      ],
+    final active = count > 0;
+    final color = active ? AppColors.accent : AppColors.textMuted;
+    return Semantics(
+      label: '$count completed today',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.check_circle_outline, size: 15, color: color),
+          const SizedBox(width: AppSpace.xs),
+          Text('$count', style: AppTextStyles.monoSmall.copyWith(color: color)),
+        ],
+      ),
     );
   }
 }
@@ -156,67 +164,131 @@ class _LoadingBody extends StatelessWidget {
 }
 
 class _ErrorBody extends StatelessWidget {
-  final Object error;
+  final VoidCallback onRetry;
 
-  const _ErrorBody({required this.error});
+  const _ErrorBody({required this.onRetry});
 
   @override
   Widget build(BuildContext context) {
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Text(
-          'Something went wrong. Try restarting the app.',
-          style: AppTextStyles.bodySmall,
-          textAlign: TextAlign.center,
+        padding: const EdgeInsets.all(AppSpace.xxl),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Today's plan didn't load.",
+                style: AppTextStyles.bodyMedium, textAlign: TextAlign.center),
+            const SizedBox(height: AppSpace.lg),
+            TextButton(
+              onPressed: onRetry,
+              child: const Text('Try again',
+                  style: TextStyle(color: AppColors.accent)),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _TodayBody extends ConsumerWidget {
-  final TodayState state;
+class _PlanBody extends ConsumerWidget {
+  final Plan plan;
 
-  const _TodayBody({required this.state});
+  const _PlanBody({required this.plan});
+
+  void _complete(BuildContext context, WidgetRef ref, Task task) {
+    ref.read(todayControllerProvider.notifier).complete(task.id);
+    final done =
+        (ref.read(completedTodayCountProvider).valueOrNull ?? 0) + 1;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        duration: const Duration(seconds: 2),
+        content: Row(
+          children: [
+            const Icon(Icons.check, size: 16, color: AppColors.accent),
+            const SizedBox(width: AppSpace.sm),
+            Text('Done — $done today',
+                style: AppTextStyles.bodyMedium),
+          ],
+        ),
+      ));
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return switch (state.mode) {
-      DayMode.quickWins => _QuickWinsBody(state: state, ref: ref),
-      DayMode.normal => state.primaryTask == null
+    return switch (plan.mode) {
+      DayMode.quickWins => _QuickWinsBody(
+          plan: plan,
+          onComplete: (t) => _complete(context, ref, t),
+        ),
+      DayMode.normal => plan.primaryTask == null
           ? const _AllClearBody()
-          : _NormalBody(state: state, ref: ref),
+          : _NextBestAction(
+              task: plan.primaryTask!,
+              reason: plan.reason,
+              onComplete: () => _complete(context, ref, plan.primaryTask!),
+            ),
     };
   }
 }
 
 // ---------------------------------------------------------------------------
-// Normal mode
+// Normal mode — the one thing, at full weight
 // ---------------------------------------------------------------------------
 
-class _NormalBody extends StatelessWidget {
-  final TodayState state;
-  final WidgetRef ref;
+class _NextBestAction extends ConsumerWidget {
+  final Task task;
+  final String reason;
+  final VoidCallback onComplete;
 
-  const _NormalBody({required this.state, required this.ref});
+  const _NextBestAction({
+    required this.task,
+    required this.reason,
+    required this.onComplete,
+  });
 
   @override
-  Widget build(BuildContext context) {
-    final task = state.primaryTask!;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final focus = ref.watch(focusTimerProvider);
+    final isThisTask = focus.isActive && focus.taskId == task.id;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpace.xl, AppSpace.xl, AppSpace.xl, AppSpace.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Next up', style: AppTextStyles.bodySmall),
-          const SizedBox(height: 12),
-          _TaskCard(task: task, onComplete: () {
-            ref.read(todayControllerProvider.notifier).complete(task.id);
-          }),
-          if (state.reason.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Text(state.reason, style: AppTextStyles.bodySmall),
+          const Text('NEXT UP', style: AppTextStyles.label),
+          const SizedBox(height: AppSpace.md),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(AppSpace.xl),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(AppSpace.radiusCard),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                EnergyGlyph(task.energy, showLabel: true),
+                const SizedBox(height: AppSpace.md),
+                Text(task.title, style: AppTextStyles.displayLarge),
+                if (task.notes != null && task.notes!.isNotEmpty) ...[
+                  const SizedBox(height: AppSpace.sm),
+                  Text(task.notes!, style: AppTextStyles.bodySmall),
+                ],
+                const SizedBox(height: AppSpace.xl),
+                if (isThisTask)
+                  _FocusTimerActive(focus: focus, onComplete: onComplete)
+                else
+                  _FocusTimerStart(task: task, onComplete: onComplete),
+              ],
+            ),
+          ),
+          if (reason.isNotEmpty) ...[
+            const SizedBox(height: AppSpace.md),
+            Text(reason, style: AppTextStyles.bodySmall),
           ],
         ],
       ),
@@ -224,40 +296,279 @@ class _NormalBody extends StatelessWidget {
   }
 }
 
+/// Idle state: a "Done" action plus a "Start focus" affordance with the
+/// task's own estimate (or a sensible default) as the first chip.
+class _FocusTimerStart extends ConsumerWidget {
+  final Task task;
+  final VoidCallback onComplete;
+
+  const _FocusTimerStart({required this.task, required this.onComplete});
+
+  static const _options = [5, 15, 30, 60];
+
+  void _start(WidgetRef ref, int minutes) {
+    HapticFeedback.selectionClick();
+    ref.read(focusTimerProvider.notifier).start(
+          taskId: task.id,
+          taskTitle: task.title,
+          targetMinutes: minutes,
+        );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Seed the chip set with the task's estimate if it isn't already present.
+    final est = task.estimatedMinutes;
+    final options = <int>{
+      if (est != null && est > 0) est,
+      ..._options,
+    }.toList()
+      ..sort();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        ElevatedButton(
+          onPressed: onComplete,
+          child: const Text('Done'),
+        ),
+        const SizedBox(height: AppSpace.lg),
+        const Row(
+          children: [
+            Icon(Icons.timer_outlined,
+                size: 16, color: AppColors.textSecondary),
+            SizedBox(width: AppSpace.sm),
+            Text('Start a focus block', style: AppTextStyles.bodySmall),
+          ],
+        ),
+        const SizedBox(height: AppSpace.sm),
+        Wrap(
+          spacing: AppSpace.sm,
+          runSpacing: AppSpace.sm,
+          children: [
+            for (final m in options)
+              _MinuteChip(
+                label: '$m min',
+                highlighted: m == est,
+                onTap: () => _start(ref, m),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Running/overtime state: big live numerals, a thin progress line, and a
+/// single Done. Overtime is information, not judgment — numerals go amber,
+/// copy stays kind.
+class _FocusTimerActive extends ConsumerWidget {
+  final FocusState focus;
+  final VoidCallback onComplete;
+
+  const _FocusTimerActive({required this.focus, required this.onComplete});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final overtime = focus.phase == FocusPhase.overtime;
+    final numeralColor =
+        overtime ? AppColors.attention : AppColors.textPrimary;
+
+    final String clock;
+    final String caption;
+    if (overtime) {
+      clock = formatFocusClock(focus.elapsed);
+      final over = focus.overBy.inMinutes;
+      caption = over <= 0
+          ? 'At your mark — still yours.'
+          : '$over over — still yours.';
+    } else {
+      clock = formatFocusClock(focus.elapsed);
+      final left = focus.remaining.inMinutes;
+      caption = 'Target ${focus.targetMinutes} min · ~$left left';
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Center(
+          child: Text(clock,
+              style: AppTextStyles.monoLarge.copyWith(color: numeralColor)),
+        ),
+        const SizedBox(height: AppSpace.sm),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(2),
+          child: LinearProgressIndicator(
+            value: focus.progress,
+            minHeight: 3,
+            backgroundColor: AppColors.divider,
+            valueColor: AlwaysStoppedAnimation(
+                overtime ? AppColors.attention : AppColors.accent),
+          ),
+        ),
+        const SizedBox(height: AppSpace.sm),
+        Center(child: Text(caption, style: AppTextStyles.bodySmall)),
+        const SizedBox(height: AppSpace.lg),
+        ElevatedButton(
+          onPressed: () {
+            ref.read(focusTimerProvider.notifier).stop();
+            onComplete();
+          },
+          child: const Text('Done'),
+        ),
+        const SizedBox(height: AppSpace.sm),
+        TextButton(
+          onPressed: () {
+            HapticFeedback.selectionClick();
+            ref.read(focusTimerProvider.notifier).stop();
+          },
+          child: const Text('Stop timer'),
+        ),
+      ],
+    );
+  }
+}
+
+class _MinuteChip extends StatelessWidget {
+  final String label;
+  final bool highlighted;
+  final VoidCallback onTap;
+
+  const _MinuteChip({
+    required this.label,
+    required this.onTap,
+    this.highlighted = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: highlighted ? AppColors.accentWash : AppColors.surfaceRaised,
+      borderRadius: BorderRadius.circular(AppSpace.radiusInput),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppSpace.radiusInput),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+              horizontal: AppSpace.lg, vertical: AppSpace.sm),
+          child: Text(
+            label,
+            style: AppTextStyles.bodySmall.copyWith(
+              color: highlighted ? AppColors.accent : AppColors.textPrimary,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
-// Quick Wins mode
+// Quick Wins mode — deliberately lighter
 // ---------------------------------------------------------------------------
 
 class _QuickWinsBody extends StatelessWidget {
-  final TodayState state;
-  final WidgetRef ref;
+  final Plan plan;
+  final void Function(Task) onComplete;
 
-  const _QuickWinsBody({required this.state, required this.ref});
+  const _QuickWinsBody({required this.plan, required this.onComplete});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpace.xl, AppSpace.xl, AppSpace.xl, AppSpace.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Text('QUICK WINS', style: AppTextStyles.label),
+          const SizedBox(height: AppSpace.sm),
           Text(
-            state.reason,
-            style: AppTextStyles.bodySmall.copyWith(color: AppColors.accent),
+            plan.reason,
+            style: AppTextStyles.bodyMedium
+                .copyWith(color: AppColors.textSecondary),
           ),
-          const SizedBox(height: 16),
-          ...state.quickWins.map(
+          const SizedBox(height: AppSpace.lg),
+          ...plan.quickWins.map(
             (task) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _TaskCard(
+              padding: const EdgeInsets.only(bottom: AppSpace.sm + 2),
+              child: _QuickWinCard(
                 task: task,
-                onComplete: () {
-                  ref.read(todayControllerProvider.notifier).complete(task.id);
-                },
+                onComplete: () => onComplete(task),
               ),
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _QuickWinCard extends StatelessWidget {
+  final Task task;
+  final VoidCallback onComplete;
+
+  const _QuickWinCard({required this.task, required this.onComplete});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppSpace.radiusCard),
+      ),
+      padding: const EdgeInsets.only(left: AppSpace.lg),
+      child: Row(
+        children: [
+          EnergyGlyph(task.energy, size: 16),
+          const SizedBox(width: AppSpace.md),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppSpace.lg),
+              child: Text(task.title,
+                  style: AppTextStyles.bodyMedium,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis),
+            ),
+          ),
+          _CompleteButton(onTap: onComplete, taskTitle: task.title),
+        ],
+      ),
+    );
+  }
+}
+
+/// 48px ripple target wrapping the check affordance.
+class _CompleteButton extends StatelessWidget {
+  final VoidCallback onTap;
+  final String taskTitle;
+
+  const _CompleteButton({required this.onTap, required this.taskTitle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Mark "$taskTitle" done',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppSpace.radiusCard),
+        child: SizedBox(
+          width: AppSpace.tapTarget + AppSpace.sm,
+          height: AppSpace.tapTarget + AppSpace.sm,
+          child: Center(
+            child: Container(
+              width: 26,
+              height: 26,
+              decoration: BoxDecoration(
+                border: Border.all(color: AppColors.textMuted, width: 1.5),
+                borderRadius: BorderRadius.circular(7),
+              ),
+              child: const Icon(Icons.check,
+                  size: 15, color: AppColors.textMuted),
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -272,70 +583,22 @@ class _AllClearBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 72),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.check_circle_outline,
-              size: 48, color: AppColors.accent.withOpacity(0.6)),
-          const SizedBox(height: 16),
-          Text('All clear', style: AppTextStyles.titleMedium),
-          const SizedBox(height: 8),
-          Text('Nothing pending — add something with +',
-              style: AppTextStyles.bodySmall),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Task card
-// ---------------------------------------------------------------------------
-
-class _TaskCard extends StatelessWidget {
-  final Task task;
-  final VoidCallback onComplete;
-
-  const _TaskCard({required this.task, required this.onComplete});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
-        children: [
-          _EnergyGlyph(energy: task.energy),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(task.title, style: AppTextStyles.bodyMedium),
-                if (task.notes != null && task.notes!.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(task.notes!, style: AppTextStyles.bodySmall),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: onComplete,
-            child: Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                border: Border.all(color: AppColors.textMuted, width: 1.5),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Icon(Icons.check,
-                  size: 16, color: AppColors.textMuted),
-            ),
+              size: 44, color: AppColors.accent.withValues(alpha: 0.55)),
+          const SizedBox(height: AppSpace.lg),
+          const Text('All clear', style: AppTextStyles.titleMedium),
+          const SizedBox(height: AppSpace.xs),
+          const Text('Nothing pending right now.', style: AppTextStyles.bodySmall),
+          const SizedBox(height: AppSpace.xl),
+          TextButton.icon(
+            onPressed: () => showCaptureSheet(context),
+            icon: const Icon(Icons.add, size: 18, color: AppColors.accent),
+            label: const Text('Capture something',
+                style: TextStyle(color: AppColors.accent)),
           ),
         ],
       ),
@@ -343,229 +606,69 @@ class _TaskCard extends StatelessWidget {
   }
 }
 
-// Energy glyph — monochrome, shape-distinguished (no colour coding per §13)
-class _EnergyGlyph extends StatelessWidget {
-  final EnergyLevel energy;
-
-  const _EnergyGlyph({required this.energy});
-
-  @override
-  Widget build(BuildContext context) {
-    final (icon, label) = switch (energy) {
-      EnergyLevel.low => (Icons.remove, 'low'),
-      EnergyLevel.medium => (Icons.circle_outlined, 'medium'),
-      EnergyLevel.high => (Icons.keyboard_arrow_up, 'high'),
-    };
-    return Semantics(
-      label: '$label energy',
-      child:
-          Icon(icon, size: 18, color: AppColors.textSecondary),
-    );
-  }
-}
-
 // ---------------------------------------------------------------------------
-// Capture sheet
+// Due routines
 // ---------------------------------------------------------------------------
 
-class _CaptureSheet extends StatefulWidget {
-  final WidgetRef ref;
-
-  const _CaptureSheet({required this.ref});
-
-  @override
-  State<_CaptureSheet> createState() => _CaptureSheetState();
-}
-
-class _CaptureSheetState extends State<_CaptureSheet> {
-  final _controller = TextEditingController();
-  EnergyLevel _energy = EnergyLevel.medium;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-          20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Add task', style: AppTextStyles.titleMedium),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _controller,
-            autofocus: true,
-            style: AppTextStyles.bodyMedium,
-            decoration: InputDecoration(
-              hintText: 'What needs doing?',
-              hintStyle: AppTextStyles.bodySmall,
-              filled: true,
-              fillColor: AppColors.surfaceVariant,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text('Energy to start', style: AppTextStyles.bodySmall),
-          const SizedBox(height: 8),
-          Row(
-            children: EnergyLevel.values.map((e) {
-              final selected = e == _energy;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  label: Text(e.name),
-                  selected: selected,
-                  onSelected: (_) => setState(() => _energy = e),
-                  selectedColor: AppColors.accent,
-                  backgroundColor: AppColors.surfaceVariant,
-                  labelStyle: AppTextStyles.bodySmall.copyWith(
-                    color: selected
-                        ? AppColors.background
-                        : AppColors.textSecondary,
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _submit,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accent,
-                foregroundColor: AppColors.background,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-              child: const Text('Add'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _submit() {
-    final title = _controller.text.trim();
-    if (title.isEmpty) return;
-
-    final task = Task.create(title: title, energy: _energy);
-    widget.ref.read(todayControllerProvider.notifier).addTask(task);
-    Navigator.of(context).pop();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Due routines section — shown between tasks and habits
-// ---------------------------------------------------------------------------
-
-/// Shows routines that are due right now (time-of-day aware).
-/// Hidden when no routines are due — zero visual noise.
 class _DueRoutinesSection extends ConsumerWidget {
   const _DueRoutinesSection();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final dueAsync = ref.watch(dueRoutinesProvider);
+    final due = ref.watch(dueRoutinesProvider).valueOrNull ?? const <Routine>[];
+    if (due.isEmpty) return const SizedBox.shrink();
 
-    return dueAsync.when(
-      loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
-      data: (routines) {
-        if (routines.isEmpty) return const SizedBox.shrink();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Text('Routines', style: AppTextStyles.bodySmall),
-            ),
-            ...routines.map(
-              (r) => _RoutineCard(
-                routine: r,
-                onTap: () => launchRoutine(context, ref, r),
-              ),
-            ),
-          ],
-        );
-      },
+    return Padding(
+      padding:
+          const EdgeInsets.fromLTRB(AppSpace.xl, AppSpace.sm, AppSpace.xl, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('ROUTINES', style: AppTextStyles.label),
+          const SizedBox(height: AppSpace.sm),
+          ...due.map((r) => _RoutineRow(routine: r)),
+        ],
+      ),
     );
   }
 }
 
-/// Single tappable routine card.
-/// Shows progress state when a routine is already in progress.
-class _RoutineCard extends StatelessWidget {
+class _RoutineRow extends ConsumerWidget {
   final Routine routine;
-  final VoidCallback onTap;
 
-  const _RoutineCard({required this.routine, required this.onTap});
+  const _RoutineRow({required this.routine});
 
   @override
-  Widget build(BuildContext context) {
-    final inProgress = routine.completedCount > 0 && !routine.isComplete;
-    final totalMinutes = routine.steps.fold<int>(
-      0,
-      (sum, s) => sum + (s.durationMinutes ?? 0),
-    );
-    final stepLabel = inProgress
-        ? '${routine.completedCount} / ${routine.steps.length} steps'
-        : '${routine.steps.length} steps · ~$totalMinutes min';
-
+  Widget build(BuildContext context, WidgetRef ref) {
+    final progress = '${routine.completedCount}/${routine.steps.length}';
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
-        child: Container(
-          decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12),
-            // Accent border when already in progress — signals continuation
-            border: inProgress
-                ? Border.all(
-                    color: AppColors.accent.withValues(alpha: 0.35),
-                    width: 1,
-                  )
-                : null,
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(routine.name, style: AppTextStyles.bodyMedium),
-                    const SizedBox(height: 2),
-                    Text(stepLabel, style: AppTextStyles.bodySmall),
-                  ],
+      padding: const EdgeInsets.only(bottom: AppSpace.sm),
+      child: Material(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppSpace.radiusCard),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppSpace.radiusCard),
+          onTap: () => launchRoutine(context, routine, onFinished: () {
+            ref.invalidate(dueRoutinesProvider);
+          }),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: AppSpace.tapTarget),
+            padding: const EdgeInsets.symmetric(
+                horizontal: AppSpace.lg, vertical: AppSpace.md),
+            child: Row(
+              children: [
+                const Icon(Icons.replay_outlined,
+                    size: 17, color: AppColors.textSecondary),
+                const SizedBox(width: AppSpace.md),
+                Expanded(
+                  child: Text(routine.name, style: AppTextStyles.bodyMedium),
                 ),
-              ),
-              Text(
-                inProgress ? 'Continue' : 'Start',
-                style: AppTextStyles.bodySmall
-                    .copyWith(color: AppColors.accent),
-              ),
-              const SizedBox(width: 2),
-              const Icon(
-                Icons.chevron_right,
-                size: 16,
-                color: AppColors.accent,
-              ),
-            ],
+                Text(progress, style: AppTextStyles.monoSmall),
+                const SizedBox(width: AppSpace.sm),
+                const Icon(Icons.chevron_right,
+                    size: 18, color: AppColors.textMuted),
+              ],
+            ),
           ),
         ),
       ),

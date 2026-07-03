@@ -5,16 +5,28 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
 /**
- * Simple Lexi bridge stub for Android.
- * Exposes a MethodChannel `neuroflow/lexi` with a couple of safe test methods:
- *  - isAvailable -> returns false (real on-device LLM not implemented)
- *  - ping -> returns "lexi-stub"
+ * LexiBridge — native side of the on-device LLM seam (spec §14).
  *
- * This file intentionally does not implement real LLM functionality. It's a
- * lightweight native-side placeholder so Dart can call the channel without
- * crashing if you later add platform code.
+ * Exposes MethodChannel `neuroflow/lexi`.
+ *
+ * CONTRACT (must match lib/intelligence/lexi_plan_advisor.dart exactly):
+ *   checkGeminiNanoAvailable() -> Bool
+ *       True only when the AICore / Gemini Nano runtime is present and warm.
+ *       Stubbed false until the SDK is integrated.
+ *   generateResponse({systemPrompt, userMessage, maxTokens, temperature}) -> String?
+ *       Returns the model's text, or null when unavailable. Dart treats null
+ *       as "no refinement" and falls back to the deterministic plan silently.
+ *
+ * Legacy test methods (kept for adb/dev smoke tests, not used by the app):
+ *   isAvailable() -> Bool, ping() -> String
+ *
+ * HISTORY NOTE: an earlier version of this file only handled ping/isAvailable
+ * while the Dart advisor called checkGeminiNanoAvailable/generateResponse —
+ * the two halves were written against different contracts. The Dart names win
+ * because the full advisor logic lives there. Do not rename on either side
+ * without changing both in the same commit.
  */
-class LexiBridge: FlutterPlugin, MethodChannel.MethodCallHandler {
+class LexiBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
     private lateinit var channel: MethodChannel
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -28,10 +40,22 @@ class LexiBridge: FlutterPlugin, MethodChannel.MethodCallHandler {
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "checkGeminiNanoAvailable" -> result.success(false) // stub: no native LLM yet
-            "generateResponse" -> result.success(null) // stub: no native LLM yet
+            // --- Real contract (what LexiPlanAdvisor calls) ---
+            "checkGeminiNanoAvailable" -> {
+                // TODO(sdk): query AICore availability once the Gemini Nano
+                // SDK is added. Until then: honestly unavailable.
+                result.success(false)
+            }
+            "generateResponse" -> {
+                // TODO(sdk): call Gemini Nano with call.argument<String>("systemPrompt"),
+                // "userMessage", "maxTokens", "temperature". Null = graceful NoOp fallback.
+                result.success(null)
+            }
+
+            // --- Legacy dev smoke-test methods ---
             "isAvailable" -> result.success(false)
             "ping" -> result.success("lexi-stub")
+
             else -> result.notImplemented()
         }
     }

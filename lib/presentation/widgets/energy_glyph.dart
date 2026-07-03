@@ -1,36 +1,58 @@
 // lib/presentation/widgets/energy_glyph.dart
 //
-// PRESENTATION LAYER. Energy tags as flat monochrome glyphs, distinguished by
-// SHAPE only (§13, locked v1.3). Color-coding these would create a second
-// signal layer competing with the one action-accent — so every glyph here
-// renders in the same neutral textSecondary tone, never the accent, never a
-// per-tag color.
+// PRESENTATION LAYER. Energy shown as flat monochrome glyphs, distinguished
+// by SHAPE only (§13, locked v1.3). Colour-coding these would create a
+// second signal layer competing with the one action-accent.
+//
+// ⚠ RECONCILIATION NOTE (see RECONCILIATION.md, decision #1):
+// Spec §13 locks FOUR energy tags (deep-work · phone · low-energy · waiting),
+// but lib/domain/task.dart currently models EnergyLevel {low, medium, high}.
+// This widget compiles against the CURRENT domain so the app builds today.
+// When the domain migrates to EnergyTag, only the switch below changes —
+// no screen files need touching.
 
 import 'package:flutter/material.dart';
 import '../../domain/task.dart';
 import '../theme.dart';
 
-IconData _iconFor(EnergyTag tag) {
-  switch (tag) {
-    case EnergyTag.deepWork:
-      return Icons.bolt_outlined;
-    case EnergyTag.phone:
-      return Icons.call_outlined;
-    case EnergyTag.lowEnergy:
-      return Icons.battery_2_bar_outlined;
-    case EnergyTag.waiting:
-      return Icons.hourglass_bottom_outlined;
-  }
-}
-
 class EnergyGlyph extends StatelessWidget {
-  final EnergyTag tag;
+  final EnergyLevel energy;
   final double size;
 
-  const EnergyGlyph(this.tag, {super.key, this.size = 16});
+  /// When true, renders "low energy" etc. next to the glyph.
+  final bool showLabel;
+
+  const EnergyGlyph(
+    this.energy, {
+    super.key,
+    this.size = 18,
+    this.showLabel = false,
+  });
+
+  (IconData, String) get _glyph => switch (energy) {
+        // Shapes chosen to stay distinct at 16px in peripheral vision.
+        EnergyLevel.low => (Icons.battery_2_bar_outlined, 'low energy'),
+        EnergyLevel.medium => (Icons.circle_outlined, 'medium energy'),
+        EnergyLevel.high => (Icons.bolt_outlined, 'high energy'),
+      };
 
   @override
   Widget build(BuildContext context) {
-    return Icon(_iconFor(tag), size: size, color: AppColors.textSecondary);
+    final (icon, label) = _glyph;
+    final glyph = Icon(icon, size: size, color: AppColors.textSecondary);
+
+    if (!showLabel) return Semantics(label: label, child: glyph);
+
+    return Semantics(
+      label: label,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          glyph,
+          const SizedBox(width: 6),
+          Text(label, style: AppTextStyles.bodySmall),
+        ],
+      ),
+    );
   }
 }

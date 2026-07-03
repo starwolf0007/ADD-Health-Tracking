@@ -2,6 +2,10 @@
 //
 // Pure domain model — no Flutter, no Drift, no Riverpod.
 // Everything above this layer depends on Task; nothing here depends on anything.
+//
+// v2: adds estimatedMinutes — the time-blindness anchor. A task can carry its
+// own honest guess ("this should take 15"), and the Focus Timer counts against
+// it. Null means "no estimate", never "zero minutes".
 
 import 'package:uuid/uuid.dart';
 
@@ -18,6 +22,7 @@ class Task {
   final DateTime createdAt;
   final DateTime? dueDate;
   final bool isQuickWin; // §QW — eligible for auto-mode Quick Wins list
+  final int? estimatedMinutes; // v2 — focus timer target
 
   const Task({
     required this.id,
@@ -28,6 +33,7 @@ class Task {
     required this.createdAt,
     this.dueDate,
     this.isQuickWin = false,
+    this.estimatedMinutes,
   });
 
   factory Task.create({
@@ -36,6 +42,7 @@ class Task {
     EnergyLevel energy = EnergyLevel.medium,
     DateTime? dueDate,
     bool isQuickWin = false,
+    int? estimatedMinutes,
   }) {
     return Task(
       id: const Uuid().v4(),
@@ -46,6 +53,7 @@ class Task {
       createdAt: DateTime.now(),
       dueDate: dueDate,
       isQuickWin: isQuickWin,
+      estimatedMinutes: estimatedMinutes,
     );
   }
 
@@ -56,6 +64,7 @@ class Task {
     TaskStatus? status,
     DateTime? dueDate,
     bool? isQuickWin,
+    int? estimatedMinutes,
   }) {
     return Task(
       id: id,
@@ -66,6 +75,7 @@ class Task {
       createdAt: createdAt,
       dueDate: dueDate ?? this.dueDate,
       isQuickWin: isQuickWin ?? this.isQuickWin,
+      estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
     );
   }
 

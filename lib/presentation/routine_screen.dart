@@ -1,25 +1,21 @@
 // lib/presentation/routine_screen.dart
 //
-// Routine execution screen — surfaces ONE step at a time.
+// Routine execution — ONE step at a time.
+// (The original design here was right; this pass completes the file — it was
+// truncated mid-`launchRoutine` — and moves magic numbers onto theme tokens.)
 //
-// ADHD UX principles applied:
-//   • Only the current step is prominent. Others exist but are de-emphasized.
-//   • Progress bar is subtle — enough to feel movement, not overwhelming.
-//   • Completing the last step triggers a brief celebration then returns to Today.
-//   • "Skip step" is available without judgement — sometimes a step just won't happen.
+// ADHD UX principles:
+//   • Only the current step is prominent; the rest are de-emphasized.
+//   • Progress bar is subtle — movement without pressure.
+//   • Finishing the last step shows a brief celebration, then returns.
+//   • "Skip" is always available, no judgement, no confirmation friction.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../app/providers.dart';
 import '../domain/routine.dart';
-import '../providers.dart';
 import 'theme.dart';
-
-// ---------------------------------------------------------------------------
-// The screen receives the full Routine and calls back when done/exited.
-// Phase 2 will wire this through a proper RoutineController + provider;
-// for now it's self-contained stateful to keep the PR small.
-// ---------------------------------------------------------------------------
 
 class RoutineScreen extends ConsumerStatefulWidget {
   final Routine routine;
@@ -50,8 +46,9 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
       vsync: this,
       duration: const Duration(milliseconds: 400),
     );
-    _progressAnim = Tween<double>(begin: 0, end: _completedFraction)
-        .animate(CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
+    _progressAnim = Tween<double>(begin: 0, end: _completedFraction).animate(
+      CurvedAnimation(parent: _progressController, curve: Curves.easeOut),
+    );
     _progressController.forward();
   }
 
@@ -83,27 +80,24 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
     });
     _animateProgress();
 
-    // Persist to DB — fire-and-forget, UI already updated optimistically.
+    // Persist — fire-and-forget, UI already updated optimistically.
     if (updated != null) {
       ref.read(routineRepositoryProvider).updateStep(updated!);
     }
 
-    if (_completedFraction >= 1.0) {
-      _onAllDone();
-    }
+    if (_completedFraction >= 1.0) _onAllDone();
   }
 
-  void _skipStep(String stepId) {
-    // Skip = mark complete without ceremony. No judgement.
-    _completeStep(stepId);
-  }
+  // Skip = complete without ceremony. No judgement.
+  void _skipStep(String stepId) => _completeStep(stepId);
 
   void _animateProgress() {
-    final target = _completedFraction;
     _progressAnim = Tween<double>(
       begin: _progressAnim.value,
-      end: target,
-    ).animate(CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
+      end: _completedFraction,
+    ).animate(
+      CurvedAnimation(parent: _progressController, curve: Curves.easeOut),
+    );
     _progressController
       ..reset()
       ..forward();
@@ -111,42 +105,41 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
 
   void _onAllDone() {
     setState(() => _showCelebration = true);
-    Future.delayed(const Duration(seconds: 2), widget.onFinished);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) widget.onFinished();
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_showCelebration) return _CelebrationView(routineName: widget.routine.name);
+    if (_showCelebration) {
+      return _CelebrationView(routineName: widget.routine.name);
+    }
 
     final active = _activeStep;
+    final doneCount = _steps.where((s) => s.isComplete).length;
 
     return Scaffold(
-      backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
-        elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.close, color: AppColors.textSecondary),
           onPressed: widget.onFinished,
           tooltip: 'Exit routine',
         ),
-        title: Text(
-          widget.routine.name,
-          style: AppTextStyles.titleMedium,
-        ),
+        title: Text(widget.routine.name, style: AppTextStyles.titleMedium),
         actions: [
-          Padding(
-            padding: const EdgeInsets.only(right: 16, top: 16),
-            child: Text(
-              '${_steps.where((s) => s.isComplete).length}/${_steps.length}',
-              style: AppTextStyles.monoSmall,
+          Center(
+            child: Padding(
+              padding: const EdgeInsets.only(right: AppSpace.lg),
+              child: Text('$doneCount/${_steps.length}',
+                  style: AppTextStyles.monoSmall),
             ),
           ),
         ],
       ),
       body: Column(
         children: [
-          // Subtle progress bar — updates on step completion (no idle animation)
+          // Subtle progress — moves only on step completion, no idle motion.
           AnimatedBuilder(
             animation: _progressAnim,
             builder: (_, __) => _ProgressBar(fraction: _progressAnim.value),
@@ -154,25 +147,21 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
           Expanded(
             child: active == null
                 ? const Center(
-                    child: Text('All done!',
-                        style: AppTextStyles.titleMedium))
+                    child:
+                        Text('All done!', style: AppTextStyles.titleMedium))
                 : _StepView(
                     step: active,
-                    stepNumber:
-                        _steps.where((s) => s.isComplete).length + 1,
+                    stepNumber: doneCount + 1,
                     total: _steps.length,
                     onComplete: () => _completeStep(active.id),
                     onSkip: () => _skipStep(active.id),
                   ),
           ),
-          // Upcoming steps — de-emphasized list
           if (_steps.where((s) => !s.isComplete).length > 1)
             _UpNextList(
-              steps: _steps
-                  .where((s) => !s.isComplete)
-                  .toList()
+              steps: _steps.where((s) => !s.isComplete).toList()
                 ..sort((a, b) => a.position.compareTo(b.position))
-                ..removeAt(0), // active step is shown above
+                ..removeAt(0),
             ),
         ],
       ),
@@ -192,8 +181,8 @@ class _ProgressBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      height: 2,
-      color: AppColors.surfaceVariant,
+      height: 3,
+      color: AppColors.divider,
       child: FractionallySizedBox(
         alignment: Alignment.centerLeft,
         widthFactor: fraction.clamp(0.0, 1.0),
@@ -204,7 +193,7 @@ class _ProgressBar extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Active step card
+// Active step
 // ---------------------------------------------------------------------------
 
 class _StepView extends StatelessWidget {
@@ -225,64 +214,44 @@ class _StepView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(24, 32, 24, 24),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpace.xl, AppSpace.xxl, AppSpace.xl, AppSpace.xl),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Step $stepNumber of $total',
-            style: AppTextStyles.bodySmall,
-          ),
-          const SizedBox(height: 20),
-          Text(
-            step.title,
-            style: AppTextStyles.displayLarge,
-          ),
+          Text('STEP $stepNumber OF $total', style: AppTextStyles.label),
+          const SizedBox(height: AppSpace.xl),
+          Text(step.title, style: AppTextStyles.displayLarge),
           if (step.notes != null && step.notes!.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            Text(step.notes!, style: AppTextStyles.bodyMedium
-                .copyWith(color: AppColors.textSecondary)),
+            const SizedBox(height: AppSpace.md),
+            Text(
+              step.notes!,
+              style: AppTextStyles.bodyMedium
+                  .copyWith(color: AppColors.textSecondary),
+            ),
           ],
           if (step.durationMinutes != null) ...[
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpace.lg),
             Row(
               children: [
                 const Icon(Icons.timer_outlined,
                     size: 14, color: AppColors.textMuted),
-                const SizedBox(width: 4),
-                Text(
-                  '${step.durationMinutes} min',
-                  style: AppTextStyles.monoSmall,
-                ),
+                const SizedBox(width: AppSpace.xs),
+                Text('~${step.durationMinutes} min',
+                    style: AppTextStyles.monoSmall),
               ],
             ),
           ],
           const Spacer(),
-          // Done button — primary CTA
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: onComplete,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accent,
-                foregroundColor: AppColors.background,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-              child: const Text('Done', style: TextStyle(fontSize: 16)),
-            ),
-          ),
-          const SizedBox(height: 10),
-          // Skip — no judgement, same visual weight as a secondary link
+          ElevatedButton(onPressed: onComplete, child: const Text('Done')),
+          const SizedBox(height: AppSpace.sm),
           Center(
             child: TextButton(
               onPressed: onSkip,
               child: Text(
                 'Skip this step',
-                style: AppTextStyles.bodySmall
-                    .copyWith(color: AppColors.textMuted),
+                style:
+                    AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted),
               ),
             ),
           ),
@@ -293,7 +262,7 @@ class _StepView extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Up-next list
+// Up next — de-emphasized
 // ---------------------------------------------------------------------------
 
 class _UpNextList extends StatelessWidget {
@@ -305,30 +274,31 @@ class _UpNextList extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: AppColors.surfaceVariant)),
+        border: Border(top: BorderSide(color: AppColors.divider)),
       ),
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+      padding: const EdgeInsets.fromLTRB(
+          AppSpace.xl, AppSpace.md, AppSpace.xl, AppSpace.xl),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Up next', style: AppTextStyles.bodySmall),
-          const SizedBox(height: 8),
-          ...steps.take(3).map((s) => Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: Text(
-                  '· ${s.title}',
-                  style: AppTextStyles.bodySmall
-                      .copyWith(color: AppColors.textMuted),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+          const Text('UP NEXT', style: AppTextStyles.label),
+          const SizedBox(height: AppSpace.sm),
+          ...steps.take(3).map(
+                (s) => Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    '·  ${s.title}',
+                    style: AppTextStyles.bodySmall
+                        .copyWith(color: AppColors.textMuted),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
-              )),
+              ),
           if (steps.length > 3)
-            Text(
-              '+ ${steps.length - 3} more',
-              style: AppTextStyles.bodySmall
-                  .copyWith(color: AppColors.textMuted),
-            ),
+            Text('+ ${steps.length - 3} more',
+                style:
+                    AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted)),
         ],
       ),
     );
@@ -336,7 +306,7 @@ class _UpNextList extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Celebration (shown for 2s after last step done)
+// Celebration — brief, calm
 // ---------------------------------------------------------------------------
 
 class _CelebrationView extends StatelessWidget {
@@ -347,7 +317,6 @@ class _CelebrationView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(40),
@@ -356,12 +325,12 @@ class _CelebrationView extends StatelessWidget {
             children: [
               const Icon(Icons.check_circle_outline,
                   size: 64, color: AppColors.accent),
-              const SizedBox(height: 24),
+              const SizedBox(height: AppSpace.xl),
               Text(routineName, style: AppTextStyles.titleMedium),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpace.sm),
               Text('Routine complete',
-                  style: AppTextStyles.bodySmall
-                      .copyWith(color: AppColors.accent)),
+                  style:
+                      AppTextStyles.bodySmall.copyWith(color: AppColors.accent)),
             ],
           ),
         ),
@@ -371,17 +340,24 @@ class _CelebrationView extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Entry point helper — push RoutineScreen as a full-screen route
+// Entry point — push RoutineScreen as a full-screen route.
+// (This helper was the truncation point in the previous version.)
 // ---------------------------------------------------------------------------
 
 Future<void> launchRoutine(
-    BuildContext context, WidgetRef ref, Routine routine) async {
-  await Navigator.of(context).push(
-    MaterialPageRoute<void>(
+  BuildContext context,
+  Routine routine, {
+  VoidCallback? onFinished,
+}) {
+  return Navigator.of(context).push<void>(
+    MaterialPageRoute(
       fullscreenDialog: true,
-      builder: (_) => RoutineScreen(
+      builder: (routeContext) => RoutineScreen(
         routine: routine,
-        onFinished: () => Navigator.of(context).pop(),
+        onFinished: () {
+          Navigator.of(routeContext).pop();
+          onFinished?.call();
+        },
       ),
     ),
   );

@@ -65,14 +65,14 @@ class NotificationService {
       title,
       body,
       tzScheduled,
-      NotificationDetails(
+      const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
           importance: Importance.defaultImportance,
           priority: Priority.defaultPriority,
         ),
-        iOS: const DarwinNotificationDetails(),
+        iOS: DarwinNotificationDetails(),
       ),
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
@@ -80,40 +80,28 @@ class NotificationService {
     );
   }
 
-  /// Immediate morning briefing notification — fired by WorkManager callback.
-  /// Shows once per morning; no sound (ADHD: don't startle awake).
-  /// Safe to call from a background isolate after init() has been called.
-  Future<void> showMorningBriefing({required int pendingCount}) async {
-    if (pendingCount <= 0) return; // nothing to brief about — stay quiet
-
-    final body = pendingCount == 1
-        ? 'You have 1 task today. Tap to see what\'s first.'
-        : 'You have $pendingCount tasks today. Tap to see what\'s first.';
-
+  /// Immediate morning briefing notification. Fires now (not scheduled) —
+  /// used by the background job when the day's plan is ready.
+  Future<void> showMorningBriefing({
+    required String title,
+    required String body,
+  }) async {
     await _plugin.show(
       _idMorningBriefing,
-      'Good morning',
+      title,
       body,
-      NotificationDetails(
+      const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
           importance: Importance.defaultImportance,
           priority: Priority.defaultPriority,
-          playSound: false, // quiet notification — ADHD: no startle
         ),
-        iOS: const DarwinNotificationDetails(
-          presentSound: false,
-        ),
+        iOS: DarwinNotificationDetails(),
       ),
     );
   }
 
-  Future<void> cancelReminder(int id) async {
-    await _plugin.cancel(id);
-  }
-
-  Future<void> cancelAll() async {
-    await _plugin.cancelAll();
-  }
+  /// Cancel a scheduled or shown notification by ID.
+  Future<void> cancel(int id) => _plugin.cancel(id);
 }
