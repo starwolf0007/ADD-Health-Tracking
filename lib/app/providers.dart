@@ -82,6 +82,16 @@ final completedTodayCountProvider = StreamProvider<int>((ref) {
   return ref.watch(taskRepositoryProvider).watchCompletedTodayCount();
 });
 
+/// Interrupted (paused/blocked) tasks — the Re-Entry Card's source (Phase 2).
+final interruptedTasksProvider = StreamProvider<List<Task>>((ref) {
+  return ref.watch(taskRepositoryProvider).watchInterrupted();
+});
+
+/// Tasks completed today, as objects — for the timeline projection (Phase 2).
+final completedTodayProvider = StreamProvider<List<Task>>((ref) {
+  return ref.watch(taskRepositoryProvider).watchCompletedToday();
+});
+
 final activeHabitsProvider = StreamProvider<List<Habit>>((ref) {
   return ref.watch(habitRepositoryProvider).watchActive();
 });
@@ -161,13 +171,16 @@ class TodayController extends AsyncNotifier<Plan> {
   Future<Plan> build() async {
     final pending = await ref.watch(pendingTasksProvider.future);
     final mood = ref.watch(todayMoodProvider).valueOrNull;
+    final interrupted =
+        ref.watch(interruptedTasksProvider).valueOrNull ?? const [];
     final executive = ref.watch(executiveProvider);
     final advisor = ref.watch(planAdvisorProvider);
 
-    // Executive produces a complete, correct plan deterministically —
-    // today's mood is passed IN as data (§6 trigger). refine() may improve
-    // the result, never produce it. Must never throw (§14).
-    final deterministic = executive.evaluate(pending, mood: mood?.level);
+    // Executive produces a complete, correct plan deterministically — mood and
+    // interrupted tasks are passed IN as data (§6 trigger + living-state
+    // return signal). refine() may improve the result, never produce it.
+    final deterministic =
+        executive.evaluate(pending, mood: mood?.level, interrupted: interrupted);
     return advisor.refine(deterministic, pending);
   }
 

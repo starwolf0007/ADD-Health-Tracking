@@ -24,11 +24,15 @@ class DriftTaskRepository implements TaskRepository {
       title: row.title,
       notes: row.notes,
       energy: _energyFromString(row.energy),
-      status: _statusFromString(row.status),
+      state: TaskStateX.fromStorage(row.status),
       createdAt: row.createdAt,
       dueDate: row.dueDate,
       isQuickWin: row.isQuickWin,
       estimatedMinutes: row.estimatedMinutes,
+      completedAt: row.completedAt,
+      pausedAt: row.pausedAt,
+      pausedStep: row.pausedStep,
+      pausedNote: row.pausedNote,
     );
   }
 
@@ -38,11 +42,15 @@ class DriftTaskRepository implements TaskRepository {
       title: Value(task.title),
       notes: Value(task.notes),
       energy: Value(_energyToString(task.energy)),
-      status: Value(_statusToString(task.status)),
+      status: Value(task.state.storageKey),
       createdAt: Value(task.createdAt),
       dueDate: Value(task.dueDate),
       isQuickWin: Value(task.isQuickWin),
       estimatedMinutes: Value(task.estimatedMinutes),
+      completedAt: Value(task.completedAt),
+      pausedAt: Value(task.pausedAt),
+      pausedStep: Value(task.pausedStep),
+      pausedNote: Value(task.pausedNote),
     );
   }
 
@@ -75,6 +83,20 @@ class DriftTaskRepository implements TaskRepository {
   }
 
   @override
+  Stream<List<Task>> watchInterrupted() {
+    return _db.watchInterrupted().map(
+          (rows) => rows.map(_rowToTask).toList(),
+        );
+  }
+
+  @override
+  Stream<List<Task>> watchCompletedToday() {
+    return _db.watchCompletedToday().map(
+          (rows) => rows.map(_rowToTask).toList(),
+        );
+  }
+
+  @override
   Future<void> delete(String id) async {
     await _db.deleteTask(id);
     // TODO(sync): enqueue Google Tasks delete
@@ -103,28 +125,6 @@ class DriftTaskRepository implements TaskRepository {
         return 'high';
       case EnergyLevel.medium:
         return 'medium';
-    }
-  }
-
-  TaskStatus _statusFromString(String s) {
-    switch (s) {
-      case 'completed':
-        return TaskStatus.completed;
-      case 'skipped':
-        return TaskStatus.skipped;
-      default:
-        return TaskStatus.pending;
-    }
-  }
-
-  String _statusToString(TaskStatus s) {
-    switch (s) {
-      case TaskStatus.completed:
-        return 'completed';
-      case TaskStatus.skipped:
-        return 'skipped';
-      case TaskStatus.pending:
-        return 'pending';
     }
   }
 }

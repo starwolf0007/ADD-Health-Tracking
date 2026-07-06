@@ -1,39 +1,133 @@
 // lib/domain/task.dart
 //
 // Pure domain model — no Flutter, no Drift, no Riverpod.
-// Everything above this layer depends on Task; nothing here depends on anything.
 //
-// v2: adds estimatedMinutes — the time-blindness anchor. A task can carry its
-// own honest guess ("this should take 15"), and the Focus Timer counts against
-// it. Null means "no estimate", never "zero minutes".
+// PHASE 2 — LIVING-STATE MODEL (schema v3).
+// Tasks are alive, not binary. The 7-state machine replaces the old
+// {pending, completed, skipped}:
+//
+//   notStarted → preparing → inProgress → paused → blocked → checkpoint → complete
+//
+// "Tasks don't fail. They pause." The Re-Entry Card (Phase 2) reads a paused
+// task's `pausedStep` + `pausedNote` to reconstruct exactly where momentum
+// was lost. `pausedAt` orders the "what should I return to" list.
+//
+// BACKWARD COMPATIBILITY: the v2→v3 migration maps legacy string states:
+//   'pending'   → notStarted
+//   'completed' → complete
+//   'skipped'   → blocked   (a skipped task was stopped, not finished —
+//                            recoverable, not failed)
 
 import 'package:uuid/uuid.dart';
 
 enum EnergyLevel { low, medium, high }
 
-enum TaskStatus { pending, completed, skipped }
+/// The living-state machine. Stored by stable string key, never raw index.
+enum TaskState {
+  notStarted,
+  preparing,
+  inProgress,
+  paused,
+  blocked,
+  checkpoint,
+  complete,
+}
+
+extension TaskStateX on TaskState {
+  String get storageKey => switch (this) {
+        TaskState.notStarted => 'not_started',
+        TaskState.preparing => 'preparing',
+        TaskState.inProgress => 'in_progress',
+        TaskState.paused => 'paused',
+        TaskState.blocked => 'blocked',
+        TaskState.checkpoint => 'checkpoint',
+        TaskState.complete => 'complete',
+      };
+
+  static TaskState fromStorage(String s) => switch (s) {
+        'not_started' => TaskState.notStarted,
+        'preparing' => TaskState.preparing,
+        'in_progress' => TaskState.inProgress,
+        'paused' => TaskState.paused,
+        'blocked' => TaskState.blocked,
+        'checkpoint' => TaskState.checkpoint,
+        'complete' => TaskState.complete,
+        // Legacy v2 values (migration also rewrites these in-place):
+        'pending' => TaskState.notStarted,
+        'completed' => TaskState.complete,
+        'skipped' => TaskState.blocked,
+        _ => TaskState.notStarted,
+      };
+
+  String get label => switch (this) {
+        TaskState.notStarted => 'Not started',
+        TaskState.preparing => 'Preparing',
+        TaskState.inProgress => 'In progress',
+        TaskState.paused => 'Paused',
+        TaskState.blocked => 'Blocked',
+        TaskState.checkpoint => 'Checkpoint',
+        TaskState.complete => 'Complete',
+      };
+
+  /// "Open" = still needs attention (surfaces in the plan / pending list).
+  bool get isOpen => this != TaskState.complete;
+  bool get isComplete => this == TaskState.complete;
+  bool get isActive =>
+      this == TaskState.inProgress || this == TaskState.preparing;
+
+  /// Interrupted — the Re-Entry Card's domain.
+  bool get isInterrupted =>
+      this == TaskState.paused || this == TaskState.blocked;
+  bool get isCheckpoint => this == TaskState.checkpoint;
+
+  /// Legal next states — guards invalid transitions, drives UI affordances.
+  Set<TaskState> get allowedNext => switch (this) {
+        TaskState.notStarted => {TaskState.preparing, TaskState.inProgress},
+        TaskState.preparing => {TaskState.inProgress, TaskState.paused},
+        TaskState.inProgress => {
+            TaskState.paused,
+            TaskState.blocked,
+            TaskState.checkpoint,
+            TaskState.complete,
+          },
+        TaskState.paused => {TaskState.inProgress, TaskState.blocked},
+        TaskState.blocked => {TaskState.inProgress},
+        TaskState.checkpoint => {TaskState.inProgress, TaskState.complete},
+        TaskState.complete => <TaskState>{}, // terminal
+      };
+}
 
 class Task {
   final String id;
   final String title;
   final String? notes;
   final EnergyLevel energy;
-  final TaskStatus status;
+  final TaskState state;
   final DateTime createdAt;
   final DateTime? dueDate;
-  final bool isQuickWin; // §QW — eligible for auto-mode Quick Wins list
-  final int? estimatedMinutes; // v2 — focus timer target
+  final bool isQuickWin;
+  final int? estimatedMinutes;
+  final DateTime? completedAt;
+
+  // --- Living-state / Re-Entry metadata (Phase 2) ---
+  final DateTime? pausedAt;   // orders the "what to return to" list
+  final String? pausedStep;   // where you stopped, in your words
+  final String? pausedNote;   // optional freeform re-entry hint
 
   const Task({
     required this.id,
     required this.title,
     this.notes,
     required this.energy,
-    this.status = TaskStatus.pending,
+    this.state = TaskState.notStarted,
     required this.createdAt,
     this.dueDate,
     this.isQuickWin = false,
     this.estimatedMinutes,
+    this.completedAt,
+    this.pausedAt,
+    this.pausedStep,
+    this.pausedNote,
   });
 
   factory Task.create({
@@ -49,7 +143,7 @@ class Task {
       title: title,
       notes: notes,
       energy: energy,
-      status: TaskStatus.pending,
+      state: TaskState.notStarted,
       createdAt: DateTime.now(),
       dueDate: dueDate,
       isQuickWin: isQuickWin,
@@ -61,24 +155,55 @@ class Task {
     String? title,
     String? notes,
     EnergyLevel? energy,
-    TaskStatus? status,
+    TaskState? state,
     DateTime? dueDate,
     bool? isQuickWin,
     int? estimatedMinutes,
+    DateTime? completedAt,
+    DateTime? pausedAt,
+    String? pausedStep,
+    String? pausedNote,
   }) {
     return Task(
       id: id,
       title: title ?? this.title,
       notes: notes ?? this.notes,
       energy: energy ?? this.energy,
-      status: status ?? this.status,
+      state: state ?? this.state,
       createdAt: createdAt,
       dueDate: dueDate ?? this.dueDate,
       isQuickWin: isQuickWin ?? this.isQuickWin,
       estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
+      completedAt: completedAt ?? this.completedAt,
+      pausedAt: pausedAt ?? this.pausedAt,
+      pausedStep: pausedStep ?? this.pausedStep,
+      pausedNote: pausedNote ?? this.pausedNote,
     );
   }
 
-  bool get isPending => status == TaskStatus.pending;
-  bool get isCompleted => status == TaskStatus.completed;
+  bool get isOpen => state.isOpen;
+  bool get isComplete => state.isComplete;
+  bool get isInterrupted => state.isInterrupted;
+
+  /// Legacy alias — call sites that still read `isPending`. Unstarted is the
+  /// closest equivalent. Kept so the migration doesn't ripple through the UI.
+  bool get isPending => state == TaskState.notStarted;
+
+  /// Transition helper that keeps pause/complete metadata consistent.
+  Task transitionTo(TaskState next, {String? step, String? note}) {
+    switch (next) {
+      case TaskState.paused:
+      case TaskState.blocked:
+        return copyWith(
+          state: next,
+          pausedAt: DateTime.now(),
+          pausedStep: step,
+          pausedNote: note,
+        );
+      case TaskState.complete:
+        return copyWith(state: next, completedAt: DateTime.now());
+      default:
+        return copyWith(state: next);
+    }
+  }
 }

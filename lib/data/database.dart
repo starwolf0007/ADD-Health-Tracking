@@ -32,12 +32,19 @@ class Tasks extends Table {
   TextColumn get title => text()();
   TextColumn get notes => text().nullable()();
   TextColumn get energy => text()(); // 'low' | 'medium' | 'high'
-  TextColumn get status => text()(); // 'pending' | 'completed' | 'skipped'
+  // v3: holds TaskState.storageKey ('not_started'..'complete').
+  // Legacy v2 values ('pending'/'completed'/'skipped') are rewritten by the
+  // v2→v3 migration below.
+  TextColumn get status => text()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get dueDate => dateTime().nullable()();
   BoolColumn get isQuickWin => boolean().withDefault(const Constant(false))();
   IntColumn get estimatedMinutes => integer().nullable()(); // v2 focus target
   DateTimeColumn get completedAt => dateTime().nullable()();
+  // v3 living-state / Re-Entry metadata:
+  DateTimeColumn get pausedAt => dateTime().nullable()();
+  TextColumn get pausedStep => text().nullable()();
+  TextColumn get pausedNote => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -76,6 +83,9 @@ class Routines extends Table {
   IntColumn get scheduleHour => integer().nullable()(); // custom anchor only
   IntColumn get scheduleMinute => integer().nullable()();
   BoolColumn get isActive => boolean().withDefault(const Constant(true))();
+  // Which weekdays this routine fires, as a compact string of ISO weekday
+  // digits (Mon=1 … Sun=7). "12345" = weekdays. NULL = every day (back-comat).
+  TextColumn get activeDays => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
 
   @override
@@ -144,7 +154,33 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 3;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          // v1 -> v2: add Routines.activeDays (nullable; null = every day).
+          if (from < 2) {
+            await m.addColumn(routines, routines.activeDays);
+          }
+          // v2 -> v3: living-state model.
+          // 1. add the three pause-metadata columns.
+          // 2. rewrite legacy status strings into TaskState keys.
+          if (from < 3) {
+            await m.addColumn(tasks, tasks.pausedAt);
+            await m.addColumn(tasks, tasks.pausedStep);
+            await m.addColumn(tasks, tasks.pausedNote);
+            // Map old binary states → living states (data-preserving).
+            await customStatement(
+                "UPDATE tasks SET status = 'not_started' WHERE status = 'pending'");
+            await customStatement(
+                "UPDATE tasks SET status = 'complete' WHERE status = 'completed'");
+            await customStatement(
+                "UPDATE tasks SET status = 'blocked' WHERE status = 'skipped'");
+          }
+        },
+      );
 
   DateTime get _startOfToday {
     final now = DateTime.now();
@@ -166,7 +202,7 @@ class AppDatabase extends _$AppDatabase {
   Future<void> markComplete(String id) =>
       (update(tasks)..where((t) => t.id.equals(id))).write(
         TasksCompanion(
-          status: const Value('completed'),
+          status: const Value('complete'),
           completedAt: Value(DateTime.now()),
         ),
       );
@@ -174,11 +210,12 @@ class AppDatabase extends _$AppDatabase {
   Future<void> deleteTask(String id) =>
       (delete(tasks)..where((t) => t.id.equals(id))).go();
 
-  /// Pending tasks, easiest first: energy asc, then due date (nulls last),
-  /// then age. Sorted Dart-side because energy is a semantic rank, not an
-  /// alphabetical one.
+  /// "Open, not-yet-started" tasks, easiest first. Under living-state, the
+  /// plan surfaces not_started tasks; interrupted (paused/blocked) tasks are
+  /// handled by the Re-Entry flow, not the normal plan.
   Stream<List<TaskRow>> watchPendingByEnergyAsc() {
-    final query = select(tasks)..where((t) => t.status.equals('pending'));
+    final query = select(tasks)
+      ..where((t) => t.status.equals('not_started'));
     return query.watch().map((rows) {
       rows.sort((a, b) {
         final e = _energyRank(a.energy).compareTo(_energyRank(b.energy));
@@ -195,12 +232,32 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
+  /// Interrupted tasks (paused/blocked), most-recently-paused first — the
+  /// Re-Entry Card's data source (Phase 2). These are what the user should be
+  /// nudged to *return* to.
+  Stream<List<TaskRow>> watchInterrupted() {
+    final query = select(tasks)
+      ..where((t) => t.status.equals('paused') | t.status.equals('blocked'))
+      ..orderBy([(t) => OrderingTerm.desc(t.pausedAt)]);
+    return query.watch();
+  }
+
   Stream<int> watchCompletedTodayCount() {
     final query = select(tasks)
       ..where((t) =>
-          t.status.equals('completed') &
+          t.status.equals('complete') &
           t.completedAt.isBiggerOrEqualValue(_startOfToday));
     return query.watch().map((rows) => rows.length);
+  }
+
+  /// Completed tasks today, as rows (for the timeline projection).
+  Stream<List<TaskRow>> watchCompletedToday() {
+    final query = select(tasks)
+      ..where((t) =>
+          t.status.equals('complete') &
+          t.completedAt.isBiggerOrEqualValue(_startOfToday))
+      ..orderBy([(t) => OrderingTerm.asc(t.completedAt)]);
+    return query.watch();
   }
 
   // ---- Habits ---------------------------------------------------------------

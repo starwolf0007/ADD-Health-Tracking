@@ -12,6 +12,13 @@ abstract class TaskRepository {
   /// Count of tasks completed today — used by the heartbeat line.
   Stream<int> watchCompletedTodayCount();
 
+  /// Interrupted (paused/blocked) tasks, most-recently-paused first.
+  /// The Re-Entry Card's data source (Phase 2).
+  Stream<List<Task>> watchInterrupted();
+
+  /// Tasks completed today, as full objects (for the timeline projection).
+  Stream<List<Task>> watchCompletedToday();
+
   Future<void> save(Task task);
   Future<void> markComplete(String id);
   Future<void> delete(String id);
