@@ -56,8 +56,10 @@ Everything else is variations on these patterns.
 
 ```dart
 abstract class TaskRepository {
-  Stream<List<Task>> watchPending();
+  Stream<List<Task>> watchPending();            // not-started, energy asc
   Stream<int> watchCompletedTodayCount();
+  Stream<List<Task>> watchInterrupted();        // paused/blocked — Re-Entry source
+  Stream<List<Task>> watchCompletedToday();     // completed today — timeline feed
   Future<void> save(Task task);
   Future<void> markComplete(String id);
   Future<void> delete(String id);
@@ -104,11 +106,12 @@ class Plan {
   final Task? primaryTask;      // the one next-best-action (normal mode)
   final List<Task> quickWins;   // the gentle list (quickWins mode)
   final String reason;
+  final List<Task> returnable;  // interrupted tasks — offer a Re-Entry path (v3)
 }
 
 class Executive {
   // PURE. Synchronous. No I/O. Same inputs → same Plan.
-  Plan evaluate(List<Task> pending, {MoodLevel? mood});
+  Plan evaluate(List<Task> pending, {MoodLevel? mood, List<Task> interrupted});
 }
 
 abstract class PlanAdvisor {
@@ -120,7 +123,7 @@ abstract class PlanAdvisor {
 ```
 
 ### Domain entities (quick reference)
-- **Task**: id, title, notes?, `EnergyLevel` {low,medium,high}, `TaskStatus` {pending,completed,skipped}, dueDate?, isQuickWin, estimatedMinutes?
+- **Task**: id, title, notes?, `EnergyLevel` {low,medium,high}, `TaskState` {notStarted,preparing,inProgress,paused,blocked,checkpoint,complete}, dueDate?, isQuickWin, estimatedMinutes?, completedAt?, + living-state metadata (pausedAt?, pausedStep?, pausedNote?) and `transitionTo()`
 - **Habit**: id, name, frequency, isActive, + streak logic (`isCheckedToday`, `currentStreak`)
 - **Routine**: id, name, `RoutineAnchor` {morning,midday,evening,custom}, scheduleHour?, scheduleMinute?, `activeDays`? ("12345"=weekdays, null=daily), steps[]
 - **RoutineStep**: id, routineId, position, title, durationMinutes?, isComplete
@@ -150,7 +153,7 @@ See `CALENDAR-INTEGRATION-SCOPE.md` for the full phased plan.
 ---
 
 ## Testing status
-**No test suite currently exists** (see TECH_DEBT TD-05). When building tests, the Executive is the highest-value, easiest target — it's pure and deterministic. Use `AppDatabase.forTesting(NativeDatabase.memory())` for repository tests.
+**A unit-test suite exists and passes — 36 tests, `flutter test` green.** It covers the Executive (`evaluate` mode selection, the Quick Wins trigger, ordering) and the Habit/Routine domain models. Still unwritten (see TECH_DEBT TD-05): repository CRUD against an in-memory Drift DB (`AppDatabase.forTesting(NativeDatabase.memory())`), `Routine.firesOn` weekday logic, and focus-timer milestone firing.
 
 ---
 

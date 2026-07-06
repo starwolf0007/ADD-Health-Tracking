@@ -44,9 +44,9 @@ You're inheriting a **local-first Flutter ADHD executive-function app** that com
 | Weekday-aware routines (`activeDays`) | ✅ Complete | Schema v2 migration; Morning Launch = Mon–Fri | — |
 | Design system / tokens | ✅ Complete | `theme.dart`, two functional colors | — |
 | Lexi advisor seam | 🟡 Partial | Interface + Dart advisor + Kotlin bridge stub exist; **on-device Gemini Nano SDK not wired** — advisor NoOps until `LexiBridge.kt` gets a real model call | High (needs AICore SDK + device testing) |
-| **Your Day timeline** | ⬜ Planned | Next Phase 2 build. MUST be a read-only projection over existing tables. MVP = routines + task completions + mood markers. | Medium |
-| **Living-state tasks (7 states)** | ⬜ Planned | Foundation for Phase 2. Replaces binary `TaskStatus`. Migration + Executive logic update. Build FIRST in Phase 2. | Medium |
-| **Re-Entry Card** | ⬜ Planned | The signature feature. Depends on living-state + timeline. Reads timeline to find stall point. | Medium |
+| **Living-state tasks (7 states)** | ✅ Complete | Phase 2 Step 1. 7-state `TaskState` replaced binary `TaskStatus`; schema v2→v3 migration + `Executive.evaluate(interrupted:)` / `Plan.returnable`. | — |
+| **Your Day timeline** | 🟡 Partial | Phase 2 Step 2. Read-only projection (`timeline.dart`, DEC-004) + screen built; **not yet wired into nav** (TD-11). Merge inputs: completions + interrupted + mood + due routines. | Low (nav wiring) |
+| **Re-Entry Card** | ⬜ Planned | The signature feature and the immediate next build — its dependencies (living-state + timeline) now exist. Reads a paused task's `pausedStep`/`pausedNote` for the stall point. | Medium |
 | Launch Mode / Recovery Mode | ⬜ Planned | Paralysis defenses (before-start / mid-task) | Low–Medium |
 | Finish Line ritual ("Put Away 5") | ⬜ Planned | High impact, low complexity | Low |
 | Pattern Learning (friction memory) | ⬜ Planned | On-device step-level stall memory. Feeds Lexi predictions. | Medium |
@@ -63,13 +63,13 @@ Legend: ✅ Complete · 🟡 Partial · ⬜ Planned
 ## Roadmap (from the actual codebase forward)
 
 ### Immediate priority — the compile-safe next steps
-1. **Apply the pending weekday update** (if not already merged) — schema v2, requires `dart run build_runner build`.
-2. **One week of real user use** before building Phase 2. This is a hard gate. Real friction data outranks design theory.
+1. ~~Apply the pending weekday update~~ — **done.** `activeDays` (schema v2) is in the baseline; schema is now **v3** after Phase 2 Step 1.
+2. **One week of real user use** before building further. This is a hard gate. Real friction data outranks design theory.
 
 ### Phase 2 — Executive Function Layer (build in this order)
-1. **Living-state tasks** — the 7-state model. Foundation; everything references "Paused."
-2. **Your Day timeline** — read-only projection. The canvas every later feature renders on. MVP first (routines + completions + mood).
-3. **Re-Entry Card** — ships basic as soon as 1+2 exist. The signature feature.
+1. ✅ **Living-state tasks** — the 7-state model. **Done** (Step 1). Everything references "Paused."
+2. 🟡 **Your Day timeline** — read-only projection. **Built** (Step 2); screen not yet wired into nav (TD-11).
+3. **Re-Entry Card** — the immediate next build, now that 1+2 exist. The signature feature.
 4. **Launch Mode + Recovery Mode** — paralysis defenses.
 5. **Finish Line ritual** — the putting-away micro-win.
 6. **Weekly review** — science-informed (WHO-5/PERMA) reflection language.

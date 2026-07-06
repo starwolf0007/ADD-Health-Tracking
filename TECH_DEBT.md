@@ -5,7 +5,7 @@
 ---
 
 ## Compile / build status
-**As of last verification: compiles green.** `flutter analyze` → 0 errors (only `prefer_const_constructors` info-level lints, cosmetic). Runs on Pixel. The items below are debt, not breakage.
+**As of last verification: compiles green.** `flutter analyze` → 0 errors (only `prefer_const_constructors` info-level lints, cosmetic); `flutter test` → 36 passing; `build_runner` regenerates `database.g.dart` at schema v3. Current through Phase 2 Steps 1–2 (living-state tasks + timeline projection). Runs on Pixel. The items below are debt, not breakage.
 
 ---
 
@@ -31,14 +31,14 @@ The halfway / 2-min / target haptic milestones in `focus_timer.dart` fire only w
 
 ## Real debt (should be addressed, in rough priority order)
 
-### TD-05 — No tests
-**Severity: medium-high. The biggest genuine gap.**
-There is no test suite. The Executive is *designed* to be unit-testable (pure, synchronous) but has no tests written. Priority test targets when someone invests:
-1. `Executive.evaluate()` — Quick Wins trigger, mode selection, ordering. Pure function, easy to test, high value.
-2. Repository CRUD against an in-memory Drift DB (`AppDatabase.forTesting`).
-3. `Routine.firesOn()` weekday logic.
-4. Focus timer milestone firing.
-The determinism of the Executive makes this straightforward — it just hasn't been done.
+### TD-05 — Partial test coverage
+**Severity: medium. Reduced from the original "no tests at all."**
+A unit-test suite now exists and passes (36 tests, `flutter test` green): the Executive (`evaluate()` — Quick Wins trigger, mode selection, ordering) and the Habit/Routine domain models. Still unwritten, in rough priority:
+1. Repository CRUD against an in-memory Drift DB (`AppDatabase.forTesting`).
+2. `Routine.firesOn()` weekday logic.
+3. Focus timer milestone firing.
+4. Living-state transitions (`Task.transitionTo`, `TaskState.allowedNext`) and the v2→v3 migration.
+The determinism of the Executive made its tests straightforward; the remaining targets are I/O- or widget-bound, which is why they lag.
 
 ### TD-06 — `today_screen.dart` is 677 lines
 **Severity: medium.**
@@ -59,6 +59,10 @@ Unlike the streams, due-routines is a `FutureProvider` re-evaluated on rebuild, 
 ### TD-10 — MainActivity package assumption
 **Severity: low, one-time setup risk.**
 `MainActivity.kt` and `LexiBridge.kt` assume package `com.neuroflow`. If `flutter create` generated a different applicationId, these must match or the channel won't register (throws `MissingPluginException`, which the advisor catches → permanent NoOp). Documented in the handoff; just verify on setup.
+
+### TD-11 — TimelineScreen built but not wired into navigation
+**Severity: low / intentional, Phase 2 in progress.**
+`lib/presentation/timeline_screen.dart` (the read-only "Your Day" projection proof) compiles and renders `timelineProvider`, but it is not yet added to `app_shell.dart` navigation — deliberately, to keep the Phase 2 Step 2 drop reviewable. The next drop wires it in alongside the Re-Entry Card. Until then it's reachable only by direct construction.
 
 ---
 

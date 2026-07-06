@@ -100,7 +100,7 @@ graph LR
 
 ---
 
-## 3. Drift database schema (v2)
+## 3. Drift database schema (v3)
 
 ```mermaid
 erDiagram
@@ -109,12 +109,15 @@ erDiagram
         text title
         text notes
         text energy "low|medium|high"
-        text status "pending|completed|skipped"
+        text status "TaskState: not_started..complete"
         datetime createdAt
         datetime dueDate
         bool isQuickWin
         int estimatedMinutes
         datetime completedAt
+        datetime pausedAt "v3 living-state"
+        text pausedStep "v3 living-state"
+        text pausedNote "v3 living-state"
     }
     HABITS {
         text id PK
@@ -171,9 +174,9 @@ erDiagram
 
 ---
 
-## 4. Living-State Task flow (PLANNED — Phase 2)
+## 4. Living-State Task flow (BUILT — Phase 2 Step 1)
 
-*Not yet built. This is the target state machine that replaces the current binary `TaskStatus {pending, completed, skipped}`.*
+*Shipped. This 7-state machine (`TaskState` in `lib/domain/task.dart`) replaced the old binary `TaskStatus {pending, completed, skipped}`. Transitions are guarded by `TaskState.allowedNext`; `Task.transitionTo()` keeps pause/complete metadata consistent.*
 
 ```mermaid
 stateDiagram-v2
@@ -220,9 +223,9 @@ sequenceDiagram
     DB->>Repo: watchPending() stream
     Repo->>PT: List<Task>
     PT->>TC: build() triggered
-    TC->>TC: read todayMoodProvider
-    TC->>EX: evaluate(pending, mood:)
-    EX-->>TC: Plan (deterministic)
+    TC->>TC: read todayMoodProvider + interruptedTasksProvider
+    TC->>EX: evaluate(pending, mood:, interrupted:)
+    EX-->>TC: Plan (deterministic, incl. returnable)
     TC->>AD: refine(plan, pending)
     Note over AD: may enrich,<br/>never throws,<br/>NoOp by default
     AD-->>TC: Plan (final)
@@ -234,9 +237,9 @@ sequenceDiagram
 
 ---
 
-## 6. Timeline projection (PLANNED — Phase 2)
+## 6. Timeline projection (BUILT — Phase 2 Step 2)
 
-*The correct architecture: a read-only merge, NOT a storage table. Nothing writes a TimelineEvent.*
+*Shipped as `lib/app/timeline.dart` (`timelineProvider`) + `timeline_screen.dart`. A read-only merge, NOT a storage table — nothing writes a TimelineEvent (DEC-004). Current merge inputs: interrupted tasks, completed tasks, mood check-ins, due routines. Focus sessions and voice captures (below) are future layers. The screen isn't wired into nav yet — see TECH_DEBT TD-11.*
 
 ```mermaid
 graph TD

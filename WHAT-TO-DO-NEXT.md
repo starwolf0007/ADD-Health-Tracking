@@ -16,7 +16,7 @@ What we did NOT do, and why: we did not build 7 complex features blind in one sh
 
 ## The Continuity Binder (done — this is the real deliverable)
 
-Six Markdown files, written against the **actual compiling codebase**, saved in the project root:
+Seven Markdown files, written against the **actual compiling codebase**, saved in the project root:
 
 1. **HANDOFF_AND_SUCCESSION.md** — successor handbook, feature completion matrix, honest roadmap
 2. **ARCHITECTURE.md** — layers, folders, provider graph, schema, and the ADHD-design rationale
@@ -24,6 +24,7 @@ Six Markdown files, written against the **actual compiling codebase**, saved in 
 4. **TECH_DEBT.md** — every known limitation, honestly rated
 5. **DEVELOPER_HANDBOOK.md** — build steps, API contracts, debugging pitfalls
 6. **MERMAID_DIAGRAMS.md** — 6 diagrams: architecture, providers, schema, task-state, plan loop, timeline projection
+7. **WHAT-TO-DO-NEXT.md** — this file: the reframe, the discipline, and the next steps
 
 This binder means: **any engineer, or any future version of Claude, can pick this project up cold and know exactly where it stands and why.** That's the actual insurance you wanted. It's model-proof and time-proof.
 
@@ -46,33 +47,26 @@ What this interface can't do: it can't run `flutter analyze`, can't touch your a
 
 Claude Code has your real filesystem and can run the toolchain. Do this, in order:
 
-### Step 1 — Land the binder
-Drop the six `.md` files into your project root (they're in the delivered zip). Commit them. Now the project is documented.
+### Step 1 — Land the binder ✅ DONE
+The seven `.md` binder files are committed at the project root. The project is documented.
 
-### Step 2 — Apply the pending weekday update (if not already done)
-The weekday-aware routines update changed the schema to v2. If you haven't merged it:
-```bash
-# after copying the 5 changed files from the weekday-update zip:
-dart run build_runner build --delete-conflicting-outputs
-flutter analyze          # expect 0 errors
-# clear app data on device, then:
-flutter run
-```
+### Step 2 — Weekday update ✅ DONE
+`activeDays` (schema v2) is in the baseline. Codegen + `flutter analyze` verified green.
 
-### Step 3 — Verify green, then STOP building
-Confirm the app runs with the weekday routines. Then **use it for a week.** This is the gate. Do not start Phase 2 until you have real-use friction data — that data is worth more than any spec.
+### Step 3 — Verify green, then use it
+The app compiles green (`flutter analyze` clean, 36 tests passing, CI green). The one-week real-use gate before *further* building still stands — real friction data outranks design theory.
 
-### Step 4 — When ready, Phase 2 in dependency order
+### Step 4 — Phase 2 in dependency order (in progress)
 Give Claude Code / Copilot ONE feature at a time, from the locked roadmap:
-1. Living-state tasks (the 7-state model — foundation)
-2. Your Day timeline (**read-only projection** — see MERMAID diagram 6 and DEC-004)
-3. Re-Entry Card (reads the timeline)
-4. Launch/Recovery Mode, Finish Line, weekly review
+1. ✅ Living-state tasks (the 7-state model — foundation) — **done** (Step 1)
+2. 🟡 Your Day timeline (**read-only projection** — MERMAID diagram 6 and DEC-004) — **built** (Step 2); screen not yet wired into nav (TD-11)
+3. ⬜ Re-Entry Card (reads a paused task's stall point) — **the immediate next build**
+4. ⬜ Launch/Recovery Mode, Finish Line, weekly review
 
 Each one: build → `build_runner` if schema changed → `flutter analyze` → run → verify → next. Never all at once. That discipline is the whole reason you have a working app.
 
-### The prompt to give Claude Code for Phase 2 (when the week is up)
-> "Read HANDOFF_AND_SUCCESSION.md, ARCHITECTURE.md, and DECISIONS.md first. We're starting Phase 2. Build ONLY the living-state task model (the 7-state machine replacing binary TaskStatus). It needs a schema migration to v3 and updates to Executive logic. Do not touch anything else. When it compiles green and analyze is clean, stop and report — we verify before the next feature."
+### The prompt to give Claude Code for the next feature
+> "Read HANDOFF_AND_SUCCESSION.md, ARCHITECTURE.md, and DECISIONS.md first. Living-state (Step 1) and the timeline projection (Step 2) are already merged at schema v3. Build ONLY the Re-Entry Card: it reads interrupted tasks (`interruptedTasksProvider` / `Plan.returnable`) and surfaces a paused task's `pausedStep`/`pausedNote` as the stall point, and it wires `TimelineScreen` into nav (TD-11). Do not touch anything else. When it compiles green and analyze is clean, stop and report — we verify before the next feature."
 
 ---
 

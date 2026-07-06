@@ -1,6 +1,6 @@
 # NeuroFlow — Architecture
 
-*Describes the real, compiling codebase: 39 Dart files, ~5,300 lines, Flutter + Riverpod + Drift, local-first.*
+*Describes the real, compiling codebase: ~41 Dart files, Flutter + Riverpod + Drift, local-first. Current through Phase 2 Steps 1–2 (living-state tasks + timeline projection).*
 
 ---
 
@@ -56,13 +56,13 @@ NeuroFlow enforces a strict layered architecture. The layers are real — they'r
 ```
 lib/
 ├── domain/              Pure models (no dependencies)
-│   ├── task.dart        Task, EnergyLevel, TaskStatus
+│   ├── task.dart        Task, EnergyLevel, TaskState (7-state living-state)
 │   ├── habit.dart       Habit + streak logic
 │   ├── routine.dart     Routine, RoutineStep, RoutineAnchor
 │   ├── note.dart        Note + promote-to-task helpers
 │   └── mood.dart        MoodLog, MoodLevel, triggersQuickWins
 ├── data/                Persistence (Drift) + repositories
-│   ├── database.dart    7 tables, schema v2, migration
+│   ├── database.dart    7 tables, schema v3, migrations
 │   ├── *_repository.dart       Interfaces
 │   ├── *_repository_impl.dart   Drift implementations
 │   └── *_seeds.dart     First-launch seed data
@@ -73,7 +73,8 @@ lib/
 │   └── lexi_config.dart
 ├── app/
 │   ├── providers.dart   Composition root — wires everything
-│   └── focus_timer.dart Global focus-timer Notifier
+│   ├── focus_timer.dart Global focus-timer Notifier
+│   └── timeline.dart    Read-only TimelineEvent projection (DEC-004)
 ├── platform/
 │   ├── notifications/notification_service.dart
 │   ├── background/background_scheduler.dart
@@ -85,6 +86,7 @@ lib/
 │   ├── reflect_screen.dart      Mood + week + habits
 │   ├── routines_list_screen.dart
 │   ├── routine_screen.dart      One-step runner + pace banner
+│   ├── timeline_screen.dart     "Your Day" projection (built; not yet in nav)
 │   ├── theme.dart       Design tokens
 │   └── widgets/         Reusable: capture_sheet, energy_glyph,
 │                        heartbeat_line, routine_pace_banner
@@ -108,7 +110,8 @@ Drift DB (Tasks table)
               └─> TodayController.build()    [AsyncNotifier<Plan>]
                     │
                     ├── reads todayMoodProvider (mood signal)
-                    ├── Executive.evaluate(pending, mood:)  ← PURE, returns Plan
+                    ├── reads interruptedTasksProvider (paused/blocked)
+                    ├── Executive.evaluate(pending, mood:, interrupted:)  ← PURE, returns Plan
                     └── PlanAdvisor.refine(plan, pending)   ← AI seam, may enrich
                           └─> Plan
                                 └─> todayControllerProvider
@@ -128,8 +131,10 @@ Drift DB (Tasks table)
 - `taskRepositoryProvider`, `routineRepositoryProvider`, `habitRepositoryProvider`, `noteRepositoryProvider`, `moodRepositoryProvider`
 
 **Reactive data streams**
-- `pendingTasksProvider` → `Stream<List<Task>>`
+- `pendingTasksProvider` → `Stream<List<Task>>` (not-started tasks)
 - `completedTodayCountProvider` → `Stream<int>` (drives heartbeat)
+- `interruptedTasksProvider` → `Stream<List<Task>>` (paused/blocked — Re-Entry source)
+- `completedTodayProvider` → `Stream<List<Task>>` (completed today — feeds the timeline)
 - `activeHabitsProvider`, `activeRoutinesProvider`, `activeNotesProvider`
 - `dueRoutinesProvider` → `Future<List<Routine>>` (anchor-window match)
 - `todayMoodProvider` → `Stream<MoodLog?>` (Quick Wins signal)
@@ -146,13 +151,13 @@ Drift DB (Tasks table)
 
 ---
 
-## Drift schema (v2)
+## Drift schema (v3)
 
 Seven typed tables. **Each entity is its own table with its own fields — this is intentional and must not be collapsed into a generic event model.**
 
 | Table | Purpose | Notable columns |
 |---|---|---|
-| `Tasks` | To-do items | energy, status, dueDate, isQuickWin, estimatedMinutes, completedAt |
+| `Tasks` | To-do items | energy, status (`TaskState` key), dueDate, isQuickWin, estimatedMinutes, completedAt, **pausedAt / pausedStep / pausedNote** (v3 living-state) |
 | `Habits` | Recurring intentions | frequency, isActive |
 | `HabitCheckIns` | Habit completions | habitId, date, completed |
 | `Routines` | Anchor sequences | anchor, scheduleHour/Minute, **activeDays** (v2), isActive |
@@ -160,7 +165,9 @@ Seven typed tables. **Each entity is its own table with its own fields — this 
 | `Notes` | Quick capture | body, pinned, linkedTaskId |
 | `MoodLogs` | Mood check-ins | level (1–5), loggedAt — **NO sync columns, on-device only** |
 
-**Schema version: 2.** Migration v1→v2 adds `Routines.activeDays` (nullable text; null = every day) via `MigrationStrategy.onUpgrade` with `addColumn`. Existing data preserved.
+**Schema version: 3.** Migrations run via `MigrationStrategy.onUpgrade`, all data-preserving:
+- **v1→v2** adds `Routines.activeDays` (nullable text; null = every day).
+- **v2→v3** adds the three `Tasks` pause columns (`pausedAt`, `pausedStep`, `pausedNote`) and rewrites legacy status strings into `TaskState` keys (`pending→not_started`, `completed→complete`, `skipped→blocked`).
 
 **Generated code:** `database.g.dart` is produced by `dart run build_runner build`. It is gitignored and MUST be regenerated after any schema change.
 
