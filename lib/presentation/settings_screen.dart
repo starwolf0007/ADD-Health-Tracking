@@ -14,7 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../platform/alarms/alarm_scheduler.dart';
-import '../providers.dart';
+import '../app/providers.dart';
 import 'theme.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -271,7 +271,7 @@ class _ToggleTile extends StatelessWidget {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: AppColors.accent,
+            activeThumbColor: AppColors.accent,
             inactiveTrackColor: AppColors.surfaceVariant,
           ),
         ],

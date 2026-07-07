@@ -12,7 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/routine.dart';
-import '../providers.dart';
+import '../app/providers.dart';
 import 'theme.dart';
 
 // ---------------------------------------------------------------------------
@@ -374,8 +374,7 @@ class _CelebrationView extends StatelessWidget {
 // Entry point helper — push RoutineScreen as a full-screen route
 // ---------------------------------------------------------------------------
 
-Future<void> launchRoutine(
-    BuildContext context, WidgetRef ref, Routine routine) async {
+Future<void> launchRoutine(BuildContext context, Routine routine) async {
   await Navigator.of(context).push(
     MaterialPageRoute<void>(
       fullscreenDialog: true,

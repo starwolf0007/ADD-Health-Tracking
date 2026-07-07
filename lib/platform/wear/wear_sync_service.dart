@@ -18,7 +18,7 @@
 
 import 'package:flutter/services.dart';
 
-import '../../providers.dart'; // TodayState
+import '../../app/providers.dart'; // TodayState
 
 const _kChannel = 'neuroflow/wear';
 const _kMethodPush = 'pushPrimaryTask';

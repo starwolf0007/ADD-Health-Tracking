@@ -16,7 +16,7 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../providers.dart';
+import '../app/providers.dart';
 
 const _kLastResetKey = 'neuroflow_last_routine_reset';
 

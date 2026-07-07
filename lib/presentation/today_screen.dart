@@ -15,11 +15,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../domain/routine.dart';
 import '../domain/task.dart';
 import '../executive/planner.dart';
-import '../providers.dart';
+import '../app/providers.dart';
 import 'habits_widget.dart';
 import 'routine_screen.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
+import 'widgets/capture_sheet.dart';
 
 class TodayScreen extends ConsumerWidget {
   const TodayScreen({super.key});
@@ -68,22 +69,10 @@ class TodayScreen extends ConsumerWidget {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _showCaptureSheet(context, ref),
+        onPressed: () => showCaptureSheet(context),
         tooltip: 'Add task',
         child: const Icon(Icons.add),
       ),
-    );
-  }
-
-  void _showCaptureSheet(BuildContext context, WidgetRef ref) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.surface,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (_) => _CaptureSheet(ref: ref),
     );
   }
 }
@@ -277,7 +266,7 @@ class _AllClearBody extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(Icons.check_circle_outline,
-              size: 48, color: AppColors.accent.withOpacity(0.6)),
+              size: 48, color: AppColors.accent.withValues(alpha: 0.6)),
           const SizedBox(height: 16),
           Text('All clear', style: AppTextStyles.titleMedium),
           const SizedBox(height: 8),
@@ -365,109 +354,6 @@ class _EnergyGlyph extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------------------
-// Capture sheet
-// ---------------------------------------------------------------------------
-
-class _CaptureSheet extends StatefulWidget {
-  final WidgetRef ref;
-
-  const _CaptureSheet({required this.ref});
-
-  @override
-  State<_CaptureSheet> createState() => _CaptureSheetState();
-}
-
-class _CaptureSheetState extends State<_CaptureSheet> {
-  final _controller = TextEditingController();
-  EnergyLevel _energy = EnergyLevel.medium;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.fromLTRB(
-          20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Add task', style: AppTextStyles.titleMedium),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _controller,
-            autofocus: true,
-            style: AppTextStyles.bodyMedium,
-            decoration: InputDecoration(
-              hintText: 'What needs doing?',
-              hintStyle: AppTextStyles.bodySmall,
-              filled: true,
-              fillColor: AppColors.surfaceVariant,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          Text('Energy to start', style: AppTextStyles.bodySmall),
-          const SizedBox(height: 8),
-          Row(
-            children: EnergyLevel.values.map((e) {
-              final selected = e == _energy;
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: ChoiceChip(
-                  label: Text(e.name),
-                  selected: selected,
-                  onSelected: (_) => setState(() => _energy = e),
-                  selectedColor: AppColors.accent,
-                  backgroundColor: AppColors.surfaceVariant,
-                  labelStyle: AppTextStyles.bodySmall.copyWith(
-                    color: selected
-                        ? AppColors.background
-                        : AppColors.textSecondary,
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 20),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _submit,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.accent,
-                foregroundColor: AppColors.background,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-              child: const Text('Add'),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _submit() {
-    final title = _controller.text.trim();
-    if (title.isEmpty) return;
-
-    final task = Task.create(title: title, energy: _energy);
-    widget.ref.read(todayControllerProvider.notifier).addTask(task);
-    Navigator.of(context).pop();
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Due routines section — shown between tasks and habits
 // ---------------------------------------------------------------------------
 
@@ -495,7 +381,7 @@ class _DueRoutinesSection extends ConsumerWidget {
             ...routines.map(
               (r) => _RoutineCard(
                 routine: r,
-                onTap: () => launchRoutine(context, ref, r),
+                onTap: () => launchRoutine(context, r),
               ),
             ),
           ],

@@ -1,7 +1,6 @@
 // lib/data/routine_repository_impl.dart
 //
-// Drift-backed RoutineRepository. Joins Routines + RoutineSteps
-// and assembles domain Routine objects with their steps list.
+// Drift-backed RoutineRepository. Joins Routines + RoutineSteps.
 
 import 'package:drift/drift.dart';
 
@@ -26,6 +25,7 @@ class DriftRoutineRepository implements RoutineRepository {
       scheduleHour: row.scheduleHour,
       scheduleMinute: row.scheduleMinute,
       isActive: row.isActive,
+      activeDays: row.activeDays,
       steps: stepRows.map(_stepRowToStep).toList(),
       createdAt: row.createdAt,
     );
@@ -51,6 +51,7 @@ class DriftRoutineRepository implements RoutineRepository {
       scheduleHour: Value(r.scheduleHour),
       scheduleMinute: Value(r.scheduleMinute),
       isActive: Value(r.isActive),
+      activeDays: Value(r.activeDays),
       createdAt: Value(r.createdAt),
     );
   }
@@ -93,7 +94,10 @@ class DriftRoutineRepository implements RoutineRepository {
       if (_isDueNow(anchor, row.scheduleHour, row.scheduleMinute, now)) {
         final steps = await _db.fetchStepsForRoutine(row.id);
         final routine = _rowsToRoutine(row, steps);
-        // Don't surface a routine that's already fully complete today.
+        
+        // Weekday rule: skip if it doesn't fire today.
+        if (!routine.firesOn(now)) continue;
+
         if (!routine.isComplete) {
           result.add(routine);
         }

@@ -20,7 +20,7 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../providers.dart';
+import '../../app/providers.dart';
 
 const _kChannel = 'neuroflow/wear';
 const _kMethodComplete = 'onWatchComplete';

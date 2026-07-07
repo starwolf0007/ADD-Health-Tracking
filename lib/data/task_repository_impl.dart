@@ -73,14 +73,14 @@ class DriftTaskRepository implements TaskRepository {
     await _db.upsertTask(_taskToCompanion(task));
     if (_syncQueue != null) {
       if (isNew) {
-        await _syncQueue!.enqueue(SyncOperation.forCreate(
+        await _syncQueue.enqueue(SyncOperation.forCreate(
           taskId: task.id,
           taskTitle: task.title,
           taskNotes: task.notes,
         ));
       } else {
         final googleTaskId = await _getGoogleTaskId(task.id);
-        await _syncQueue!.enqueue(SyncOperation.forUpdate(
+        await _syncQueue.enqueue(SyncOperation.forUpdate(
           taskId: task.id,
           taskTitle: task.title,
           taskNotes: task.notes,
@@ -95,7 +95,7 @@ class DriftTaskRepository implements TaskRepository {
     final googleTaskId = await _getGoogleTaskId(id);
     await _db.markComplete(id);
     if (_syncQueue != null) {
-      await _syncQueue!.enqueue(SyncOperation.forComplete(
+      await _syncQueue.enqueue(SyncOperation.forComplete(
         taskId: id,
         googleTaskId: googleTaskId,
       ));
@@ -107,7 +107,7 @@ class DriftTaskRepository implements TaskRepository {
     final googleTaskId = await _getGoogleTaskId(id);
     await _db.deleteTask(id);
     if (_syncQueue != null && googleTaskId != null) {
-      await _syncQueue!.enqueue(SyncOperation.forDelete(
+      await _syncQueue.enqueue(SyncOperation.forDelete(
         taskId: id,
         googleTaskId: googleTaskId,
       ));
@@ -119,14 +119,14 @@ class DriftTaskRepository implements TaskRepository {
   // ------------------------------------------------------------------
 
   Future<bool> _isNewTask(String id) async {
-    final row = await (select(_db.tasks)
+    final row = await (_db.select(_db.tasks)
           ..where((t) => t.id.equals(id)))
         .getSingleOrNull();
     return row == null;
   }
 
   Future<String?> _getGoogleTaskId(String id) async {
-    final row = await (select(_db.tasks)
+    final row = await (_db.select(_db.tasks)
           ..where((t) => t.id.equals(id)))
         .getSingleOrNull();
     return row?.googleTaskId;

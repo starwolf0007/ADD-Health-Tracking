@@ -13,7 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../domain/habit.dart';
-import '../providers.dart';
+import '../app/providers.dart';
 import 'theme.dart';
 
 class HabitsWidget extends ConsumerWidget {

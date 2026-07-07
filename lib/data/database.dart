@@ -1,7 +1,13 @@
 // lib/data/database.dart
 //
-// Drift schema. @DataClassName('TaskRow') avoids collision with domain Task.
-// Source of truth per §12.3 — Google Tasks is the mirror/sync queue only.
+// The system of record (§12.3): local Drift/SQLite, source of truth.
+// Google services are mirrors, never masters.
+//
+// v2 unified schema — eight tables:
+//   Tasks, Habits, HabitCheckIns, Routines, RoutineSteps  (Phase-1 core)
+//   Notes                                                  (v2 capture hub)
+//   MoodLogs                                               (v2 §6 trigger — §2.8 ON-DEVICE ONLY)
+//   SyncQueue                                              (Google Tasks mirror)
 
 import 'dart:io';
 
@@ -13,9 +19,10 @@ import 'package:path_provider/path_provider.dart';
 part 'database.g.dart';
 
 // ---------------------------------------------------------------------------
-// Table definitions
+// Tables
 // ---------------------------------------------------------------------------
 
+@DataClassName('TaskRow')
 class Tasks extends Table {
   TextColumn get id => text()();
   TextColumn get title => text()();
@@ -25,28 +32,20 @@ class Tasks extends Table {
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get dueDate => dateTime().nullable()();
   BoolColumn get isQuickWin => boolean().withDefault(const Constant(false))();
-
-  // Google Tasks mirror fields
+  IntColumn get estimatedMinutes => integer().nullable()();
+  DateTimeColumn get completedAt => dateTime().nullable()();
   TextColumn get googleTaskId => text().nullable()();
-  DateTimeColumn get lastSyncedAt => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
 }
 
-// ---------------------------------------------------------------------------
-// Routines tables
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
-// Habits tables
-// ---------------------------------------------------------------------------
-
+@DataClassName('HabitRow')
 class Habits extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
   TextColumn get notes => text().nullable()();
-  TextColumn get frequency => text()(); // 'daily' | 'weekdays' | 'weekends'
+  TextColumn get frequency => text()();
   BoolColumn get isActive => boolean().withDefault(const Constant(true))();
   DateTimeColumn get createdAt => dateTime()();
 
@@ -54,71 +53,35 @@ class Habits extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+@DataClassName('HabitCheckInRow')
 class HabitCheckIns extends Table {
   TextColumn get id => text()();
   TextColumn get habitId => text()();
-  DateTimeColumn get date => dateTime()(); // normalized to midnight
-  BoolColumn get completed => boolean().withDefault(const Constant(true))();
+  DateTimeColumn get date => dateTime()();
+  BoolColumn get completed => boolean()();
   DateTimeColumn get createdAt => dateTime()();
 
   @override
   Set<Column> get primaryKey => {id};
 }
 
-// ---------------------------------------------------------------------------
-// Sync queue table
-// ---------------------------------------------------------------------------
-
-/// Durable queue of pending Google Tasks mirror operations.
-/// Operations survive app restarts and are flushed by WorkManager every 4 h.
-/// Auth-gated: the sync service checks for an OAuth token before flushing —
-/// if the user hasn't connected Google Tasks, all ops stay pending silently.
-@DataClassName('SyncQueueData')
-class SyncQueue extends Table {
-  TextColumn get id => text()();
-
-  /// 'create' | 'update' | 'complete' | 'delete'
-  TextColumn get operation => text()();
-
-  /// Local task ID this operation refers to.
-  TextColumn get taskId => text()();
-
-  /// Snapshot of title at time of enqueue — used for create/update calls.
-  TextColumn get taskTitle => text().nullable()();
-
-  /// Snapshot of notes at time of enqueue.
-  TextColumn get taskNotes => text().nullable()();
-
-  /// Google Tasks remote ID — null until first successful create sync.
-  TextColumn get googleTaskId => text().nullable()();
-
-  /// 'pending' | 'done' | 'failed' (failed = >5 retries, won't retry again)
-  TextColumn get status => text().withDefault(const Constant('pending'))();
-
-  IntColumn get retryCount => integer().withDefault(const Constant(0))();
-  DateTimeColumn get createdAt => dateTime()();
-
-  @override
-  Set<Column> get primaryKey => {id};
-}
-
-// ---------------------------------------------------------------------------
-// Routines tables
-// ---------------------------------------------------------------------------
-
+@DataClassName('RoutineRow')
 class Routines extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
-  TextColumn get anchor => text()(); // 'morning' | 'midday' | 'evening' | 'custom'
+  TextColumn get anchor => text()(); // RoutineAnchor.name
   IntColumn get scheduleHour => integer().nullable()();
   IntColumn get scheduleMinute => integer().nullable()();
   BoolColumn get isActive => boolean().withDefault(const Constant(true))();
+  // Which weekdays this routine fires (Mon=1 … Sun=7). "12345" = weekdays.
+  TextColumn get activeDays => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
 
   @override
   Set<Column> get primaryKey => {id};
 }
 
+@DataClassName('RoutineStepRow')
 class RoutineSteps extends Table {
   TextColumn get id => text()();
   TextColumn get routineId => text()();
@@ -132,42 +95,97 @@ class RoutineSteps extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+@DataClassName('NoteRow')
+class Notes extends Table {
+  TextColumn get id => text()();
+  TextColumn get body => text()();
+  BoolColumn get pinned => boolean().withDefault(const Constant(false))();
+  TextColumn get linkedTaskId => text().nullable()();
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('MoodLogRow')
+class MoodLogs extends Table {
+  TextColumn get id => text()();
+  IntColumn get level => integer()(); // MoodLevel.score, 1..5
+  TextColumn get note => text().nullable()();
+  DateTimeColumn get loggedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('SyncQueueData')
+class SyncQueue extends Table {
+  TextColumn get id => text()();
+  TextColumn get operation => text()(); // 'create' | 'update' | 'complete' | 'delete'
+  TextColumn get taskId => text()();
+  TextColumn get taskTitle => text().nullable()();
+  TextColumn get taskNotes => text().nullable()();
+  TextColumn get googleTaskId => text().nullable()();
+  TextColumn get status => text().withDefault(const Constant('pending'))();
+  IntColumn get retryCount => integer().withDefault(const Constant(0))();
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 // ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
 
-@DriftDatabase(tables: [Tasks, SyncQueue, Habits, HabitCheckIns, Routines, RoutineSteps])
+@DriftDatabase(tables: [
+  Tasks,
+  Habits,
+  HabitCheckIns,
+  Routines,
+  RoutineSteps,
+  Notes,
+  MoodLogs,
+  SyncQueue,
+])
 class AppDatabase extends _$AppDatabase {
-  AppDatabase() : super(_openConnection());
+  AppDatabase() : super(_open());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
-    onCreate: (m) async {
-      await m.createAll();
-    },
-    onUpgrade: (m, from, to) async {
-      if (from < 2) {
-        await m.createTable(routines);
-        await m.createTable(routineSteps);
-      }
-      if (from < 3) {
-        await m.createTable(habits);
-        await m.createTable(habitCheckIns);
-      }
-      if (from < 4) {
-        await m.createTable(syncQueue);
-      }
-    },
-  );
+        onCreate: (m) => m.createAll(),
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.addColumn(routines, routines.activeDays);
+          }
+        },
+      );
 
-  // ------------------------------------------------------------------
-  // Queries
-  // ------------------------------------------------------------------
+  DateTime get _startOfToday {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
 
-  /// All pending tasks ordered by energy (low first — Quick Wins logic).
+  // ---- Tasks --------------------------------------------------------------
+
+  Future<void> upsertTask(TasksCompanion entry) =>
+      into(tasks).insertOnConflictUpdate(entry);
+
+  Future<void> markComplete(String id) =>
+      (update(tasks)..where((t) => t.id.equals(id))).write(
+        TasksCompanion(
+          status: const Value('completed'),
+          completedAt: Value(DateTime.now()),
+        ),
+      );
+
+  Future<void> deleteTask(String id) =>
+      (delete(tasks)..where((t) => t.id.equals(id))).go();
+
   Stream<List<TaskRow>> watchPendingByEnergyAsc() {
     return (select(tasks)
           ..where((t) => t.status.equals('pending'))
@@ -175,120 +193,106 @@ class AppDatabase extends _$AppDatabase {
         .watch();
   }
 
-  /// Count of tasks completed today — drives the heartbeat line (§13).
   Stream<int> watchCompletedTodayCount() {
-    final today = DateTime.now();
-    final startOfDay = DateTime(today.year, today.month, today.day);
-    final endOfDay = startOfDay.add(const Duration(days: 1));
-    return (selectOnly(tasks)
-          ..addColumns([tasks.id.count()])
-          ..where(tasks.status.equals('completed') &
-              tasks.createdAt.isBetweenValues(startOfDay, endOfDay)))
-        .map((row) => row.read(tasks.id.count()) ?? 0)
-        .watchSingle();
+    final query = select(tasks)
+      ..where((t) =>
+          t.status.equals('completed') &
+          t.completedAt.isBiggerOrEqualValue(_startOfToday));
+    return query.watch().map((rows) => rows.length);
   }
 
-  Future<void> upsertTask(TasksCompanion task) =>
-      into(tasks).insertOnConflictUpdate(task);
+  // ---- Habits ---------------------------------------------------------------
 
-  Future<void> markComplete(String id) => (update(tasks)
-        ..where((t) => t.id.equals(id)))
-      .write(TasksCompanion(
-        status: const Value('completed'),
-      ));
-
-  Future<void> deleteTask(String id) =>
-      (delete(tasks)..where((t) => t.id.equals(id))).go();
-
-  // ------------------------------------------------------------------
-  // Habit queries
-  // ------------------------------------------------------------------
-
-  Stream<List<HabitRow>> watchActiveHabits() {
-    return (select(habits)
-          ..where((h) => h.isActive.equals(true))
-          ..orderBy([(h) => OrderingTerm.asc(h.createdAt)]))
-        .watch();
-  }
-
-  Future<List<HabitCheckInRow>> fetchRecentCheckIns(String habitId) {
-    final cutoff = DateTime.now().subtract(const Duration(days: 30));
-    return (select(habitCheckIns)
-          ..where((c) =>
-              c.habitId.equals(habitId) & c.date.isBiggerThanValue(cutoff))
-          ..orderBy([(c) => OrderingTerm.desc(c.date)]))
-        .get();
-  }
-
-  Future<void> upsertHabit(HabitsCompanion habit) =>
-      into(habits).insertOnConflictUpdate(habit);
-
-  Future<void> upsertCheckIn(HabitCheckInsCompanion checkIn) =>
-      into(habitCheckIns).insertOnConflictUpdate(checkIn);
-
-  Future<void> deleteCheckInForToday(String habitId) async {
-    final today = DateTime.now();
-    final startOfDay = DateTime(today.year, today.month, today.day);
-    final endOfDay = startOfDay.add(const Duration(days: 1));
-    await (delete(habitCheckIns)
-          ..where((c) =>
-              c.habitId.equals(habitId) &
-              c.date.isBetweenValues(startOfDay, endOfDay)))
-        .go();
-  }
+  Future<void> upsertHabit(HabitsCompanion entry) =>
+      into(habits).insertOnConflictUpdate(entry);
 
   Future<void> archiveHabit(String id) =>
       (update(habits)..where((h) => h.id.equals(id)))
           .write(const HabitsCompanion(isActive: Value(false)));
 
-  Future<void> deleteHabit(String id) async {
-    await (delete(habitCheckIns)..where((c) => c.habitId.equals(id))).go();
-    await (delete(habits)..where((h) => h.id.equals(id))).go();
-  }
+  Future<void> deleteHabit(String id) => transaction(() async {
+        await (delete(habitCheckIns)..where((c) => c.habitId.equals(id))).go();
+        await (delete(habits)..where((h) => h.id.equals(id))).go();
+      });
 
-  // ------------------------------------------------------------------
-  // Routine queries
-  // ------------------------------------------------------------------
+  Stream<List<HabitRow>> watchActiveHabits() =>
+      (select(habits)..where((h) => h.isActive.equals(true))).watch();
 
-  Stream<List<RoutineRow>> watchActiveRoutines() {
-    return (select(routines)
-          ..where((r) => r.isActive.equals(true))
-          ..orderBy([(r) => OrderingTerm.asc(r.anchor),
-                     (r) => OrderingTerm.asc(r.name)]))
-        .watch();
-  }
-
-  Future<List<RoutineStepRow>> fetchStepsForRoutine(String routineId) {
-    return (select(routineSteps)
-          ..where((s) => s.routineId.equals(routineId))
-          ..orderBy([(s) => OrderingTerm.asc(s.position)]))
+  Future<List<HabitCheckInRow>> fetchRecentCheckIns(String habitId) {
+    final since = _startOfToday.subtract(const Duration(days: 30));
+    return (select(habitCheckIns)
+          ..where((c) =>
+              c.habitId.equals(habitId) & c.date.isBiggerOrEqualValue(since))
+          ..orderBy([(c) => OrderingTerm.desc(c.date)]))
         .get();
   }
 
-  Future<void> upsertRoutine(RoutinesCompanion routine) =>
-      into(routines).insertOnConflictUpdate(routine);
+  Future<void> upsertCheckIn(HabitCheckInsCompanion entry) =>
+      into(habitCheckIns).insertOnConflictUpdate(entry);
 
-  Future<void> upsertStep(RoutineStepsCompanion step) =>
-      into(routineSteps).insertOnConflictUpdate(step);
+  Future<void> deleteCheckInForToday(String habitId) =>
+      (delete(habitCheckIns)
+            ..where((c) =>
+                c.habitId.equals(habitId) & c.date.equals(_startOfToday)))
+          .go();
 
-  Future<void> markStepComplete(String stepId, bool complete) =>
+  // ---- Routines -------------------------------------------------------------
+
+  Future<void> upsertRoutine(RoutinesCompanion entry) =>
+      into(routines).insertOnConflictUpdate(entry);
+
+  Future<void> upsertStep(RoutineStepsCompanion entry) =>
+      into(routineSteps).insertOnConflictUpdate(entry);
+
+  Future<void> markStepComplete(String stepId, bool isComplete) =>
       (update(routineSteps)..where((s) => s.id.equals(stepId)))
-          .write(RoutineStepsCompanion(isComplete: Value(complete)));
+          .write(RoutineStepsCompanion(isComplete: Value(isComplete)));
 
   Future<void> resetRoutineSteps(String routineId) =>
       (update(routineSteps)..where((s) => s.routineId.equals(routineId)))
           .write(const RoutineStepsCompanion(isComplete: Value(false)));
 
-  Future<void> deleteRoutine(String routineId) async {
-    await (delete(routineSteps)
-          ..where((s) => s.routineId.equals(routineId)))
-        .go();
-    await (delete(routines)..where((r) => r.id.equals(routineId))).go();
-  }
+  Future<void> deleteRoutine(String id) => transaction(() async {
+        await (delete(routineSteps)..where((s) => s.routineId.equals(id))).go();
+        await (delete(routines)..where((r) => r.id.equals(id))).go();
+      });
 
-  // ------------------------------------------------------------------
-  // Sync queue queries
-  // ------------------------------------------------------------------
+  Stream<List<RoutineRow>> watchActiveRoutines() =>
+      (select(routines)..where((r) => r.isActive.equals(true))).watch();
+
+  Future<List<RoutineStepRow>> fetchStepsForRoutine(String routineId) =>
+      (select(routineSteps)
+            ..where((s) => s.routineId.equals(routineId))
+            ..orderBy([(s) => OrderingTerm.asc(s.position)]))
+          .get();
+
+  // ---- Notes -----------------------------------------------------------
+
+  Future<void> upsertNote(NotesCompanion entry) =>
+      into(notes).insertOnConflictUpdate(entry);
+
+  Future<void> deleteNote(String id) =>
+      (delete(notes)..where((n) => n.id.equals(id))).go();
+
+  Stream<List<NoteRow>> watchNotes() => (select(notes)
+        ..orderBy([
+          (n) => OrderingTerm.desc(n.pinned),
+          (n) => OrderingTerm.desc(n.updatedAt),
+        ]))
+      .watch();
+
+  // ---- MoodLogs ------------------------------------
+
+  Future<void> insertMoodLog(MoodLogsCompanion entry) =>
+      into(moodLogs).insert(entry);
+
+  Stream<MoodLogRow?> watchTodayLatestMood() => (select(moodLogs)
+        ..where((m) => m.loggedAt.isBiggerOrEqualValue(_startOfToday))
+        ..orderBy([(m) => OrderingTerm.desc(m.loggedAt)])
+        ..limit(1))
+      .watchSingleOrNull();
+
+  // ---- Sync Queue -----------------------------------------------------------
 
   Future<void> enqueueSyncOp(SyncQueueCompanion op) =>
       into(syncQueue).insert(op);
@@ -324,10 +328,10 @@ class AppDatabase extends _$AppDatabase {
       (delete(syncQueue)..where((s) => s.status.equals('done'))).go();
 }
 
-LazyDatabase _openConnection() {
+LazyDatabase _open() {
   return LazyDatabase(() async {
-    final dbDir = await getApplicationDocumentsDirectory();
-    final file = File(p.join(dbDir.path, 'neuroflow.sqlite'));
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File(p.join(dir.path, 'neuroflow.sqlite'));
     return NativeDatabase.createInBackground(file);
   });
 }

@@ -21,7 +21,7 @@ import 'package:flutter/services.dart';
 
 import '../domain/task.dart';
 import 'lexi_config.dart';
-import 'planner.dart';
+import '../executive/planner.dart';
 
 class LexiPlanAdvisor implements PlanAdvisor {
   static const _channel = MethodChannel('neuroflow/lexi');

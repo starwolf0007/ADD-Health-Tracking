@@ -1,34 +1,18 @@
 // lib/presentation/widgets/capture_sheet.dart
-//
-// PRESENTATION LAYER. The realization of §13's "capture reachable from
-// anywhere in one gesture" rule: one input, one "Add to inbox" button,
-// nothing else. Opened from a persistent affordance on every screen (Today's
-// FAB today; the same sheet should be reachable identically from any future
-// screen — don't fork this per-screen).
-//
-// PHASE NOTE: the local NLP parser (date/time/list extraction from the typed
-// sentence, §5 Rail 1) is phase 2. This sheet creates a plain Task with the
-// raw title and no due date for now — capture still works end-to-end, it
-// just doesn't self-schedule yet. Swapping in the parser later only touches
-// _submit() below; the sheet/UI doesn't change.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../app/providers.dart';
 import '../../domain/task.dart';
 import '../theme.dart';
 
-Future<void> showCaptureSheet(BuildContext context, WidgetRef ref) {
-  return showModalBottomSheet(
+Future<void> showCaptureSheet(BuildContext context) {
+  return showModalBottomSheet<void>(
     context: context,
-    backgroundColor: AppColors.surfaceRaised,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
     isScrollControlled: true,
-    builder: (ctx) => const _CaptureSheetBody(),
+    useSafeArea: true,
+    builder: (_) => const _CaptureSheetBody(),
   );
 }
 
@@ -41,58 +25,92 @@ class _CaptureSheetBody extends ConsumerStatefulWidget {
 
 class _CaptureSheetBodyState extends ConsumerState<_CaptureSheetBody> {
   final _controller = TextEditingController();
+  EnergyLevel _energy = EnergyLevel.medium;
+  bool _quickWin = false;
   bool _submitting = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   Future<void> _submit() async {
     final title = _controller.text.trim();
     if (title.isEmpty || _submitting) return;
     setState(() => _submitting = true);
 
-    final now = DateTime.now();
-    final task = Task(
-      id: const Uuid().v4(),
+    final task = Task.create(
       title: title,
-      source: TaskSource.quickAdd,
-      // TODO(phase 2): run the local chrono-style parser on `title` here and
-      // populate `due` — the one line this whole sheet exists to make easy.
-      createdAt: now,
-      lastTouchedAt: now,
-      updatedAt: now,
+      energy: _energy,
+      isQuickWin: _quickWin || _energy == EnergyLevel.low,
     );
-
     await ref.read(taskRepositoryProvider).save(task);
-    if (mounted) Navigator.of(context).pop();
+
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Captured'), duration: Duration(seconds: 1)),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: EdgeInsets.only(
-        left: 20,
-        right: 20,
-        top: 20,
-        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      padding: EdgeInsets.fromLTRB(
+        AppSpace.xl,
+        AppSpace.md,
+        AppSpace.xl,
+        MediaQuery.of(context).viewInsets.bottom + AppSpace.xl,
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // Grab handle
+          Center(
+            child: Container(
+              width: 36,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: AppSpace.lg),
+              decoration: BoxDecoration(
+                color: AppColors.divider,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
           TextField(
             controller: _controller,
             autofocus: true,
             textInputAction: TextInputAction.done,
+            textCapitalization: TextCapitalization.sentences,
             onSubmitted: (_) => _submit(),
-            style: const TextStyle(color: AppColors.textPrimary, fontSize: 17),
+            style: AppTextStyles.bodyMedium.copyWith(fontSize: 17),
             decoration: const InputDecoration(
               hintText: "What's on your mind?",
-              hintStyle: TextStyle(color: AppColors.textFaint),
               border: InputBorder.none,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpace.lg),
+          const Text('ENERGY TO START', style: AppTextStyles.label),
+          const SizedBox(height: AppSpace.sm),
+          Row(
+            children: EnergyLevel.values.map((e) {
+              final selected = e == _energy;
+              return Padding(
+                padding: const EdgeInsets.only(right: AppSpace.sm),
+                child: ChoiceChip(
+                  label: Text(e.name),
+                  selected: selected,
+                  onSelected: (_) => setState(() => _energy = e),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: AppSpace.lg),
           ElevatedButton(
             onPressed: _submitting ? null : _submit,
-            child: Text(_submitting ? "Adding…" : "Add to inbox"),
+            child: Text(_submitting ? 'Adding…' : 'Add to today'),
           ),
         ],
       ),

@@ -15,7 +15,7 @@
 //  • ExistingWorkPolicy.keep is correct for 24h periodic tasks: preserves the
 //    existing schedule instead of cancelling and rescheduling on every launch.
 
-import 'package:flutter/services.dart';
+import 'dart:ui';
 import 'package:workmanager/workmanager.dart';
 
 import '../../data/database.dart';
@@ -103,10 +103,10 @@ class BackgroundScheduler {
       _taskMorningRefresh,
       frequency: const Duration(hours: 24),
       constraints: Constraints(
-        networkType: NetworkType.not_required,
+        networkType: NetworkType.notRequired,
         requiresBatteryNotLow: false,
       ),
-      existingWorkPolicy: ExistingWorkPolicy.keep,
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
     );
 
     // Sync queue flush — runs every 4 hours when network available.
@@ -117,7 +117,7 @@ class BackgroundScheduler {
       constraints: Constraints(
         networkType: NetworkType.connected,
       ),
-      existingWorkPolicy: ExistingWorkPolicy.keep,
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
     );
   }
 
