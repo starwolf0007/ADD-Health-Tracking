@@ -72,6 +72,10 @@ class Executive {
 
   /// Produce a deterministic Plan from the current pending task list.
   /// This is intentionally synchronous and pure — no I/O, no AI.
+  ///
+  /// Phase 2 STAGE 2 (7-state model): pending = {notStarted, preparing, inProgress,
+  /// paused, blocked, checkpoint}, complete = {complete}. Paused tasks are considered
+  /// for quick wins but sorted lower. See §2 in DECISIONS.md.
   Plan evaluate(List<Task> pending) {
     if (pending.isEmpty) {
       return const Plan(
@@ -81,20 +85,43 @@ class Executive {
       );
     }
 
-    // Auto Quick Wins: if all pending tasks are low-energy AND there are ≤3,
+    // Prioritize non-paused tasks; deprioritize paused (but still show as quick wins).
+    final nonPausedTasks = pending.where((t) => t.status != TaskStatus.paused).toList();
+    final pausedTasks = pending.where((t) => t.status == TaskStatus.paused).toList();
+
+    // Auto Quick Wins: if all non-paused pending tasks are low-energy AND there are ≤3,
     // swap to Quick Wins mode automatically (spec v1.3 §QW auto-mode).
-    final allLowEnergy =
-        pending.every((t) => t.energy == _quickWinsMaxEnergy);
-    if (allLowEnergy && pending.length <= _quickWinsMaxCount) {
+    // Include paused tasks only if we don't have enough non-paused quick wins.
+    final nonPausedLowEnergy =
+        nonPausedTasks.every((t) => t.energy == _quickWinsMaxEnergy);
+
+    if (nonPausedLowEnergy && nonPausedTasks.length <= _quickWinsMaxCount) {
+      // Non-paused quick wins available — show them first
       return Plan(
         mode: DayMode.quickWins,
-        quickWins: pending,
+        quickWins: nonPausedTasks,
         reason: 'Lighter load today — showing your easiest wins first.',
       );
     }
 
+    // If no non-paused quick wins but we have momentum (some tasks in progress),
+    // and paused tasks exist, surface paused tasks for re-entry (Phase 3 recovery card).
+    final inProgressTasks = nonPausedTasks.where((t) => t.status == TaskStatus.inProgress).toList();
+    if (inProgressTasks.isNotEmpty && pausedTasks.isNotEmpty && pausedTasks.length <= _quickWinsMaxCount) {
+      final allPausedLowEnergy = pausedTasks.every((t) => t.energy == _quickWinsMaxEnergy);
+      if (allPausedLowEnergy) {
+        return Plan(
+          mode: DayMode.quickWins,
+          quickWins: pausedTasks,
+          reason: 'You have momentum — try resuming one of these paused tasks.',
+        );
+      }
+    }
+
     // Normal mode: surface the lowest-energy pending task first.
-    final sorted = List<Task>.from(pending)
+    // Prefer non-paused tasks, then fall back to paused.
+    final candidates = nonPausedTasks.isNotEmpty ? nonPausedTasks : pending;
+    final sorted = List<Task>.from(candidates)
       ..sort((a, b) => a.energy.index.compareTo(b.energy.index));
 
     return Plan(

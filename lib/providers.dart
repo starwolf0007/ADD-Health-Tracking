@@ -24,6 +24,7 @@ import 'data/task_repository_impl.dart';
 import 'domain/habit.dart';
 import 'domain/routine.dart';
 import 'domain/task.dart';
+import 'domain/timeline_event.dart';
 import 'executive/lexi_plan_advisor.dart';
 import 'executive/planner.dart';
 import 'platform/settings_service.dart';
@@ -275,3 +276,133 @@ final dueRoutinesProvider = FutureProvider<List<Routine>>((ref) {
 final activeHabitsProvider = StreamProvider<List<Habit>>((ref) {
   return ref.watch(habitRepositoryProvider).watchActive();
 });
+
+// ---------------------------------------------------------------------------
+// Timeline provider (read-only projection)
+// ---------------------------------------------------------------------------
+
+/// Unified chronological timeline of all app activity.
+///
+/// Phase 2 STAGE 2: Merges tasks, routines, and habits into a single stream.
+/// NO DATABASE TABLE — reads from existing tables and computes in memory (§4).
+/// Timestamps derived from: task.createdAt (task events), routine.createdAt
+/// (routine events), habit checkIn.createdAt (habit events).
+///
+/// Used by: Timeline view (Phase 3), re-entry card recovery logic (Phase 3 STAGE 3).
+///
+/// Sorted chronologically (most recent first), emitted as a read-only stream.
+final timelineProvider = StreamProvider<List<TimelineEvent>>((ref) async* {
+  // Watch all three sources in parallel and merge.
+  final taskStream = ref.watch(taskRepositoryProvider).watchPending();
+  final routineStream = ref.watch(activeRoutinesProvider);
+  final habitStream = ref.watch(activeHabitsProvider);
+
+  // Listen to all streams and emit merged timeline whenever any source changes.
+  await for (final tasks in taskStream) {
+    final routines = await routineStream.first;
+    final habits = await habitStream.first;
+
+    final events = <TimelineEvent>[];
+
+    // Task events: emit task creation and state transitions.
+    // For simplicity in Phase 2, emit one event per task state.
+    // Phase 3: track state changes with separate timestamps per transition.
+    for (final task in tasks) {
+      // Create event for task creation.
+      events.add(
+        TaskEvent(
+          taskId: task.id,
+          taskTitle: task.title,
+          taskNotes: task.notes,
+          timestamp: task.createdAt,
+          type: TimelineEventType.taskCreated,
+          statusLabel: _taskStatusLabel(task.status),
+          energyLabel: _energyLabel(task.energy),
+        ),
+      );
+
+      // If task is complete, add completion event.
+      if (task.isCompleted && task.completedAt != null) {
+        events.add(
+          TaskEvent(
+            taskId: task.id,
+            taskTitle: task.title,
+            taskNotes: task.notes,
+            timestamp: task.completedAt!,
+            type: TimelineEventType.taskCompleted,
+            statusLabel: 'Complete',
+            energyLabel: _energyLabel(task.energy),
+          ),
+        );
+      }
+    }
+
+    // Routine events: emit routine creation and completion.
+    for (final routine in routines) {
+      events.add(
+        RoutineEvent(
+          routineId: routine.id,
+          routineName: routine.name,
+          completedSteps: routine.completedCount,
+          totalSteps: routine.steps.length,
+          timestamp: routine.createdAt,
+          type: TimelineEventType.routineStarted,
+        ),
+      );
+
+      // If routine is complete, emit completion event.
+      // Phase 2: use routine.createdAt + duration heuristic.
+      // Phase 3: capture actual completedAt timestamp per routine.
+      if (routine.isComplete) {
+        events.add(
+          RoutineEvent(
+            routineId: routine.id,
+            routineName: routine.name,
+            completedSteps: routine.completedCount,
+            totalSteps: routine.steps.length,
+            timestamp: routine.createdAt.add(const Duration(hours: 1)), // heuristic
+            type: TimelineEventType.routineCompleted,
+          ),
+        );
+      }
+    }
+
+    // Habit events: emit check-in events from recent check-ins.
+    for (final habit in habits) {
+      for (final checkIn in habit.recentCheckIns) {
+        events.add(
+          HabitEvent(
+            habitId: habit.id,
+            habitName: habit.name,
+            completed: checkIn.completed,
+            currentStreak: habit.currentStreak,
+            timestamp: checkIn.createdAt,
+          ),
+        );
+      }
+    }
+
+    // Sort by timestamp (most recent first).
+    events.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+
+    yield events;
+  }
+});
+
+/// Human-readable label for task status (used in timeline).
+String _taskStatusLabel(TaskStatus status) => switch (status) {
+  TaskStatus.notStarted => 'Not Started',
+  TaskStatus.preparing => 'Preparing',
+  TaskStatus.inProgress => 'In Progress',
+  TaskStatus.paused => 'Paused',
+  TaskStatus.blocked => 'Blocked',
+  TaskStatus.checkpoint => 'Checkpoint',
+  TaskStatus.complete => 'Complete',
+};
+
+/// Human-readable label for energy level (used in timeline).
+String _energyLabel(EnergyLevel energy) => switch (energy) {
+  EnergyLevel.low => 'Low',
+  EnergyLevel.medium => 'Medium',
+  EnergyLevel.high => 'High',
+};

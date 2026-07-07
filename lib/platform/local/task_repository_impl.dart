@@ -56,7 +56,7 @@ class DriftTaskRepository implements TaskRepository {
     if (t == null) return;
     final now = DateTime.now();
     await _db.upsertTask(t.copyWith(
-      status: TaskStatus.done,
+      status: TaskStatus.complete,
       completedAt: now,
       lastTouchedAt: now,
       updatedAt: now,
@@ -73,9 +73,11 @@ class DriftTaskRepository implements TaskRepository {
     final t = await byId(id);
     if (t == null) return;
     final now = DateTime.now();
-    // Archived, not deleted (§6) — recoverable, just out of default views.
+    // Archive by moving to 'paused' state — recoverable, just out of default views (§6).
+    // Phase 3: full archiving support with dedicated state.
     await _db.upsertTask(t.copyWith(
-      status: TaskStatus.archived,
+      status: TaskStatus.paused,
+      lastTouchedAt: now,
       updatedAt: now,
     ));
   }

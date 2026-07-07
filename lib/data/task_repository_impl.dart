@@ -34,6 +34,7 @@ class DriftTaskRepository implements TaskRepository {
       status: _statusFromString(row.status),
       createdAt: row.createdAt,
       dueDate: row.dueDate,
+      completedAt: row.completedAt,
       isQuickWin: row.isQuickWin,
     );
   }
@@ -47,6 +48,7 @@ class DriftTaskRepository implements TaskRepository {
       status: Value(_statusToString(task.status)),
       createdAt: Value(task.createdAt),
       dueDate: Value(task.dueDate),
+      completedAt: Value(task.completedAt),
       isQuickWin: Value(task.isQuickWin),
     );
   }
@@ -158,25 +160,54 @@ class DriftTaskRepository implements TaskRepository {
     }
   }
 
+  /// Convert stored string to 7-state TaskStatus model (Phase 2 STAGE 2).
+  /// Handles legacy values from Phase 1 for backward compatibility.
   TaskStatus _statusFromString(String s) {
     switch (s) {
+      // Legacy values (Phase 1) — map to new model
+      case 'pending':
+        return TaskStatus.notStarted; // default for legacy tasks
       case 'completed':
-        return TaskStatus.completed;
+        return TaskStatus.complete;
       case 'skipped':
-        return TaskStatus.skipped;
+        return TaskStatus.paused; // archive via paused state
+      // New values (Phase 2 STAGE 2)
+      case 'notStarted':
+        return TaskStatus.notStarted;
+      case 'preparing':
+        return TaskStatus.preparing;
+      case 'inProgress':
+        return TaskStatus.inProgress;
+      case 'paused':
+        return TaskStatus.paused;
+      case 'blocked':
+        return TaskStatus.blocked;
+      case 'checkpoint':
+        return TaskStatus.checkpoint;
+      case 'complete':
+        return TaskStatus.complete;
       default:
-        return TaskStatus.pending;
+        return TaskStatus.notStarted; // safe default
     }
   }
 
+  /// Convert 7-state TaskStatus to string for persistence (Phase 2 STAGE 2).
   String _statusToString(TaskStatus s) {
     switch (s) {
-      case TaskStatus.completed:
-        return 'completed';
-      case TaskStatus.skipped:
-        return 'skipped';
-      case TaskStatus.pending:
-        return 'pending';
+      case TaskStatus.notStarted:
+        return 'notStarted';
+      case TaskStatus.preparing:
+        return 'preparing';
+      case TaskStatus.inProgress:
+        return 'inProgress';
+      case TaskStatus.paused:
+        return 'paused';
+      case TaskStatus.blocked:
+        return 'blocked';
+      case TaskStatus.checkpoint:
+        return 'checkpoint';
+      case TaskStatus.complete:
+        return 'complete';
     }
   }
 }

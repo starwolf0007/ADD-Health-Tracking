@@ -68,9 +68,12 @@ class AppDatabase extends _$AppDatabase {
   Future<List<Task>> openTasks() async {
     final rows = await (select(tasks)
           ..where((t) => t.status.isIn([
-                TaskStatus.inbox.index,
-                TaskStatus.today.index,
-                TaskStatus.scheduled.index,
+                TaskStatus.notStarted.index,
+                TaskStatus.preparing.index,
+                TaskStatus.inProgress.index,
+                TaskStatus.paused.index,
+                TaskStatus.blocked.index,
+                TaskStatus.checkpoint.index,
               ])))
         .get();
     return rows.map(_toDomain).toList();
@@ -79,9 +82,12 @@ class AppDatabase extends _$AppDatabase {
   Stream<List<Task>> watchOpenTasks() {
     return (select(tasks)
           ..where((t) => t.status.isIn([
-                TaskStatus.inbox.index,
-                TaskStatus.today.index,
-                TaskStatus.scheduled.index,
+                TaskStatus.notStarted.index,
+                TaskStatus.preparing.index,
+                TaskStatus.inProgress.index,
+                TaskStatus.paused.index,
+                TaskStatus.blocked.index,
+                TaskStatus.checkpoint.index,
               ])))
         .watch()
         .map((rows) => rows.map(_toDomain).toList());
@@ -95,7 +101,11 @@ class AppDatabase extends _$AppDatabase {
     final rows = await (select(tasks)
           ..where((t) =>
               t.lastTouchedAt.isSmallerThanValue(cutoff) &
-              t.status.isIn([TaskStatus.inbox.index, TaskStatus.today.index])))
+              t.status.isIn([
+                TaskStatus.notStarted.index,
+                TaskStatus.preparing.index,
+                TaskStatus.inProgress.index,
+              ])))
         .get();
     return rows.map(_toDomain).toList();
   }
@@ -109,7 +119,7 @@ class AppDatabase extends _$AppDatabase {
     final countExp = tasks.id.count();
     final query = selectOnly(tasks)
       ..addColumns([countExp])
-      ..where(tasks.status.equals(TaskStatus.done.index) &
+      ..where(tasks.status.equals(TaskStatus.complete.index) &
           tasks.completedAt.isBiggerOrEqualValue(startOfDay) &
           tasks.completedAt.isSmallerThanValue(endOfDay));
     return query.watchSingle().map((row) => row.read(countExp) ?? 0);

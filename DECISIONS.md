@@ -118,3 +118,147 @@ Both toggles follow the same **privacy-critical, opt-in-only** pattern:
 - `lib/presentation/settings_screen.dart` — added "Privacy & Sync" section with "Health data sync" toggle
 - `lib/providers.dart` — added `globalPrivacyProvider` as StateProvider<bool>
 - `DECISIONS.md` — this entry (documenting design rationale)
+
+---
+
+# Phase 2 STAGE 2: Living-State Tasks & Timeline Integration
+
+## Design Decision: 7-State Task Lifecycle Model
+
+### Why 7 States Instead of 3?
+
+The original 3-state model (pending/completed/skipped) is binary — a task is either "done" or "not done". This doesn't capture the REAL workflow of someone with ADHD, where tasks are:
+
+- **Started but not done** (in progress, paused, blocked, checkpointing)
+- **Abandoned mid-execution** (paused for context switch)
+- **Stuck waiting** (blocked on external input)
+- **Partially complete** (checkpoint reached)
+
+The 7-state model enables:
+
+1. **Progress tracking without binary judgment** — "I did some work" is visible even if incomplete
+2. **Re-entry recovery** — paused tasks surface in Phase 3 re-entry card, making it easier to resume
+3. **Better prioritization** — blocked tasks sink; in-progress tasks surface; paused tasks available for momentum recovery
+4. **Temporal awareness** — the Executive can see task state lifetime and make smarter plan decisions
+
+### State Definitions
+
+| State | Meaning | Transition | UI Implication |
+|-------|---------|------------|-----------------|
+| **notStarted** | Task created but not touched | user clicks "start" | default state on creation |
+| **preparing** | User thinking/planning before execution | user clicks "begin" | pre-execution mental load |
+| **inProgress** | Task actively being worked on | user works; can pause/block/checkpoint | primary focus state |
+| **paused** | Context switch, interruption, need to context switch | user resumes or moves on | recover via re-entry card (Phase 3) |
+| **blocked** | Waiting for external input (reply, resource, decision) | external blocker resolved | sink in priority; may have metadata ("blocked by X") |
+| **checkpoint** | Sub-phase complete (intermediate milestone) | user continues or pauses | celebrate progress without finishing |
+| **complete** | Task fully finished | terminal state | gone from pending views, tracked in heartbeat |
+
+**State diagram:**
+```
+notStarted → preparing → inProgress → {paused, blocked, checkpoint} → complete
+                              ↓
+                           (can jump to paused/blocked from any mid-execution state)
+```
+
+### Paused State — Critical for Phase 3
+
+The **paused** state is specifically designed to enable the "re-entry card" feature in Phase 3 STAGE 3. When a user:
+
+1. Starts a task (inProgress)
+2. Realizes they need to context switch (hits pause button)
+3. Returns to the app later
+
+The app will surface "You were working on X — resume?" via a dedicated re-entry card, powered by searching for paused tasks in the timeline. This is a core ADHD UX pattern — removing friction to resume mid-task work.
+
+### Executive.evaluate() Updates
+
+The planner now:
+
+1. **Distinguishes pending states**: `pending = {notStarted, preparing, inProgress, paused, blocked, checkpoint}`, `complete = {complete}`
+2. **Deprioritizes paused tasks by default** — they appear after non-paused quick wins
+3. **Surfaces paused tasks if user has momentum** — if other tasks are inProgress, paused tasks become quick-win candidates (Phase 3 momentum heuristic)
+4. **Never shows paused as a terminal state** — it's always recoverable
+
+### Timeline as Read-Only Projection
+
+**Critical rule: NO NEW DATABASE TABLE** (§4, Timeline Rule).
+
+The timeline is a **computed stream** that merges existing data:
+
+- **Tasks**: Emit `taskCreated` event at `task.createdAt`, `taskCompleted` event at `task.completedAt` (if complete)
+- **Routines**: Emit `routineStarted` at `routine.createdAt`, `routineCompleted` when all steps done (heuristic time in Phase 2; real timestamp in Phase 3)
+- **Habits**: Emit `habitChecked` for each check-in, keyed to `checkIn.createdAt`
+
+All merging happens in `timelineProvider` — a single StreamProvider that:
+1. Watches taskRepositoryProvider.watchPending()
+2. Watches activeRoutinesProvider
+3. Watches activeHabitsProvider
+4. Combines all three into a List<TimelineEvent>
+5. Sorts by timestamp (most recent first)
+6. Emits as a read-only stream
+
+**Why no table?**
+- Timeline events are derived (not primary data)
+- Timestamps already exist in Task, Routine, Habit, and HabitCheckIn
+- Computing in memory is cheaper than joins and reduces schema complexity
+- If timeline data needs persistence later (archival, export), use the source events, never raw timeline rows
+
+### Timestamp Derivation (Phase 2 Heuristics)
+
+| Event Type | Timestamp Source |
+|------------|-----------------|
+| taskCreated | task.createdAt |
+| taskCompleted | task.completedAt |
+| routineStarted | routine.createdAt |
+| routineCompleted | routine.createdAt + 1 hour (Phase 2 heuristic; Phase 3 captures real completedAt) |
+| habitChecked | checkIn.createdAt |
+| moodLogged | mood.createdAt (future feature; mood domain exists but not wired yet) |
+
+### Files Modified
+
+- `lib/domain/task.dart` — migrated TaskStatus to 7-state enum; added completedAt field; updated domain helpers
+- `lib/domain/timeline_event.dart` — NEW; domain models for all timeline event types
+- `lib/platform/local/database.dart` — updated openTasks(), watchOpenTasks(), untouchedFor(), and watchCompletedTodayCount() to use new TaskStatus states
+- `lib/platform/local/task_repository_impl.dart` — updated complete() and archive() to use new states
+- `lib/executive/planner.dart` — updated Executive.evaluate() to work with 7-state model; added paused task recovery heuristic
+- `lib/providers.dart` — added timelineProvider (StreamProvider<List<TimelineEvent>>); added helper functions _taskStatusLabel() and _energyLabel()
+- `DECISIONS.md` — this entry
+
+### Phase 3 Notes — Future Work
+
+#### Timeline View UI
+Not implemented in Phase 2. Phase 3 STAGE 1 will create:
+- TimelineScreen showing chronological activity feed
+- Event cards (task, routine, habit, mood)
+- Filtering by event type
+- Date grouping (today, this week, older)
+
+#### Re-Entry Card
+Phase 3 STAGE 3 will use paused tasks from timeline to power:
+- "You were working on X — resume?" card on Today screen
+- Auto-suggests paused task if user revisits within 24 hours
+- One-tap resume (returns task to inProgress)
+
+#### Mood Log Integration
+Mood domain exists (`lib/domain/mood.dart`) but MoodRepository is not wired. Phase 3 will:
+- Create MoodRepository + Drift implementation
+- Wire moodRepositoryProvider
+- Emit MoodEvent from timeline when moods logged
+- Timeline view shows mood events (color-coded)
+
+#### Captured Timestamp for Routines
+Phase 2 uses heuristic (createdAt + 1 hour) for routine completion. Phase 3 will:
+- Add completedAt field to Routine domain
+- Capture actual time when last step completed
+- Update database schema (Routines table)
+- Update timeline to use real timestamp
+
+### Backward Compatibility
+
+Existing tasks with status=pending migrate to status=notStarted automatically (Drift migration in Phase 3). The `isPending` computed property works with the new model:
+
+```dart
+bool get isPending => status != TaskStatus.complete;
+```
+
+This means old code filtering for `isPending` continues to work with new states.
