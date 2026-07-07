@@ -1,0 +1,42 @@
+{
+  "//": "PLACEHOLDER ONLY — every value below is fake. Do NOT use this file as-is.",
+  "//1": "Download the real google-services.json from Google Cloud / Firebase console",
+  "//2": "for package com.neuroflow, then place it at android/app/google-services.json.",
+  "//3": "That path is gitignored — never commit the real file.",
+  "project_info": {
+    "project_number": "000000000000",
+    "project_id": "neuroflow-dev-REPLACE_ME",
+    "storage_bucket": "neuroflow-dev-REPLACE_ME.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+        "android_client_info": {
+          "package_name": "com.neuroflow"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "000000000000-REPLACE_ME.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.neuroflow",
+            "certificate_hash": "0000000000000000000000000000000000000000"
+          }
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "REPLACE_ME_FAKE_API_KEY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

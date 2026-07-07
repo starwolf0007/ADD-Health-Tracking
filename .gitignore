@@ -13,6 +13,13 @@ lib/data/database.g.dart
 
 # Android
 **/android/**/gradle-wrapper.jar
+# Google Cloud / OAuth config & signing secrets — NEVER commit these
+**/android/app/google-services.json
+google-services.json
+*.jks
+*.keystore
+**/android/key.properties
+key.properties
 **/android/.gradle
 **/android/captures/
 **/android/gradlew
