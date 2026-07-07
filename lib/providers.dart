@@ -29,6 +29,8 @@ import 'executive/lexi_plan_advisor.dart';
 import 'executive/planner.dart';
 import 'platform/settings_service.dart';
 import 'platform/sync/google_tasks_sync_service.dart';
+import 'platform/sync/sync_engine.dart';
+import 'platform/sync/sync_engine_impl.dart';
 import 'platform/sync/sync_queue_repository.dart';
 import 'platform/sync/sync_queue_repository_impl.dart';
 import 'platform/wear/wear_sync_service.dart';
@@ -66,6 +68,16 @@ final googleTasksSyncServiceProvider = Provider<GoogleTasksSyncService>((ref) {
 final wearSyncServiceProvider = Provider<WearSyncService>((ref) {
   return WearSyncService();
 });
+
+// --- Generic sync engine (Google Foundation Sprint, STAGE 7) --------------
+// Zero Google imports; ships with no channels registered this sprint, so it
+// cannot double-process anything GoogleTasksSyncService already handles.
+final syncEngineProvider = Provider<SyncEngine>((ref) {
+  final engine = DefaultSyncEngine(connectivityProbe: const SocketConnectivityProbe());
+  ref.onDispose(engine.dispose);
+  return engine;
+});
+// ---------------------------------------------------------------------------
 
 /// User's display name — drives the greeting on TodayScreen.
 /// Async because it reads from FlutterSecureStorage.
