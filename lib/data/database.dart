@@ -291,7 +291,7 @@ class AppDatabase extends _$AppDatabase {
   // ------------------------------------------------------------------
 
   Future<void> enqueueSyncOp(SyncQueueCompanion op) =>
-      into(syncQueue).insert(op);
+      into(syncQueue).insertOnConflictUpdate(op);
 
   Future<List<SyncQueueData>> fetchPendingSyncOps({int limit = 50}) {
     return (select(syncQueue)

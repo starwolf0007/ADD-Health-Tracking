@@ -457,13 +457,25 @@ class _CaptureSheetState extends State<_CaptureSheet> {
     );
   }
 
-  void _submit() {
+  void _submit() async {
     final title = _controller.text.trim();
     if (title.isEmpty) return;
 
     final task = Task.create(title: title, energy: _energy);
-    widget.ref.read(todayControllerProvider.notifier).addTask(task);
-    Navigator.of(context).pop();
+    try {
+      await widget.ref.read(todayControllerProvider.notifier).addTask(task);
+      Navigator.of(context).pop();
+    } catch (e) {
+      // Show error to user if task creation fails
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to add task: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 }
 

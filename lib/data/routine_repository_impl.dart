@@ -73,6 +73,11 @@ class DriftRoutineRepository implements RoutineRepository {
 
   @override
   Stream<List<Routine>> watchActive() {
+    // Use a manual deduplication mechanism to prevent duplicate emissions.
+    // The asyncMap can re-emit the same data multiple times, causing infinite
+    // duplication in the UI. Track the last emission and only emit if changed.
+    List<Routine>? lastEmission;
+
     return _db.watchActiveRoutines().asyncMap((rows) async {
       final result = <Routine>[];
       for (final row in rows) {
@@ -80,6 +85,29 @@ class DriftRoutineRepository implements RoutineRepository {
         result.add(_rowsToRoutine(row, steps));
       }
       return result;
+    }).where((nextEmission) {
+      // Deduplicate: only emit if the list of routine IDs changed.
+      // Compares routine IDs (not the full objects) to detect meaningful changes.
+      if (lastEmission == null) {
+        lastEmission = nextEmission;
+        return true;
+      }
+
+      if (lastEmission!.length != nextEmission.length) {
+        lastEmission = nextEmission;
+        return true;
+      }
+
+      // Check if any routine ID is different
+      for (int i = 0; i < lastEmission!.length; i++) {
+        if (lastEmission![i].id != nextEmission[i].id) {
+          lastEmission = nextEmission;
+          return true;
+        }
+      }
+
+      // No change detected; suppress duplicate emission
+      return false;
     });
   }
 

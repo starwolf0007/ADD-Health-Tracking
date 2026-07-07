@@ -50,7 +50,14 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
 
   @override
   Future<void> enqueue(SyncOperation op) async {
-    await _db.enqueueSyncOp(_opToCompanion(op));
+    try {
+      await _db.enqueueSyncOp(_opToCompanion(op));
+    } catch (e) {
+      // If insertion fails (e.g., due to constraint violation), log it but don't
+      // crash. The sync queue is best-effort; missing a sync op isn't fatal.
+      print('SyncQueue enqueue failed: $e');
+      rethrow; // Re-throw so the caller is aware, but now logged
+    }
   }
 
   @override
