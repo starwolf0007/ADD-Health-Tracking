@@ -57,7 +57,7 @@ Console → APIs & Services → OAuth consent screen.
 
 - [ ] **User type:** `External` (required unless the project is in a Workspace org and the app is org-internal only — NeuroFlow is a consumer app, so External).
 - [ ] **App name:** `NeuroFlow`
-- [ ] **User support email:** your dev address (e.g. `starwolf0007@gmail.com`).
+- [ ] **User support email:** your dev address (e.g. `<your-dev-email>`).
 - [ ] **Developer contact email:** same.
 - [ ] Logo: skip for now — uploading a logo can trigger the verification requirement earlier than you want.
 - [ ] **Scopes — this sprint, declare ONLY the sign-in basics:**
@@ -73,7 +73,7 @@ Console → APIs & Services → OAuth consent screen.
 
   Adding those later will require Google's app verification (privacy policy URL, scope justification video, days-to-weeks review). Keep this sprint's footprint to openid/email/profile so nothing blocks development.
 - [ ] **Publishing status:** leave in `Testing`.
-  - [ ] Add **test users** (up to 100): every Google account that will sign in during development, including `starwolf0007@gmail.com`.
+  - [ ] Add **test users** (up to 100): every Google account that will sign in during development, including `<your-dev-email>`.
   - In Testing mode, refresh behavior differs: **refresh tokens expire after 7 days** for external testing apps. Expect periodic re-consent until the app is published/verified — do not "fix" this in code.
 - [ ] Later (pre-launch, not this sprint): publish to Production + submit for verification once product scopes are added.
 

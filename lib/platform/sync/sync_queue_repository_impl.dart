@@ -55,7 +55,12 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
     } catch (e) {
       // If insertion fails (e.g., due to constraint violation), log it but don't
       // crash. The sync queue is best-effort; missing a sync op isn't fatal.
-      print('SyncQueue enqueue failed: $e');
+      // Never interpolate the caught exception itself: SyncOperation carries
+      // task content (taskTitle/taskNotes/googleTaskId), and a Drift/sqlite3
+      // constraint-violation exception's toString() can embed bound statement
+      // values — logging it verbatim would risk leaking task content to
+      // device logs. Log only a fixed category message instead.
+      print('SyncQueue enqueue failed (${e.runtimeType})');
       rethrow; // Re-throw so the caller is aware, but now logged
     }
   }

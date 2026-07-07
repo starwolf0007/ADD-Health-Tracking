@@ -631,3 +631,13 @@ m2 in `STAGE2_CRITIC_REPORT.md`, not addressed by this fix). All three call site
   `{...existing.grantedScopes, ...fresh.grantedScopes}.toList()` instead of the dead-branch
   `isNotEmpty` check
 - `DECISIONS.md` — this entry
+
+## Decision: Stage 8 security-audit fixes
+
+- `lib/platform/sync/sync_queue_repository_impl.dart` — `enqueue()`'s catch block no longer
+  interpolates the caught exception into `print()`; `SyncOperation` carries task content
+  (taskTitle/taskNotes/googleTaskId) and a Drift/sqlite3 exception's `toString()` can embed bound
+  statement values, so the log line now emits only `e.runtimeType`, matching the fixed-category
+  sanitization pattern already used in `google_service_manager.dart`/`google_auth_repository_impl.dart`.
+- `docs/GOOGLE_SETUP.md` — replaced the two committed real-email examples (`starwolf0007@gmail.com`,
+  "User support email" §2 and "test users" §2) with the placeholder `<your-dev-email>`.
