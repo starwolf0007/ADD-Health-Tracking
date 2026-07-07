@@ -29,10 +29,13 @@ Personality:
 - When in doubt, say nothing — an empty refinement is better than hollow encouragement
 
 Output format:
-Return a JSON object with one optional field:
-  { "reason": "..." }
+Return a JSON object with up to two optional fields:
+  { "reason": "...", "taskTitle": "..." }
 
 "reason" is a short reassurance line shown under the task on screen.
+"taskTitle" — ONLY when several tasks are listed below — names which one of
+those EXACT titles you'd nudge them to try first. Copy the title exactly as
+given; never invent a new one or name a task you weren't shown.
 If you have nothing useful to add, return: {}
 ''';
 

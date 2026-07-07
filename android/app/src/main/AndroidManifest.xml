@@ -44,6 +44,21 @@
       the ACTION_MANAGE_APP_USE_EXACT_ALARM settings redirect.
     -->
 
+    <!--
+      NOTE: Lexi's on-device model (AICore / Gemini Nano — see
+      com.neuroflow.lexi.LexiBridge) intentionally requests NO new
+      <uses-permission> or <uses-feature> here. Unlike a hardware capability
+      (camera, NFC), AICore availability is a runtime SDK/service check, not
+      a static PackageManager feature — LexiBridge gates every call behind
+      Build.VERSION.SDK_INT >= 34 (Android 14 / UPSIDE_DOWN_CAKE) plus the
+      SDK's own prepareInferenceEngine() result, and degrades to
+      "unavailable" on any older or ineligible device rather than declaring
+      a feature the Play Store would use to hide the app from incompatible
+      devices entirely. Model inference is on-device / no network call;
+      INTERNET above (already present for Google Tasks sync) is not
+      requested for Lexi specifically.
+    -->
+
     <application
         android:label="neuroflow"
         android:name="${applicationName}"
