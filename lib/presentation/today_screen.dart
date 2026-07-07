@@ -20,6 +20,7 @@ import 'habits_widget.dart';
 import 'routine_screen.dart';
 import 'settings_screen.dart';
 import 'theme.dart';
+import 'widgets/reentry_card.dart';
 
 class TodayScreen extends ConsumerWidget {
   const TodayScreen({super.key});
@@ -195,20 +196,52 @@ class _TodayBody extends ConsumerWidget {
 // Normal mode
 // ---------------------------------------------------------------------------
 
-class _NormalBody extends StatelessWidget {
+class _NormalBody extends ConsumerWidget {
   final TodayState state;
   final WidgetRef ref;
 
   const _NormalBody({required this.state, required this.ref});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final task = state.primaryTask!;
+    final pausedTasksAsync = ref.watch(pausedTasksProvider);
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Show re-entry card for top paused task if any exist.
+          pausedTasksAsync.when(
+            loading: () => const SizedBox.shrink(),
+            error: (_, __) => const SizedBox.shrink(),
+            data: (pausedTasks) {
+              if (pausedTasks.isEmpty) return const SizedBox.shrink();
+
+              final topPaused = pausedTasks.first;
+              return Column(
+                children: [
+                  ReentryCard(
+                    task: topPaused,
+                    onResume: () async {
+                      await ref
+                          .read(todayControllerProvider.notifier)
+                          .resumePausedTask(topPaused.id);
+                    },
+                    onDismiss: () {
+                      // Session-only snooze (visual dismiss).
+                      ref
+                          .read(todayControllerProvider.notifier)
+                          .snoozeForSession(topPaused.id);
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                ],
+              );
+            },
+          ),
+
           Text('Next up', style: AppTextStyles.bodySmall),
           const SizedBox(height: 12),
           _TaskCard(task: task, onComplete: () {

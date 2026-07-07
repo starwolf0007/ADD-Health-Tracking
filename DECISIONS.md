@@ -262,3 +262,131 @@ bool get isPending => status != TaskStatus.complete;
 ```
 
 This means old code filtering for `isPending` continues to work with new states.
+
+---
+
+# Phase 2 STAGE 3: Re-Entry Card
+
+## Design Decision: Progress-First Re-Entry UI for Paused Tasks
+
+### Purpose
+
+The Re-Entry Card is an ADHD-friendly feature that surfaces paused tasks with minimal friction. When a user returns to the app after context-switching, a single card offers:
+
+1. **Progress celebration** — show the work already done ("60% progress")
+2. **Context recall** — remind them where they paused ("Paused at: Step 4")
+3. **Micro-action suggestion** — one small next step ("Next: Check logs")
+
+This follows ADHD-friendly UX patterns:
+- **Progress-first messaging**: Show wins before asking for more effort
+- **Context preservation**: Exact checkpoint reduces re-orientation time
+- **Minimal friction**: One tap to resume; one tap to dismiss
+
+### Architecture: No Database Changes
+
+The Re-Entry Card uses **existing Task fields only**:
+- `status = TaskStatus.paused` (already defined in Phase 2 STAGE 2)
+- `notes` (existing field — parsed heuristically in Phase 2)
+- `title` (used to infer next action)
+- `createdAt` (used to sort paused tasks by recency)
+
+**No new tables, no new columns.** Phase 3 will add persistent step tracking if needed; Phase 2 uses best-effort heuristics.
+
+### Phase 2 Heuristics
+
+The `ReentryAdvisor` class analyzes a paused task using simple pattern matching:
+
+1. **Progress percentage**: Count newline-delimited lines in task.notes
+   - 1 line → 25%
+   - 2-3 lines → 50%
+   - 4-5 lines → 60%
+   - 6+ lines → 75% (capped below 100% until task marked complete)
+
+2. **Paused-at step**: Extract the last line of task.notes
+   - Strips leading numbers/bullets ("1. Step" → "Step")
+   - Wrapped in quotes: `Paused at: "Step 4: Deploy"`
+
+3. **Suggested action**: Pattern match on task title verbs
+   - "Deploy X" → "Check logs"
+   - "Review PR" → "Merge if approved"
+   - "Write email" → "Send reply"
+   - "Setup X" → "Test it"
+   - Default: "Continue"
+
+**Phase 2 limitation**: These are estimates. A user might have completed 2 of 5 steps, but if they only wrote 2 notes lines, progress shows ~50% instead of 40%. The heuristic favors showing progress.
+
+### Phase 3 Future: Real Step Tracking
+
+Phase 3 STAGE 3 will:
+
+1. Add `SubtaskCompletion` table in database (tracks which subtasks are done)
+2. Compute real progress: `(completed / total) * 100`
+3. Replace title/notes parsing with actual step metadata
+4. Enable richer context: "Step 4 of 8 done" instead of "60% progress"
+
+### UI: Re-Entry Card Placement
+
+The card appears in the Today screen's normal mode, **above the primary task**:
+
+```
+[Header: Hey, User | Count: 7]
+─────────────────────────────────
+[Re-Entry Card — paused task]
+─────────────────────────────────
+[Primary Task Card]
+─────────────────────────────────
+[Due Routines / Habits]
+```
+
+**Visibility logic**:
+- Show only if `pausedTasks` list is non-empty
+- Show only the **top 1 paused task** (most recent)
+- Use `snoozeForSession()` for dismiss (visual only; no DB change)
+- Use `resumePausedTask()` for resume (transitions paused → inProgress)
+
+### Components
+
+**File: `lib/executive/reentry_advisor.dart`**
+- `ReentryAdvisor` class — analyzes paused tasks
+- `ReentryData` class — holds progress %, paused-at step, suggested action
+- Private helpers: `_extractSteps()`, `_estimateProgress()`, `_extractPausedAtStep()`, `_suggestAction()`
+
+**File: `lib/presentation/widgets/reentry_card.dart`**
+- `ReentryCard` StatelessWidget — renders the UI
+- Layout: header (pause icon + title) → progress bar → context → action → buttons
+- Colors: AppColors.accent border, AppColors.surface fill (matches other cards)
+- Buttons: "← Go back" (dismiss) | "Resume →" (resume)
+
+**File: `lib/providers.dart`**
+- `pausedTasksProvider` — FutureProvider that filters pending tasks for status=paused
+- `TodayController.resumePausedTask()` — transitions paused → inProgress and recomputes plan
+
+**File: `lib/presentation/today_screen.dart`**
+- Updated `_NormalBody` to watch `pausedTasksProvider` and show card if available
+- Wired resume/dismiss buttons to controller methods
+
+### Dismissal Behavior
+
+The "← Go back" button calls `snoozeForSession()`, which:
+- Adds task ID to `_snoozedIds` set in TodayController
+- Invalidates the provider to trigger rebuild
+- **Does not** modify database — dismissal is session-local only
+- Card reappears if user restarts the app (re-entry still available)
+
+**Rationale**: Users may want to dismiss the card without actually resuming, but we should re-prompt on next session if the task remains paused. Session-only snooze gives immediate UI relief without losing the re-entry opportunity.
+
+### Files Modified
+
+- `lib/executive/reentry_advisor.dart` — NEW; advisory logic for paused tasks
+- `lib/presentation/widgets/reentry_card.dart` — NEW; UI component
+- `lib/presentation/today_screen.dart` — added ReentryCard widget, imported it, updated _NormalBody to ConsumerWidget
+- `lib/providers.dart` — added `pausedTasksProvider`, added `resumePausedTask()` method to TodayController
+- `DECISIONS.md` — this entry
+
+### Testing Notes
+
+1. **Create a paused task**: Create a task, mark it inProgress, then manually change status to paused (via DB query in test)
+2. **Verify progress estimation**: Add notes with 3-5 lines, verify progress shows ~50-60%
+3. **Verify action suggestion**: Create a task titled "Deploy database", verify suggested action is "Check logs"
+4. **Test resume flow**: Tap "Resume →", verify task transitions to inProgress and re-entry card disappears
+5. **Test dismiss flow**: Tap "← Go back", verify card hides (but stays in DB as paused, re-appears on app restart)

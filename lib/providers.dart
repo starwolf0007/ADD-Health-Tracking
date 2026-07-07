@@ -244,6 +244,28 @@ class TodayController extends AsyncNotifier<TodayState> {
     // with the snoozed task excluded.
     ref.invalidateSelf();
   }
+
+  /// Resume a paused task (transitions from paused → inProgress).
+  /// Phase 2 STAGE 3: Called by Re-Entry Card when user taps Resume.
+  Future<void> resumePausedTask(String taskId) async {
+    // Find the paused task.
+    final pending = await ref
+        .watch(taskRepositoryProvider)
+        .watchPending()
+        .first;
+
+    final pausedTask = pending.firstWhere(
+      (t) => t.id == taskId && t.status == TaskStatus.paused,
+      orElse: () => throw Exception('Paused task not found: $taskId'),
+    );
+
+    // Transition to inProgress.
+    final resumed = pausedTask.copyWith(status: TaskStatus.inProgress);
+
+    // Save and recompute plan.
+    await ref.read(taskRepositoryProvider).save(resumed);
+    ref.invalidateSelf();
+  }
 }
 
 final todayControllerProvider =
@@ -275,6 +297,27 @@ final dueRoutinesProvider = FutureProvider<List<Routine>>((ref) {
 /// All active habits with recent check-ins — drives HabitsWidget.
 final activeHabitsProvider = StreamProvider<List<Habit>>((ref) {
   return ref.watch(habitRepositoryProvider).watchActive();
+});
+
+// ---------------------------------------------------------------------------
+// Paused tasks provider — Phase 2 STAGE 3: Re-Entry Card
+// ---------------------------------------------------------------------------
+
+/// All paused tasks available for re-entry (sorted by most recent first).
+/// Used by Re-Entry Card to suggest task resumption.
+final pausedTasksProvider = FutureProvider<List<Task>>((ref) async {
+  final allPending = await ref
+      .watch(taskRepositoryProvider)
+      .watchPending()
+      .first;
+
+  // Filter for paused tasks only, sort by creation time (most recent first).
+  final paused = allPending
+      .where((t) => t.status == TaskStatus.paused)
+      .toList()
+    ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+  return paused;
 });
 
 // ---------------------------------------------------------------------------
