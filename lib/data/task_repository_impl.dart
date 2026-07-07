@@ -6,11 +6,11 @@
 
 import 'package:drift/drift.dart';
 
-import '../domain/task.dart';
-import '../platform/sync/sync_operation.dart';
-import '../platform/sync/sync_queue_repository.dart';
-import 'database.dart';
-import 'task_repository.dart';
+import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/platform/sync/sync_operation.dart';
+import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
+import 'package:neuroflow/data/database.dart';
+import 'package:neuroflow/data/task_repository.dart';
 
 class DriftTaskRepository implements TaskRepository {
   final AppDatabase _db;
@@ -114,6 +114,13 @@ class DriftTaskRepository implements TaskRepository {
     }
   }
 
+  @override
+  Future<Task?> getById(String id) async {
+    final row = await (_db.select(_db.tasks)..where((t) => t.id.equals(id)))
+        .getSingleOrNull();
+    return row == null ? null : _rowToTask(row);
+  }
+
   // ------------------------------------------------------------------
   // Sync helpers
   // ------------------------------------------------------------------
@@ -164,6 +171,10 @@ class DriftTaskRepository implements TaskRepository {
         return TaskStatus.completed;
       case 'skipped':
         return TaskStatus.skipped;
+      case 'paused':
+        return TaskStatus.paused;
+      case 'blocked':
+        return TaskStatus.blocked;
       default:
         return TaskStatus.pending;
     }
@@ -175,6 +186,10 @@ class DriftTaskRepository implements TaskRepository {
         return 'completed';
       case TaskStatus.skipped:
         return 'skipped';
+      case TaskStatus.paused:
+        return 'paused';
+      case TaskStatus.blocked:
+        return 'blocked';
       case TaskStatus.pending:
         return 'pending';
     }

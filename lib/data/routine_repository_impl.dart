@@ -4,9 +4,9 @@
 
 import 'package:drift/drift.dart';
 
-import '../domain/routine.dart';
-import 'database.dart';
-import 'routine_repository.dart';
+import 'package:neuroflow/domain/routine.dart';
+import 'package:neuroflow/data/database.dart';
+import 'package:neuroflow/data/routine_repository.dart';
 
 class DriftRoutineRepository implements RoutineRepository {
   final AppDatabase _db;

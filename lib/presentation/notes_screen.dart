@@ -1,6 +1,6 @@
 // lib/presentation/notes_screen.dart
 import 'package:flutter/material.dart';
-import 'theme.dart';
+import 'package:neuroflow/presentation/theme.dart';
 
 class NotesScreen extends StatelessWidget {
   const NotesScreen({super.key});

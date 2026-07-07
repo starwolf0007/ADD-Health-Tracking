@@ -24,7 +24,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/providers.dart';
+import 'package:neuroflow/app/providers.dart';
 
 class ForegroundSyncObserver extends WidgetsBindingObserver {
   final ProviderContainer _container;

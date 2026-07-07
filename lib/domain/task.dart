@@ -7,7 +7,7 @@ import 'package:uuid/uuid.dart';
 
 enum EnergyLevel { low, medium, high }
 
-enum TaskStatus { pending, completed, skipped }
+enum TaskStatus { pending, completed, skipped, paused, blocked }
 
 class Task {
   final String id;

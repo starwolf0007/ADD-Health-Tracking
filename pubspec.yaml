@@ -28,6 +28,7 @@ dependencies:
   # Google Tasks sync
   google_sign_in: ^6.2.1
   googleapis: ^13.1.0
+  extension_google_sign_in_as_googleapis_auth: ^2.0.12
 
   # Secure storage (tokens, sensitive prefs — §2.8)
   flutter_secure_storage: ^9.2.1
@@ -43,6 +44,7 @@ dependencies:
   #   2. Local NLP date parsing — no production-ready Flutter package
   # Both are Phase 2 / §14 items. Stubs are in executive/planner.dart.
 
+  googleapis_auth: any
 dev_dependencies:
   flutter_test:
     sdk: flutter

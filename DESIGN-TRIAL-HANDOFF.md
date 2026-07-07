@@ -37,3 +37,4 @@ Nothing else references any of this — it's a clean lift-out.
 
 ## Review checkpoint
 Same as every Phase 2 gate — revisit after real use. Specifically watch: does the gold moment feel earned, or does it feel like a notification you start dismissing without reading? That's the tell.
+[lib](lib)

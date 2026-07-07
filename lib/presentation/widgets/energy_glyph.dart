@@ -1,8 +1,8 @@
 // lib/presentation/widgets/energy_glyph.dart
 
 import 'package:flutter/material.dart';
-import '../../domain/task.dart';
-import '../theme.dart';
+import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/presentation/theme.dart';
 
 class EnergyGlyph extends StatelessWidget {
   final EnergyLevel energy;

@@ -12,15 +12,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../domain/routine.dart';
-import '../domain/task.dart';
-import '../executive/planner.dart';
-import '../app/providers.dart';
-import 'habits_widget.dart';
-import 'routine_screen.dart';
-import 'settings_screen.dart';
-import 'theme.dart';
-import 'widgets/capture_sheet.dart';
+import 'package:neuroflow/domain/routine.dart';
+import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/executive/planner.dart';
+import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/presentation/habits_widget.dart';
+import 'package:neuroflow/presentation/routine_screen.dart';
+import 'package:neuroflow/presentation/settings_screen.dart';
+import 'package:neuroflow/presentation/theme.dart';
+import 'package:neuroflow/presentation/widgets/capture_sheet.dart';
 
 class TodayScreen extends ConsumerWidget {
   const TodayScreen({super.key});
@@ -151,9 +151,9 @@ class _ErrorBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return const Center(
       child: Padding(
-        padding: const EdgeInsets.all(32),
+        padding: EdgeInsets.all(32),
         child: Text(
           'Something went wrong. Try restarting the app.',
           style: AppTextStyles.bodySmall,
@@ -198,7 +198,7 @@ class _NormalBody extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Next up', style: AppTextStyles.bodySmall),
+          const Text('Next up', style: AppTextStyles.bodySmall),
           const SizedBox(height: 12),
           _TaskCard(task: task, onComplete: () {
             ref.read(todayControllerProvider.notifier).complete(task.id);
@@ -268,9 +268,9 @@ class _AllClearBody extends StatelessWidget {
           Icon(Icons.check_circle_outline,
               size: 48, color: AppColors.accent.withValues(alpha: 0.6)),
           const SizedBox(height: 16),
-          Text('All clear', style: AppTextStyles.titleMedium),
+          const Text('All clear', style: AppTextStyles.titleMedium),
           const SizedBox(height: 8),
-          Text('Nothing pending — add something with +',
+          const Text('Nothing pending — add something with +',
               style: AppTextStyles.bodySmall),
         ],
       ),
@@ -374,8 +374,8 @@ class _DueRoutinesSection extends ConsumerWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
               child: Text('Routines', style: AppTextStyles.bodySmall),
             ),
             ...routines.map(

@@ -1,6 +1,6 @@
 // lib/presentation/reflect_screen.dart
 import 'package:flutter/material.dart';
-import 'theme.dart';
+import 'package:neuroflow/presentation/theme.dart';
 
 class ReflectScreen extends StatelessWidget {
   const ReflectScreen({super.key});

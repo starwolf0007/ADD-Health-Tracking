@@ -5,10 +5,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../app/providers.dart';
-import '../domain/routine.dart';
-import 'routine_screen.dart';
-import 'theme.dart';
+import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/domain/routine.dart';
+import 'package:neuroflow/presentation/routine_screen.dart';
+import 'package:neuroflow/presentation/theme.dart';
 
 class RoutinesListScreen extends ConsumerWidget {
   const RoutinesListScreen({super.key});

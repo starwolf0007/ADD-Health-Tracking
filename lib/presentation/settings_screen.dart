@@ -13,9 +13,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../platform/alarms/alarm_scheduler.dart';
-import '../app/providers.dart';
-import 'theme.dart';
+import 'package:neuroflow/platform/alarms/alarm_scheduler.dart';
+import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/presentation/connected_services_screen.dart';
+import 'package:neuroflow/presentation/theme.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
   const SettingsScreen({super.key});
@@ -90,9 +91,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
-        title: Text('Enable Cloud Gemini?',
+        title: const Text('Enable Cloud Gemini?',
             style: AppTextStyles.titleMedium),
-        content: Text(
+        content: const Text(
           'Task titles and descriptions will be sent to Google for AI suggestions. '
           'No health data, energy logs, or personal notes are shared. '
           'You can turn this off at any time.',
@@ -105,7 +106,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Enable',
+            child: const Text('Enable',
                 style: TextStyle(color: AppColors.accent)),
           ),
         ],
@@ -131,7 +132,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           icon: const Icon(Icons.arrow_back, color: AppColors.textSecondary),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: Text('Settings', style: AppTextStyles.titleMedium),
+        title: const Text('Settings', style: AppTextStyles.titleMedium),
       ),
       body: _loading
           ? const SizedBox.shrink()
@@ -139,7 +140,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 40),
               children: [
                 // ------------------------------------------------ Name
-                _SectionLabel('About you'),
+                const _SectionLabel('About you'),
                 const SizedBox(height: 8),
                 _NameField(
                   controller: _nameController,
@@ -147,8 +148,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ),
                 const SizedBox(height: 32),
 
+                // ----------------------------------------- Connections
+                const _SectionLabel('Integrations'),
+                const SizedBox(height: 8),
+                ListTile(
+                  leading: const Icon(Icons.cloud_sync_outlined, color: AppColors.accent),
+                  title: const Text('Connected Services', style: AppTextStyles.bodyMedium),
+                  subtitle: const Text('Google Tasks, Calendar, and more', style: AppTextStyles.bodySmall),
+                  trailing: const Icon(Icons.chevron_right, size: 20, color: AppColors.textMuted),
+                  tileColor: AppColors.surface,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ConnectedServicesScreen()),
+                  ),
+                ),
+                const SizedBox(height: 32),
+
                 // ----------------------------------------- Notifications
-                _SectionLabel('Notifications'),
+                const _SectionLabel('Notifications'),
                 const SizedBox(height: 8),
                 _ToggleTile(
                   title: 'Morning briefing',
@@ -160,7 +177,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const SizedBox(height: 32),
 
                 // -------------------------------------------- AI (§14)
-                _SectionLabel('AI'),
+                const _SectionLabel('AI'),
                 const SizedBox(height: 8),
                 _ToggleTile(
                   title: 'Cloud Gemini suggestions',
@@ -214,10 +231,10 @@ class _NameField extends StatelessWidget {
       decoration: InputDecoration(
         hintText: 'Your first name (optional)',
         hintStyle: AppTextStyles.bodyMedium.copyWith(color: AppColors.textMuted),
-        enabledBorder: UnderlineInputBorder(
+        enabledBorder: const UnderlineInputBorder(
           borderSide: BorderSide(color: AppColors.surfaceVariant),
         ),
-        focusedBorder: UnderlineInputBorder(
+        focusedBorder: const UnderlineInputBorder(
           borderSide: BorderSide(color: AppColors.accent),
         ),
         contentPadding: const EdgeInsets.symmetric(vertical: 8),

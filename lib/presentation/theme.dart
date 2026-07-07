@@ -28,6 +28,11 @@ class AppColors {
   static const warning = Color(0xFFD9A441);
   static const attention = Color(0xFFD9A441);
 
+  // -- Trial colors (v-trial) --
+  static const gold = Color(0xFFFFD700);
+  static const info = Color(0xFF2196F3);
+  static const lexi = Color(0xFFBB86FC);
+
   AppColors._();
 }
 

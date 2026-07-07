@@ -2,7 +2,7 @@
 //
 // Abstract repository for Habit CRUD and check-in recording.
 
-import '../domain/habit.dart';
+import 'package:neuroflow/domain/habit.dart';
 
 abstract class HabitRepository {
   /// All active habits with last-30-day check-ins attached.

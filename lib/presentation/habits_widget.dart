@@ -12,9 +12,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../domain/habit.dart';
-import '../app/providers.dart';
-import 'theme.dart';
+import 'package:neuroflow/domain/habit.dart';
+import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/presentation/theme.dart';
 
 class HabitsWidget extends ConsumerWidget {
   const HabitsWidget({super.key});
@@ -33,8 +33,8 @@ class HabitsWidget extends ConsumerWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
               child: Text('Habits', style: AppTextStyles.bodySmall),
             ),
             ...shown.map((h) => _HabitRow(habit: h)),

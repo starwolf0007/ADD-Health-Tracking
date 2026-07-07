@@ -6,9 +6,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'app/bootstrap.dart';
-import 'presentation/app_shell.dart';
-import 'presentation/theme.dart';
+import 'package:neuroflow/app/bootstrap.dart';
+import 'package:neuroflow/presentation/app_shell.dart';
+import 'package:neuroflow/presentation/theme.dart';
+import 'package:neuroflow/presentation/widgets/achievement_toast.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -38,7 +39,7 @@ class NeuroFlowApp extends StatelessWidget {
       theme: AppTheme.dark(),
       darkTheme: AppTheme.dark(),
       themeMode: ThemeMode.dark, // calm-functional is dark-only by design (§13)
-      home: const AppShell(),
+      home: const AchievementToastHost(child: AppShell()),
     );
   }
 }

@@ -5,10 +5,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'notes_screen.dart';
-import 'reflect_screen.dart';
-import 'routines_list_screen.dart';
-import 'today_screen.dart';
+import 'package:neuroflow/presentation/notes_screen.dart';
+import 'package:neuroflow/presentation/reflect_screen.dart';
+import 'package:neuroflow/presentation/routines_list_screen.dart';
+import 'package:neuroflow/presentation/today_screen.dart';
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});

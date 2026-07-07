@@ -3,7 +3,7 @@
 // Abstract repository for Routine CRUD.
 // Executive layer and Presentation layer depend only on this interface.
 
-import '../domain/routine.dart';
+import 'package:neuroflow/domain/routine.dart';
 
 abstract class RoutineRepository {
   /// All active routines, ordered by anchor then name.

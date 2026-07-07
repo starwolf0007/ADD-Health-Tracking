@@ -3,8 +3,8 @@
 // Preset routines. Seeded on first launch — user can edit or delete any of them.
 // Chosen for ADHD: short, achievable, ordered by energy cost (lowest first).
 
-import '../domain/routine.dart';
-import 'routine_repository.dart';
+import 'package:neuroflow/domain/routine.dart';
+import 'package:neuroflow/data/routine_repository.dart';
 
 /// Call once during onboarding or first launch.
 Future<void> seedDefaultRoutines(RoutineRepository repo) async {

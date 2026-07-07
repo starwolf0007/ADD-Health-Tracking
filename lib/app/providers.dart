@@ -1,39 +1,41 @@
 // lib/app/providers.dart
 //
 // THE composition root — the only file allowed to know every layer at once.
-//
-// Wiring (§3):
-//   Platform (AppDatabase, lib/data/database.dart)
-//     ↓
-//   Data (Drift repositories: task, routine, habit, sync_queue)
-//     ↓
-//   Executive (Executive.evaluate → Plan; PlanAdvisor seam, §14)
-//     ↓
-//   Presentation (TodayController → AsyncValue<TodayState>)
-//
-// Rules preserved:
-//   • TodayController is the SOLE call site for PlanAdvisor.refine().
-//   • Executive.evaluate() stays pure/synchronous; the async AI seam is here.
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-import '../data/database.dart';
-import '../data/habit_repository.dart';
-import '../data/habit_repository_impl.dart';
-import '../data/routine_repository.dart';
-import '../data/routine_repository_impl.dart';
-import '../data/task_repository.dart';
-import '../data/task_repository_impl.dart';
-import '../domain/habit.dart';
-import '../domain/routine.dart';
-import '../domain/task.dart';
-import '../executive/planner.dart';
-import '../intelligence/lexi_plan_advisor.dart';
-import '../platform/settings_service.dart';
-import '../platform/sync/google_tasks_sync_service.dart';
-import '../platform/sync/sync_queue_repository.dart';
-import '../platform/sync/sync_queue_repository_impl.dart';
-import '../platform/wear/wear_sync_service.dart';
+import 'package:neuroflow/data/database.dart';
+import 'package:neuroflow/data/habit_repository.dart';
+import 'package:neuroflow/data/habit_repository_impl.dart';
+import 'package:neuroflow/data/routine_repository.dart';
+import 'package:neuroflow/data/routine_repository_impl.dart';
+import 'package:neuroflow/data/task_repository.dart';
+import 'package:neuroflow/data/task_repository_impl.dart';
+import 'package:neuroflow/domain/habit.dart';
+import 'package:neuroflow/domain/routine.dart';
+import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/executive/planner.dart';
+import 'package:neuroflow/intelligence/lexi_plan_advisor.dart';
+import 'package:neuroflow/domain/google/google_account.dart';
+import 'package:neuroflow/domain/google/google_auth_repository.dart';
+import 'package:neuroflow/domain/google/google_account_repository.dart';
+import 'package:neuroflow/domain/google/google_permission_manager.dart';
+import 'package:neuroflow/domain/google/connected_services_repository.dart';
+import 'package:neuroflow/domain/google/google_connection_state.dart';
+import 'package:neuroflow/domain/google/sync_engine.dart';
+import 'package:neuroflow/data/google/google_auth_repository_impl.dart';
+import 'package:neuroflow/data/google/google_account_repository_impl.dart';
+import 'package:neuroflow/data/google/google_permission_manager_impl.dart';
+import 'package:neuroflow/data/google/connected_services_repository_impl.dart';
+import 'package:neuroflow/platform/google/google_service_manager.dart';
+import 'package:neuroflow/platform/google/google_api_factory.dart';
+import 'package:neuroflow/platform/sync/google_sync_engine_impl.dart';
+import 'package:neuroflow/platform/settings_service.dart';
+import 'package:neuroflow/platform/sync/google_tasks_sync_service.dart';
+import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
+import 'package:neuroflow/platform/sync/sync_queue_repository_impl.dart';
+import 'package:neuroflow/platform/wear/wear_sync_service.dart';
 
 // ---------------------------------------------------------------------------
 // Platform layer
@@ -47,6 +49,51 @@ final databaseProvider = Provider<AppDatabase>((ref) {
 
 final settingsServiceProvider = Provider<SettingsService>((ref) {
   return SettingsService();
+});
+
+// ---------------------------------------------------------------------------
+// Google layer
+// ---------------------------------------------------------------------------
+
+final googleAuthRepositoryProvider = Provider<GoogleAuthRepository>((ref) {
+  return GoogleAuthRepositoryImpl();
+});
+
+final googleAccountRepositoryProvider = Provider<GoogleAccountRepository>((ref) {
+  return GoogleAccountRepositoryImpl(const FlutterSecureStorage());
+});
+
+final googlePermissionManagerProvider = Provider<GooglePermissionManager>((ref) {
+  final authRepo = ref.watch(googleAuthRepositoryProvider) as GoogleAuthRepositoryImpl;
+  return GooglePermissionManagerImpl(authRepo.googleSignIn);
+});
+
+final connectedServicesRepositoryProvider = Provider<ConnectedServicesRepository>((ref) {
+  return ConnectedServicesRepositoryImpl(const FlutterSecureStorage());
+});
+
+final googleServiceManagerProvider = Provider<GoogleServiceManager>((ref) {
+  final authRepo = ref.watch(googleAuthRepositoryProvider);
+  final accountRepo = ref.watch(googleAccountRepositoryProvider);
+  return GoogleServiceManager(authRepo, accountRepo);
+});
+
+final googleApiFactoryProvider = Provider<GoogleApiFactory>((ref) {
+  return GoogleApiFactory(ref.watch(googleServiceManagerProvider));
+});
+
+/// Stream of the currently connected Google account.
+final googleAccountProvider = StreamProvider<GoogleAccount?>((ref) {
+  return ref.watch(googleServiceManagerProvider).accountChanges;
+});
+
+/// Stream of the global Google connection state.
+final googleConnectionStateProvider = StreamProvider<GoogleConnectionState>((ref) {
+  return ref.watch(googleServiceManagerProvider).connectionState;
+});
+
+final googleSyncEngineProvider = Provider<SyncEngine>((ref) {
+  return GoogleSyncEngineImpl(ref.watch(syncQueueRepositoryProvider));
 });
 
 // ---------------------------------------------------------------------------
@@ -165,7 +212,7 @@ class TodayController extends AsyncNotifier<TodayState> {
     final state = await _computeState(pending);
     
     // Push to watch after state change
-    ref.read(wearSyncServiceProvider).pushPrimaryTask(state);
+    await ref.read(wearSyncServiceProvider).pushPrimaryTask(state);
     
     return state;
   }

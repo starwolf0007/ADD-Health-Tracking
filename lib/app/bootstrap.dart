@@ -4,15 +4,15 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../data/habit_seeds.dart';
-import '../data/routine_seeds.dart';
-import '../platform/daily_reset.dart';
-import '../platform/notifications/notification_service.dart';
-import '../platform/background/background_scheduler.dart';
-import '../platform/wear/wear_action_handler.dart';
-import '../platform/sync/foreground_sync_observer.dart';
-import '../platform/alarms/alarm_scheduler.dart';
-import 'providers.dart';
+import 'package:neuroflow/data/habit_seeds.dart';
+import 'package:neuroflow/data/routine_seeds.dart';
+import 'package:neuroflow/platform/daily_reset.dart';
+import 'package:neuroflow/platform/notifications/notification_service.dart';
+import 'package:neuroflow/platform/background/background_scheduler.dart';
+import 'package:neuroflow/platform/wear/wear_action_handler.dart';
+import 'package:neuroflow/platform/sync/foreground_sync_observer.dart';
+import 'package:neuroflow/platform/alarms/alarm_scheduler.dart';
+import 'package:neuroflow/app/providers.dart';
 
 class AppBootstrap {
   /// Run all startup initialization.
@@ -28,6 +28,7 @@ class AppBootstrap {
     // 3. State maintenance
     await resetRoutinesIfNewDay(container);
     await _hydrateAdvisorTier(container);
+    await container.read(googleServiceManagerProvider).restoreSession();
 
     // 4. Integrations
     WearActionHandler(container).start();

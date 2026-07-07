@@ -10,8 +10,8 @@
 //   • No streaks pressure in the seed data — they start at zero.
 //   • All daily frequency — weekly habits add decision fatigue early on.
 
-import '../domain/habit.dart';
-import 'habit_repository.dart';
+import 'package:neuroflow/domain/habit.dart';
+import 'package:neuroflow/data/habit_repository.dart';
 
 /// Call once during onboarding or first launch.
 /// Safe to call on every startup — no-ops if habits already exist.

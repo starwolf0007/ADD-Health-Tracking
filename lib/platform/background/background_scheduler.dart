@@ -18,11 +18,11 @@
 import 'dart:ui';
 import 'package:workmanager/workmanager.dart';
 
-import '../../data/database.dart';
-import '../../data/task_repository_impl.dart';
-import '../notifications/notification_service.dart';
-import '../sync/google_tasks_sync_service.dart';
-import '../sync/sync_queue_repository_impl.dart';
+import 'package:neuroflow/data/database.dart';
+import 'package:neuroflow/data/task_repository_impl.dart';
+import 'package:neuroflow/platform/notifications/notification_service.dart';
+import 'package:neuroflow/platform/sync/google_tasks_sync_service.dart';
+import 'package:neuroflow/platform/sync/sync_queue_repository_impl.dart';
 
 const _taskMorningRefresh = 'neuroflow.morning_refresh';
 const _taskSyncFlush = 'neuroflow.sync_flush';
@@ -92,7 +92,6 @@ class BackgroundScheduler {
   Future<void> init() async {
     await Workmanager().initialize(
       callbackDispatcher,
-      isInDebugMode: false, // flip to true for logcat output during dev
     );
   }
 

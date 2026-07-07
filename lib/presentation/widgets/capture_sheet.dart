@@ -3,9 +3,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../app/providers.dart';
-import '../../domain/task.dart';
-import '../theme.dart';
+import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/presentation/theme.dart';
 
 Future<void> showCaptureSheet(BuildContext context) {
   return showModalBottomSheet<void>(
@@ -26,7 +26,7 @@ class _CaptureSheetBody extends ConsumerStatefulWidget {
 class _CaptureSheetBodyState extends ConsumerState<_CaptureSheetBody> {
   final _controller = TextEditingController();
   EnergyLevel _energy = EnergyLevel.medium;
-  bool _quickWin = false;
+  final bool _quickWin = false;
   bool _submitting = false;
 
   @override
