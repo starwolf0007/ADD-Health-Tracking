@@ -10,12 +10,14 @@
 //   • Display name          → greeting on Today screen
 //   • Morning briefing      → WorkManager notification on/off (default: on)
 //   • Cloud Gemini opt-in   → §14 AI tiering gate (default: off)
+//   • Global Privacy        → Health data sync permission (default: off)
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 const _kDisplayName = 'neuroflow_display_name';
 const _kMorningBriefing = 'neuroflow_morning_briefing';
 const _kCloudGemini = 'neuroflow_cloud_gemini';
+const _kGlobalPrivacy = 'neuroflow_global_privacy';
 
 class SettingsService {
   static const _storage = FlutterSecureStorage();
@@ -52,5 +54,20 @@ class SettingsService {
 
   Future<void> setCloudGeminiEnabled(bool value) async {
     await _storage.write(key: _kCloudGemini, value: value.toString());
+  }
+
+  // --------------------------------------------------------- Global Privacy
+
+  /// Global Privacy & Health Sync opt-in. Default: off (privacy-first design).
+  /// Controls permission to sync Mood Logs and other health data to Apple Health / Google Health.
+  /// TODO(phase3): This toggle gates permissions only. Actual sync logic hooks in Phase 3
+  /// when health platform integrations (HealthKit / Google Fit) are wired.
+  Future<bool> getGlobalPrivacyEnabled() async {
+    final raw = await _storage.read(key: _kGlobalPrivacy);
+    return raw == 'true'; // false unless explicitly set
+  }
+
+  Future<void> setGlobalPrivacyEnabled(bool value) async {
+    await _storage.write(key: _kGlobalPrivacy, value: value.toString());
   }
 }

@@ -3,12 +3,13 @@
 // Settings screen — minimal by design.
 //
 // ADHD UX rationale:
-//   • Three settings only. Every additional option is a decision the user
-//     has to make, and decisions cost dopamine.
+//   • Four settings only (name, notifications, AI, privacy). Every additional
+//     option is a decision the user has to make, and decisions cost dopamine.
 //   • No "Advanced" section — if something needs to be hidden, it shouldn't
 //     be in the settings screen at all.
 //   • Name field is optional — app works fine without it (greeting stays neutral).
 //   • Destructive actions (clear data) live here but require a confirmation tap.
+//   • Privacy toggles (Cloud Gemini, Health Sync) are opt-in only — never on by default.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -28,6 +29,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _nameController = TextEditingController();
   bool _morningBriefing = true;
   bool _cloudGemini = false;
+  bool _globalPrivacy = false;
   bool _loading = true;
 
   @override
@@ -41,11 +43,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final name = await svc.getDisplayName();
     final briefing = await svc.getMorningBriefingEnabled();
     final cloud = await svc.getCloudGeminiEnabled();
+    final privacy = await svc.getGlobalPrivacyEnabled();
     if (!mounted) return;
     setState(() {
       _nameController.text = name;
       _morningBriefing = briefing;
       _cloudGemini = cloud;
+      _globalPrivacy = privacy;
       _loading = false;
     });
     // Hydrate the in-memory advisor tier so it matches persisted prefs,
@@ -83,6 +87,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     // without requiring an app restart.
     ref.read(advisorTierProvider.notifier).state =
         value ? AdvisorTier.cloud : AdvisorTier.lexi;
+  }
+
+  Future<void> _toggleGlobalPrivacy(bool value) async {
+    setState(() => _globalPrivacy = value);
+    await ref.read(settingsServiceProvider).setGlobalPrivacyEnabled(value);
   }
 
   Future<bool> _confirmCloudGemini() async {
@@ -169,6 +178,19 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       'Off by default. Health data never shared.',
                   value: _cloudGemini,
                   onChanged: _toggleCloudGemini,
+                ),
+                const SizedBox(height: 32),
+
+                // ----------------------------------- Privacy & Sync
+                _SectionLabel('Privacy & Sync'),
+                const SizedBox(height: 8),
+                _ToggleTile(
+                  title: 'Health data sync',
+                  subtitle:
+                      'When enabled, Mood Logs will sync to Apple Health and Google Health. '
+                      'Off by default.',
+                  value: _globalPrivacy,
+                  onChanged: _toggleGlobalPrivacy,
                 ),
               ],
             ),

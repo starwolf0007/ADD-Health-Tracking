@@ -66,6 +66,55 @@ Apply two fixes:
 
 ## Files Modified
 
-- `lib/data/routine_repository_impl.dart` — watchActive() method
-- `lib/platform/sync/sync_queue_repository_impl.dart` — enqueue() method  
-- `lib/presentation/today_screen.dart` — _CaptureSheet._submit() method
+- `lib/data/routine_repository_impl.dart` — watchActive() method (deduplication)
+- `lib/data/habit_repository_impl.dart` — watchActive() method (deduplication)
+- `lib/platform/sync/sync_queue_repository_impl.dart` — enqueue() method (error logging)
+- `lib/data/database.dart` — enqueueSyncOp() method (conflict resolution)
+- `lib/presentation/today_screen.dart` — _CaptureSheet._submit() method (error handling)
+
+---
+
+# Phase 2 STAGE 1: Global Privacy & Health Sync Toggle
+
+## Design Decision: Privacy-First Default
+
+### Rationale
+The "Health data sync" toggle defaults to **OFF** for the following reasons:
+
+1. **Privacy-first principle**: Users should never be synced to external health platforms without explicit consent. Health data is the most sensitive data the app handles.
+
+2. **Regulatory alignment**: This default protects HIPAA compliance and similar privacy regulations by requiring affirmative opt-in before any health data leaves the device.
+
+3. **Data minimization**: Users who don't need interoperability with Apple Health / Google Health see no sync attempts, reducing unnecessary external API calls and battery drain.
+
+4. **Clear expectation setting**: Unlike Cloud Gemini (which users may assume is "normal" cloud behavior), health sync is opt-in only, making the user's privacy posture explicit and intentional.
+
+### Where Sync Logic Hooks In (Phase 3)
+
+The toggle gates **permissions only**. The actual sync implementation is deferred to Phase 3:
+
+- **Current scope (Phase 2 STAGE 1)**: Toggle persists to FlutterSecureStorage via SettingsService. Provider wired for reactive state updates across the app. UI placed in "Privacy & Sync" settings section.
+
+- **Phase 3 scope**: Actual data sync logic for Mood Logs will integrate with:
+  - **iOS**: HealthKit API via platform channel (requires native Swift bridge)
+  - **Android**: Google Fit API via platform channel (requires native Kotlin bridge)
+
+The toggle will act as a guard in Phase 3 when these integrations are built, preventing any sync attempts if `globalPrivacyProvider.state == false`.
+
+### Relationship with Cloud Gemini Toggle
+
+Both toggles follow the same **privacy-critical, opt-in-only** pattern:
+
+| Toggle | Default | Scope | Privacy Model |
+|--------|---------|-------|---------------|
+| Cloud Gemini | OFF | Task data → Google AI | Opt-in to cloud |
+| Health Sync | OFF | Health logs → Apple/Google | Opt-in to external health platforms |
+
+**Difference**: Cloud Gemini is "nice-to-have" (suggestion feature), while Health Sync is "must-have-permission" (interoperability). Both respect user autonomy.
+
+### Files Modified
+
+- `lib/platform/settings_service.dart` — added `getGlobalPrivacyEnabled()` and `setGlobalPrivacyEnabled()` methods
+- `lib/presentation/settings_screen.dart` — added "Privacy & Sync" section with "Health data sync" toggle
+- `lib/providers.dart` — added `globalPrivacyProvider` as StateProvider<bool>
+- `DECISIONS.md` — this entry (documenting design rationale)

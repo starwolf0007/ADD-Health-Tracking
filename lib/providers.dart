@@ -72,6 +72,14 @@ final displayNameProvider = FutureProvider<String>((ref) async {
   return ref.watch(settingsServiceProvider).getDisplayName();
 });
 
+/// Global Privacy & Health Sync opt-in. Default: off (privacy-first design).
+/// Gates permission to sync health data to Apple Health / Google Health.
+/// TODO(phase3): Actual sync logic hooks in Phase 3 when health platform integrations
+/// (HealthKit / Google Fit) are fully wired.
+final globalPrivacyProvider = StateProvider<bool>((ref) {
+  return false; // default off — users must explicitly opt-in
+});
+
 // ---------------------------------------------------------------------------
 // Data layer
 // ---------------------------------------------------------------------------
