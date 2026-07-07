@@ -13,20 +13,31 @@
 // Executive.evaluate() is pure/synchronous; the async AI seam lives here.
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 
 import 'data/database.dart';
+import 'data/google_account_repository.dart';
+import 'data/google_account_repository_impl.dart';
+import 'data/google_auth_repository.dart';
 import 'data/habit_repository.dart';
 import 'data/habit_repository_impl.dart';
 import 'data/routine_repository.dart';
 import 'data/routine_repository_impl.dart';
 import 'data/task_repository.dart';
 import 'data/task_repository_impl.dart';
+import 'domain/google_connection_state.dart';
 import 'domain/habit.dart';
 import 'domain/routine.dart';
 import 'domain/task.dart';
 import 'domain/timeline_event.dart';
 import 'executive/lexi_plan_advisor.dart';
 import 'executive/planner.dart';
+import 'platform/google/google_api_factory.dart';
+import 'platform/google/google_api_factory_impl.dart';
+import 'platform/google/google_auth_repository_impl.dart';
+import 'platform/google/google_permission_manager.dart';
+import 'platform/google/google_permission_manager_impl.dart';
+import 'platform/google/google_service_manager.dart';
 import 'platform/settings_service.dart';
 import 'platform/sync/google_tasks_sync_service.dart';
 import 'platform/sync/sync_engine.dart';
@@ -76,6 +87,77 @@ final syncEngineProvider = Provider<SyncEngine>((ref) {
   final engine = DefaultSyncEngine(connectivityProbe: const SocketConnectivityProbe());
   ref.onDispose(engine.dispose);
   return engine;
+});
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Google integration (Google Foundation Sprint, Stages 4-5)
+//
+// Every Google interaction in the app passes through GoogleServiceManager —
+// widgets watch googleConnectionStateProvider for state and
+// ref.read(googleServiceManagerProvider) for actions (connect()/disconnect()).
+// No widget may import google_sign_in or lib/platform/google/* directly.
+//
+// Scope note: ConnectedServicesRepository and its providers
+// (connectedServicesRepositoryProvider, connectedServicesProvider) are a
+// separate, parallel Stage 6/7 task and are intentionally NOT added here —
+// see STAGE2_COMPONENT_DESIGN.md §4 and DECISIONS.md. (syncProgressProvider
+// belongs to that same follow-up work, surfacing syncEngineProvider.progress
+// above.)
+// ---------------------------------------------------------------------------
+
+/// The single shared google_sign_in plugin instance. Base scopes only
+/// (email, profile) — anything more is incremental auth via
+/// GooglePermissionManager. Never watched directly by widgets.
+final googleSignInPluginProvider = Provider<GoogleSignIn>((ref) {
+  return GoogleSignIn(scopes: const ['email', 'profile']);
+});
+
+final googleAuthRepositoryProvider = Provider<GoogleAuthRepository>((ref) {
+  return GoogleSignInAuthRepository(ref.watch(googleSignInPluginProvider));
+});
+
+final googleAccountRepositoryProvider = Provider<GoogleAccountRepository>((ref) {
+  return DriftGoogleAccountRepository(ref.watch(databaseProvider));
+});
+
+/// No GoogleAccountRepository dependency by design — GoogleServiceManager is
+/// the single writer of grantedScopes (fix for m1 in
+/// STAGE2_COMPONENT_DESIGN.md §2.4).
+final googlePermissionManagerProvider = Provider<GooglePermissionManager>((ref) {
+  return GooglePermissionManagerImpl(ref.watch(googleSignInPluginProvider));
+});
+
+final googleApiFactoryProvider = Provider<GoogleApiFactory>((ref) {
+  final factory = GoogleApiFactoryImpl(
+    ref.watch(googleAuthRepositoryProvider),
+    ref.watch(googlePermissionManagerProvider),
+  );
+  ref.onDispose(factory.invalidate);
+  return factory;
+});
+
+/// Facade every Google interaction passes through. Wires GoogleApiFactory's
+/// 401 callback post-construction (setter, not a constructor arg) to avoid a
+/// circular Riverpod dependency between this provider and
+/// googleApiFactoryProvider.
+final googleServiceManagerProvider = Provider<GoogleServiceManager>((ref) {
+  final apiFactory = ref.watch(googleApiFactoryProvider);
+  final manager = GoogleServiceManager(
+    auth: ref.watch(googleAuthRepositoryProvider),
+    accounts: ref.watch(googleAccountRepositoryProvider),
+    permissions: ref.watch(googlePermissionManagerProvider),
+    apiFactory: apiFactory,
+  );
+  apiFactory.wireAuthFailureCallback(manager.notifyAuthFailure);
+  ref.onDispose(manager.dispose);
+  return manager;
+});
+
+/// The only Google surface widgets watch. Seeded with the current state for
+/// late subscribers (see GoogleServiceManager.watchConnectionState()).
+final googleConnectionStateProvider = StreamProvider<GoogleConnectionState>((ref) {
+  return ref.watch(googleServiceManagerProvider).watchConnectionState();
 });
 // ---------------------------------------------------------------------------
 

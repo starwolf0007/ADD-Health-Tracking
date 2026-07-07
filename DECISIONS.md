@@ -390,3 +390,133 @@ The "← Go back" button calls `snoozeForSession()`, which:
 3. **Verify action suggestion**: Create a task titled "Deploy database", verify suggested action is "Check logs"
 4. **Test resume flow**: Tap "Resume →", verify task transitions to inProgress and re-entry card disappears
 5. **Test dismiss flow**: Tap "← Go back", verify card hides (but stays in DB as paused, re-appears on app restart)
+
+---
+
+# Google Foundation Sprint — Stages 4-5: Authentication + GoogleServiceManager
+
+Implements `STAGE2_COMPONENT_DESIGN.md` §2.1-2.4, §2.6-2.7, §3-5 (design doc, revision 2
+post adversarial-critic review). Full architecture diagram and component specs live in
+that document; this entry records the binding decisions and the deviations this
+implementation stage had to make.
+
+## Decision: tokens never live in Drift
+
+`GoogleAccounts` (schema v5) stores account METADATA only — id, email, displayName,
+photoUrl, grantedScopes (space-separated string), isPrimary, connectedAt,
+lastRefreshAt, tokenExpiresAtEstimate. No column holds a token, and none ever will;
+adding one is a review-blocking regression. Access tokens are never persisted anywhere
+(see next decision); the ID token is the only token FlutterSecureStorage ever holds,
+under a per-account key `neuroflow_google_id_token_<accountId>`, written and deleted
+exclusively by `GoogleSignInAuthRepository` (`lib/platform/google/google_auth_repository_impl.dart`).
+
+## Decision: `tokenExpiresAtEstimate` is derived, never plugin-provided
+
+`google_sign_in` v6.2.1 exposes no token-expiry field — `GoogleSignInAuthentication`
+surfaces only `accessToken` / `idToken` / `serverAuthCode`. `GoogleAccount.estimateExpiry()`
+derives it as `(lastRefreshAt ?? connectedAt) + 55min`, deliberately shy of the ~60-minute
+access-token TTL to absorb device clock skew. It is advisory-only — used to hint a
+"may need to reconnect" state in a future Settings UI — and is NEVER used to gate
+`GoogleApiFactory.clientFor()` and NEVER itself flips `GoogleConnectionStatus` to
+`expired`. The authoritative expiry signal is a live 401 from an API call.
+
+## Decision: `currentAccessToken()` reads the plugin's live getter, never storage
+
+`GoogleAuthRepository.currentAccessToken()` (impl: `GoogleSignInAuthRepository`) reads
+`GoogleSignIn.currentUser.authentication` fresh on every call — it never reads a stored
+copy. A secure-storage copy would be stale within about an hour (the plugin/Play
+Services silently rotates the underlying token), which is the common case given the
+existing 4h WorkManager sync cadence. This is also why the design does not persist an
+access token at all: the one place a stored copy would have been useful — a headless
+WorkManager isolate flushing Google-backed sync without the plugin available — is an
+open problem explicitly deferred to the tasks-integration sprint (not papered over with
+a token that would already be stale).
+
+## Decision: `switchAccount` is descoped this sprint
+
+`GoogleServiceManager` has no `switchAccount` method. `google_sign_in` ^6.2.1 has no
+account-targeted silent sign-in (only one `currentUser` at a time), and this sprint's
+Settings surface has no multi-account UI to call it. `GoogleAccountRepository` still
+supports N accounts and `setPrimary` (cheap, future-proof), but nothing but the first-
+connected account is ever made primary this sprint. A future multi-account sprint would
+respecify `switchAccount` as an interactive `signIn()` whose returned account is
+compared against the requested id, not a silent targeted restore.
+
+## Decision: `connecting → expired` is a legal transition
+
+`GoogleConnectionState.isLegalTransition()` allows `connecting → expired` in addition to
+`connecting → {connected, error, disconnected}`. This covers `GoogleServiceManager.initialize()`:
+a previous session existed (a persisted `GoogleAccountRepository` row) but the plugin's
+`silentSignIn()` could not restore it — distinct from `connecting → error`, which is
+reserved for an unexpected plugin/network exception. Without this transition,
+`initialize()`'s own documented behavior would trip the manager's debug-mode transition
+assert on a legitimate, non-exceptional path.
+
+## Decision: 401 feedback via `notifyAuthFailure()`
+
+`GoogleApiFactory`'s `_AuthenticatedClient` (an `http.BaseClient`) reads the token via
+`GoogleAuthRepository.currentAccessToken()` at `send()` time and, on a 401 response,
+invokes an injected `onAuthFailure` callback exactly once — wired to
+`GoogleServiceManager.notifyAuthFailure()` at composition-root time (`providers.dart`).
+`notifyAuthFailure()` transitions `connected → expired` and fires one best-effort silent
+`refreshSession()`. This is the only path that reaches `GoogleConnectionStatus.expired`
+from live traffic in practice; proactive expiry detection via `tokenExpiresAtEstimate`
+is deliberately not attempted (see above).
+
+## Implementation deviation: `GoogleApiFactory`'s auth-failure callback is wired via a
+## post-construction setter, not a constructor argument
+
+`GoogleServiceManager` depends on `GoogleApiFactory`, and `GoogleApiFactory` needs a
+callback into `GoogleServiceManager.notifyAuthFailure()` — a naive constructor-time
+wiring is circular in the Riverpod provider graph (`googleServiceManagerProvider` would
+need to read itself via `googleApiFactoryProvider`). Resolved with
+`GoogleApiFactory.wireAuthFailureCallback(void Function())`, called once by
+`googleServiceManagerProvider` immediately after both objects are constructed; the
+factory stores it behind a trampoline closure so clients created before or after the
+wiring call still pick up the current callback. The provider-table row in
+STAGE2_COMPONENT_DESIGN.md §4 (`GoogleApiFactoryImpl(authRepo, permissionManager)`, no
+third constructor arg) is consistent with this — the design doc's class-body pseudocode
+just didn't spell out the wiring mechanism.
+
+## Implementation deviation: ConnectedServicesRepository / SyncEngine dependencies
+## dropped from `GoogleServiceManager` this stage
+
+STAGE2_COMPONENT_DESIGN.md §2.1 specs `GoogleServiceManager`'s constructor with six
+dependencies, including `ConnectedServicesRepository` and `SyncEngine`, and an
+`enableService()` method that writes through the former. This implementation stage
+(Stages 4-5, Authentication + GoogleServiceManager only) is explicitly scoped to NOT
+build `ConnectedServicesRepository` — that ships in a parallel Stage 6/7 task.
+`GoogleServiceManager` here therefore takes only `GoogleAuthRepository`,
+`GoogleAccountRepository`, `GooglePermissionManager`, and `GoogleApiFactory`, and does
+not implement `enableService()`. `registerServiceIntegration()` and `clientFor(GoogleServiceId)`
+ARE implemented — the registration seam itself needs only an in-memory
+`Map<GoogleServiceId, GoogleServiceIntegration>`, no `ConnectedServicesRepository` or
+`SyncEngine` — so the seam is real, just unpopulated (nothing registers an integration
+this sprint). `lib/domain/google_service.dart` accordingly ships only the
+`GoogleServiceId` enum this stage, not the `GoogleServiceStatus` / `ConnectedService`
+domain types that belong to `ConnectedServicesRepository`. The `GoogleAccounts` v4→v5
+migration is likewise scoped to that one table — the design doc's combined
+`GoogleAccounts` + `ConnectedServices` migration is split across the two parallel tasks
+to avoid both touching `schemaVersion`/`onUpgrade` at once; whichever lands second bumps
+to v6. `syncEngineProvider` already exists in `providers.dart` from the parallel
+SyncEngine task and is untouched here; `connectedServicesRepositoryProvider`,
+`connectedServicesProvider`, and `syncProgressProvider` are left for that follow-up work
+(one-line pointer comments only, no stub providers).
+
+## Files Modified / Created
+
+- `lib/domain/google_account.dart` — NEW; `GoogleAccount` metadata model (no tokens)
+- `lib/domain/google_connection_state.dart` — NEW; `GoogleConnectionStatus` enum + `GoogleConnectionState`, including `isLegalTransition()`
+- `lib/domain/google_service.dart` — NEW; `GoogleServiceId` enum only (see deviation above)
+- `lib/data/google_auth_repository.dart` — NEW; `GoogleAuthRepository` interface + `GoogleAuthException`/`GoogleAuthTokenExpiredException`
+- `lib/data/google_account_repository.dart` — NEW; `GoogleAccountRepository` interface
+- `lib/data/google_account_repository_impl.dart` — NEW; `DriftGoogleAccountRepository`, enforces the single-primary invariant via `AppDatabase.transaction()`
+- `lib/data/database.dart` — added `GoogleAccounts` table (schema v4 → v5, additive `onUpgrade`), low-level query primitives (`watchGoogleAccounts`, `fetchGoogleAccounts`, `upsertGoogleAccount`, `demoteAllGoogleAccounts`, `promoteGoogleAccount`, `touchGoogleAccount`, `removeGoogleAccount`, `clearGoogleAccounts`)
+- `lib/platform/google/google_auth_repository_impl.dart` — NEW; `GoogleSignInAuthRepository`
+- `lib/platform/google/google_permission_manager.dart` + `google_permission_manager_impl.dart` — NEW; `GooglePermissionManager` / `GooglePermissionManagerImpl` (no `GoogleAccountRepository` dependency)
+- `lib/platform/google/google_api_factory.dart` + `google_api_factory_impl.dart` — NEW; `GoogleApiFactory` / `GoogleApiFactoryImpl`, `_AuthenticatedClient`
+- `lib/platform/google/google_service_manager.dart` — NEW; `GoogleServiceManager` facade, `GoogleServiceIntegration`
+- `lib/platform/google/google_scopes.dart` — NEW; unused-this-sprint `GoogleScopes` constants
+- `lib/providers.dart` — added `googleSignInPluginProvider`, `googleAuthRepositoryProvider`, `googleAccountRepositoryProvider`, `googlePermissionManagerProvider`, `googleApiFactoryProvider`, `googleServiceManagerProvider`, `googleConnectionStateProvider`
+- `lib/main.dart` — added non-blocking, try/catch-wrapped `googleServiceManagerProvider.initialize()` call at startup (silent session restore)
+- `DECISIONS.md` — this entry

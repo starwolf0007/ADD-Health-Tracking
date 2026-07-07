@@ -29,6 +29,12 @@ dependencies:
   google_sign_in: ^6.2.1
   googleapis: ^13.1.0
 
+  # Authenticated http.Client seam for GoogleApiFactory (Google Foundation
+  # Sprint) — already resolved transitively via google_sign_in/googleapis at
+  # 2.0.2 (see pubspec.lock); declared directly here since
+  # lib/platform/google/ and lib/platform/sync/ import it directly.
+  http: ^2.0.2
+
   # Secure storage (tokens, sensitive prefs — §2.8)
   flutter_secure_storage: ^9.2.1
 

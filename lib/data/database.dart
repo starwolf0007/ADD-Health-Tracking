@@ -133,15 +133,52 @@ class RoutineSteps extends Table {
 }
 
 // ---------------------------------------------------------------------------
+// Google account metadata (schema v5)
+// ---------------------------------------------------------------------------
+
+/// Connected Google account METADATA. SECURITY INVARIANT: this table has no
+/// token columns and never will — access/id/refresh tokens live exclusively
+/// in FlutterSecureStorage (see
+/// lib/platform/google/google_auth_repository_impl.dart key scheme). Adding
+/// a token column here is a review-blocking violation.
+@DataClassName('GoogleAccountRow')
+class GoogleAccounts extends Table {
+  TextColumn get id => text()(); // google_sign_in stable id
+  TextColumn get email => text()();
+  TextColumn get displayName => text().nullable()();
+  TextColumn get photoUrl => text().nullable()();
+  TextColumn get grantedScopes =>
+      text().withDefault(const Constant(''))(); // space-separated
+  BoolColumn get isPrimary => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get connectedAt => dateTime()();
+  DateTimeColumn get lastRefreshAt => dateTime().nullable()();
+  DateTimeColumn get tokenExpiresAtEstimate => dateTime().nullable()();
+  // DERIVED (connectedAt/lastRefreshAt + 55min), advisory-only — see
+  // GoogleAccount.tokenExpiresAtEstimate doc. Never the authoritative expiry
+  // signal (a 401 is); never a token itself.
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+// ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
 
-@DriftDatabase(tables: [Tasks, SyncQueue, Habits, HabitCheckIns, Routines, RoutineSteps])
+@DriftDatabase(tables: [
+  Tasks,
+  SyncQueue,
+  Habits,
+  HabitCheckIns,
+  Routines,
+  RoutineSteps,
+  GoogleAccounts,
+])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -159,6 +196,11 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from < 4) {
         await m.createTable(syncQueue);
+      }
+      if (from < 5) {
+        // Pure additive migration — no data transforms, no changes to
+        // existing tables (Google Foundation Sprint, Stage 4).
+        await m.createTable(googleAccounts);
       }
     },
   );
@@ -322,6 +364,49 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> clearDoneSyncOps() =>
       (delete(syncQueue)..where((s) => s.status.equals('done'))).go();
+
+  // ------------------------------------------------------------------
+  // Google account queries
+  // ------------------------------------------------------------------
+  // Low-level primitives only — enum/list<->string mapping and the
+  // setPrimary/getPrimary invariant enforcement live in
+  // DriftGoogleAccountRepository (lib/data/google_account_repository_impl.dart),
+  // which composes these via `transaction()` for atomicity.
+
+  /// All Google account metadata rows, primary first.
+  Stream<List<GoogleAccountRow>> watchGoogleAccounts() {
+    return (select(googleAccounts)
+          ..orderBy([
+            (t) => OrderingTerm.desc(t.isPrimary),
+            (t) => OrderingTerm.asc(t.connectedAt),
+          ]))
+        .watch();
+  }
+
+  Future<List<GoogleAccountRow>> fetchGoogleAccounts() =>
+      select(googleAccounts).get();
+
+  Future<void> upsertGoogleAccount(GoogleAccountsCompanion account) =>
+      into(googleAccounts).insertOnConflictUpdate(account);
+
+  Future<void> demoteAllGoogleAccounts() => update(googleAccounts)
+      .write(const GoogleAccountsCompanion(isPrimary: Value(false)));
+
+  Future<void> promoteGoogleAccount(String accountId) =>
+      (update(googleAccounts)..where((t) => t.id.equals(accountId)))
+          .write(const GoogleAccountsCompanion(isPrimary: Value(true)));
+
+  Future<void> touchGoogleAccount(
+    String accountId,
+    GoogleAccountsCompanion patch,
+  ) =>
+      (update(googleAccounts)..where((t) => t.id.equals(accountId)))
+          .write(patch);
+
+  Future<void> removeGoogleAccount(String accountId) =>
+      (delete(googleAccounts)..where((t) => t.id.equals(accountId))).go();
+
+  Future<void> clearGoogleAccounts() => delete(googleAccounts).go();
 }
 
 LazyDatabase _openConnection() {

@@ -9,6 +9,8 @@
 // tree builds. The same container is handed to ProviderScope via
 // `parent:` so no second DB connection is opened.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -52,6 +54,13 @@ void main() async {
   // desktop wouldn't appear for up to 4h (the WorkManager interval).
   ForegroundSyncObserver(container).start();
 
+  // Attempt silent restore of a previous Google session (Google Foundation
+  // Sprint). Fire-and-forget: never awaited, so a slow or failing plugin
+  // call can never delay first paint, and wrapped in try/catch so it can
+  // never crash startup — the connection just stays disconnected/expired
+  // and the user can retry from Settings. Never logs tokens or emails.
+  unawaited(_initializeGoogleServices(container));
+
   // Schedule the morning briefing as an exact alarm (AlarmManager) rather than
   // WorkManager, so it fires precisely on time for ADHD time-blindness.
   // WorkManager is kept only for the 4h sync flush where inexact is acceptable.
@@ -80,6 +89,19 @@ Future<void> _hydrateAdvisorTier(ProviderContainer container) async {
     // lexi is already the default; no-op when cloudEnabled is false.
   } catch (_) {
     // Non-fatal — advisor stays at default lexi tier.
+  }
+}
+
+/// Silently restores a previous Google session, if any (no-op signed-out).
+/// Non-fatal by design: GoogleServiceManager.initialize() itself never
+/// throws for "not signed in", but this wrapper guards against unexpected
+/// plugin/platform failures too, so a broken Google Play Services install
+/// can never block app startup.
+Future<void> _initializeGoogleServices(ProviderContainer container) async {
+  try {
+    await container.read(googleServiceManagerProvider).initialize();
+  } catch (_) {
+    // Non-fatal — connection stays disconnected; never log tokens/emails.
   }
 }
 
