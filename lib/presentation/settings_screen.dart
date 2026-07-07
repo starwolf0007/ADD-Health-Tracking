@@ -14,6 +14,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../domain/google_connection_state.dart';
+import '../domain/google_service.dart';
 import '../platform/alarms/alarm_scheduler.dart';
 import '../providers.dart';
 import 'theme.dart';
@@ -192,6 +194,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   value: _globalPrivacy,
                   onChanged: _toggleGlobalPrivacy,
                 ),
+                const SizedBox(height: 32),
+
+                // ----------------------------------- Connected Services
+                _SectionLabel('Connected Services'),
+                const SizedBox(height: 8),
+                const _GoogleAccountTile(),
+                const SizedBox(height: 12),
+                const _MoreServicesList(),
               ],
             ),
     );
@@ -297,6 +307,272 @@ class _ToggleTile extends StatelessWidget {
             inactiveTrackColor: AppColors.surfaceVariant,
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Connected Services (Google Foundation Sprint, Stage 6)
+//
+// This screen never imports google_sign_in or anything under
+// lib/platform/google/ — only providers.dart (which watches/reads
+// GoogleServiceManager) and the pure domain types it exposes.
+// ---------------------------------------------------------------------------
+
+/// "Google Account" row — the ONE functional action in this sprint's
+/// Connected Services UI (connect()/disconnect()). Renders correctly with
+/// zero crashes in the default disconnected state.
+class _GoogleAccountTile extends ConsumerWidget {
+  const _GoogleAccountTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final connectionAsync = ref.watch(googleConnectionStateProvider);
+
+    return connectionAsync.when(
+      data: (state) {
+        switch (state.status) {
+          case GoogleConnectionStatus.connecting:
+            return const _GoogleAccountCard(
+              title: 'Google Account',
+              busy: true,
+              subtitle: 'Connecting…',
+            );
+          case GoogleConnectionStatus.connected:
+          case GoogleConnectionStatus.expired:
+            return _GoogleAccountCard(
+              title: 'Google Account',
+              subtitle: state.email ?? 'Connected',
+              warning: state.status == GoogleConnectionStatus.expired
+                  ? 'Session may need reconnecting.'
+                  : null,
+              actionLabel: 'Disconnect',
+              onAction: () =>
+                  ref.read(googleServiceManagerProvider).disconnect(),
+            );
+          case GoogleConnectionStatus.disconnected:
+          case GoogleConnectionStatus.error:
+            final isError = state.status == GoogleConnectionStatus.error;
+            return _GoogleAccountCard(
+              title: 'Google Account',
+              subtitle: isError && state.lastError != null
+                  ? state.lastError!
+                  : 'Connect to sync tasks and unlock more services.',
+              isErrorSubtitle: isError,
+              actionLabel: isError ? 'Retry' : 'Connect Google',
+              onAction: () => ref.read(googleServiceManagerProvider).connect(),
+            );
+        }
+      },
+      // Riverpod StreamProvider loading/error states never surface here in
+      // practice — GoogleServiceManager.watchConnectionState() seeds the
+      // current state (disconnected by default) to every new listener — but
+      // both are handled defensively so this screen never crashes.
+      loading: () => const _GoogleAccountCard(
+        title: 'Google Account',
+        busy: true,
+        subtitle: 'Connecting…',
+      ),
+      error: (_, __) => _GoogleAccountCard(
+        title: 'Google Account',
+        subtitle: 'Connect to sync tasks and unlock more services.',
+        actionLabel: 'Connect Google',
+        onAction: () => ref.read(googleServiceManagerProvider).connect(),
+      ),
+    );
+  }
+}
+
+class _GoogleAccountCard extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool isErrorSubtitle;
+  final bool busy;
+  final String? warning;
+  final String? actionLabel;
+  final VoidCallback? onAction;
+
+  const _GoogleAccountCard({
+    required this.title,
+    required this.subtitle,
+    this.isErrorSubtitle = false,
+    this.busy = false,
+    this.warning,
+    this.actionLabel,
+    this.onAction,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (busy) ...[
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor: AlwaysStoppedAnimation(AppColors.accent),
+              ),
+            ),
+            const SizedBox(width: 12),
+          ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: AppTextStyles.bodyMedium),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: isErrorSubtitle
+                        ? AppColors.warning
+                        : AppColors.textMuted,
+                  ),
+                ),
+                if (warning != null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    warning!,
+                    style: AppTextStyles.bodySmall
+                        .copyWith(color: AppColors.warning),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (actionLabel != null && onAction != null) ...[
+            const SizedBox(width: 12),
+            TextButton(
+              onPressed: onAction,
+              child: Text(
+                actionLabel!,
+                style: TextStyle(color: AppColors.accent),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// "More services" list — every row is inert this sprint (every
+/// GoogleServiceId is comingSoon). A tap logs friendly no-op interest via
+/// GoogleServiceManager.enableService(); deliberately no snackbar/feedback
+/// loop (ADHD-friendly: no dead-end feedback for an action with no visible
+/// effect).
+class _MoreServicesList extends ConsumerWidget {
+  const _MoreServicesList();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final servicesAsync = ref.watch(connectedServicesProvider);
+
+    return servicesAsync.when(
+      data: (services) => Column(
+        children: [
+          for (var i = 0; i < services.length; i++) ...[
+            _ComingSoonServiceTile(service: services[i]),
+            if (i != services.length - 1) const SizedBox(height: 8),
+          ],
+        ],
+      ),
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+    );
+  }
+}
+
+class _ComingSoonServiceTile extends ConsumerWidget {
+  final ConnectedService service;
+
+  const _ComingSoonServiceTile({required this.service});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () {
+        // Fire-and-forget: this sprint every service is comingSoon, so the
+        // call always no-ops (returns false) — nothing to react to in the UI.
+        ref.read(googleServiceManagerProvider).enableService(service.id);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(
+                      _serviceLabel(service.id),
+                      style: AppTextStyles.bodyMedium,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const _ComingSoonBadge(),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            IgnorePointer(
+              child: Switch(
+                value: false,
+                onChanged: null,
+                activeColor: AppColors.accent,
+                inactiveTrackColor: AppColors.surfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _serviceLabel(GoogleServiceId id) => switch (id) {
+        GoogleServiceId.tasks => 'Tasks',
+        GoogleServiceId.calendar => 'Calendar',
+        GoogleServiceId.drive => 'Drive',
+        GoogleServiceId.gmail => 'Gmail',
+        GoogleServiceId.contacts => 'Contacts',
+        GoogleServiceId.healthConnect => 'Health Connect',
+        GoogleServiceId.gemini => 'Gemini',
+      };
+}
+
+class _ComingSoonBadge extends StatelessWidget {
+  const _ComingSoonBadge();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceVariant,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        'COMING SOON',
+        style: AppTextStyles.monoSmall.copyWith(
+          fontSize: 10,
+          color: AppColors.textMuted,
+        ),
       ),
     );
   }

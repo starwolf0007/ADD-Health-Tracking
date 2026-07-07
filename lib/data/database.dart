@@ -162,6 +162,27 @@ class GoogleAccounts extends Table {
 }
 
 // ---------------------------------------------------------------------------
+// Connected services status (schema v6)
+// ---------------------------------------------------------------------------
+
+/// Per-service connection status ("Connected services" list in Settings).
+/// One row per GoogleServiceId, seeded explicitly by
+/// DriftConnectedServicesRepository.ensureSeeded() (never lazily inside a
+/// watch() stream — see STAGE2_CRITIC_REPORT.md m5).
+@DataClassName('ConnectedServiceRow')
+class ConnectedServices extends Table {
+  TextColumn get serviceId => text()(); // GoogleServiceId.name
+  TextColumn get status =>
+      text().withDefault(const Constant('comingSoon'))();
+  // 'comingSoon' | 'available' | 'enabled' | 'disabled'
+  DateTimeColumn get enabledAt => dateTime().nullable()();
+  DateTimeColumn get lastUsedAt => dateTime().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {serviceId};
+}
+
+// ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
 
@@ -173,12 +194,13 @@ class GoogleAccounts extends Table {
   Routines,
   RoutineSteps,
   GoogleAccounts,
+  ConnectedServices,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_openConnection());
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -201,6 +223,11 @@ class AppDatabase extends _$AppDatabase {
         // Pure additive migration — no data transforms, no changes to
         // existing tables (Google Foundation Sprint, Stage 4).
         await m.createTable(googleAccounts);
+      }
+      if (from < 6) {
+        // Pure additive migration — no data transforms, no changes to the
+        // v5 GoogleAccounts block above (Google Foundation Sprint, Stage 6).
+        await m.createTable(connectedServices);
       }
     },
   );
@@ -407,6 +434,35 @@ class AppDatabase extends _$AppDatabase {
       (delete(googleAccounts)..where((t) => t.id.equals(accountId))).go();
 
   Future<void> clearGoogleAccounts() => delete(googleAccounts).go();
+
+  // ------------------------------------------------------------------
+  // Connected services queries
+  // ------------------------------------------------------------------
+  // Low-level primitives only — enum<->string mapping, seeding, and
+  // read-before-watch ordering live in DriftConnectedServicesRepository
+  // (lib/data/connected_services_repository_impl.dart), mirroring the
+  // GoogleAccounts primitives above.
+
+  /// All connected-service rows, ordered by serviceId (repository re-sorts
+  /// into GoogleServiceId enum order, since text sort != enum order).
+  Stream<List<ConnectedServiceRow>> watchConnectedServices() {
+    return select(connectedServices).watch();
+  }
+
+  Future<List<ConnectedServiceRow>> fetchConnectedServices() =>
+      select(connectedServices).get();
+
+  Future<void> upsertConnectedService(ConnectedServicesCompanion service) =>
+      into(connectedServices).insertOnConflictUpdate(service);
+
+  Future<void> patchConnectedService(
+    String serviceId,
+    ConnectedServicesCompanion patch,
+  ) =>
+      (update(connectedServices)..where((t) => t.serviceId.equals(serviceId)))
+          .write(patch);
+
+  Future<void> clearConnectedServices() => delete(connectedServices).go();
 }
 
 LazyDatabase _openConnection() {

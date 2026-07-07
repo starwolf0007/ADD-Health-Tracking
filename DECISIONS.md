@@ -520,3 +520,73 @@ SyncEngine task and is untouched here; `connectedServicesRepositoryProvider`,
 - `lib/providers.dart` — added `googleSignInPluginProvider`, `googleAuthRepositoryProvider`, `googleAccountRepositoryProvider`, `googlePermissionManagerProvider`, `googleApiFactoryProvider`, `googleServiceManagerProvider`, `googleConnectionStateProvider`
 - `lib/main.dart` — added non-blocking, try/catch-wrapped `googleServiceManagerProvider.initialize()` call at startup (silent session restore)
 - `DECISIONS.md` — this entry
+
+---
+
+# Google Foundation Sprint — Stage 6: Connected Services Settings Page
+
+Implements `STAGE2_COMPONENT_DESIGN.md` §2.8, the remaining half of §2.1 (`ConnectedServicesRepository`
+dependency + `enableService()`), and §3-4 (the split-in-two `ConnectedServices` migration and its
+providers) that the Stages 4-5 entry above explicitly deferred to this task. `SyncEngine` — the other
+dependency §2.1 lists on `GoogleServiceManager` — is deliberately still not wired in; nothing in this
+facade consumes it yet and the parallel Stage 7 SyncEngine keeps its own independent provider.
+
+## Decision: schema v5 → v6, additive only, does not touch the v5 GoogleAccounts block
+
+Per the note left in the Stages 4-5 entry ("whichever lands second bumps to v6"), this task bumps
+`AppDatabase.schemaVersion` from 5 to 6 and adds a `ConnectedServices` table via a new
+`if (from < 6) { await m.createTable(connectedServices); }` block appended after (never merged into)
+the existing `if (from < 5)` block. No changes to `GoogleAccounts` or any other v5-and-earlier table.
+
+## Decision: `ConnectedServices` rows are seeded via an explicit, awaited `ensureSeeded()` step — never lazily inside `watchAll()`'s stream pipeline
+
+The design doc originally specified lazy seeding "on first read" inside the watch stream.
+`STAGE2_CRITIC_REPORT.md` m5 flagged this as a write-triggers-rewatch risk: a table write performed
+during stream setup re-fires the same Drift watcher that triggered it. Fix shipped here:
+`DriftConnectedServicesRepository` kicks off a `Future<void> _seeded` (an idempotent
+"insert one comingSoon row per missing `GoogleServiceId`" pass) once in its constructor; every public
+method (`watchAll()`, `get()`, `setStatus()`, `touchLastUsed()`, `clearAll()`) `await`s that same Future
+before touching the table, and the write itself never happens inside `watchConnectedServices()`'s
+`.watch()` pipeline. `clearAll()` re-runs the same idempotent seed pass immediately after wiping the
+table, so the "always exactly one row per `GoogleServiceId`" invariant holds immediately after a
+factory reset too, not just at cold start.
+
+## Decision: `enableService()` "records intent" means `touchLastUsed()`, not `setStatus()`
+
+`STAGE2_CRITIC_REPORT.md` n3 flagged the design doc's "records intent via ConnectedServicesRepository
+(status stays comingSoon)" as ambiguous — recording *what*, concretely? Resolved: a tap on a
+"coming soon" service row calls `GoogleServiceManager.enableService(id)`, which calls
+`ConnectedServicesRepository.touchLastUsed(id)` (sets `lastUsedAt`) and always returns `false`. It
+never calls `setStatus()` — `status` is reserved for a real state transition
+(`comingSoon → available/enabled/disabled`) that only a future sprint with an actual product client
+may perform; writing `status` here would fabricate a status change nothing backs. `lastUsedAt` is a
+timestamp-only signal that costs nothing and gives a future sprint usage data ("which coming-soon
+services did users tap") without pretending anything was enabled.
+
+## Decision: no snackbar / visible feedback on a "coming soon" tap
+
+Tapping a coming-soon service row calls `enableService()` fire-and-forget and renders nothing new —
+no snackbar, no dialog, no toggle animation (the `Switch` is rendered disabled via `onChanged: null`,
+wrapped in `IgnorePointer` so taps pass through to the row's `InkWell` instead of being swallowed).
+This is a deliberate ADHD-friendly UX choice: an action with no real effect should not manufacture a
+dead-end feedback loop or a false sense of progress.
+
+## Deviation: `GoogleServiceManager` gains only `ConnectedServicesRepository`, not `SyncEngine`
+
+STAGE2_COMPONENT_DESIGN.md §2.1's six-dependency constructor also lists `SyncEngine`. This task adds
+only the fifth dependency, `ConnectedServicesRepository` — `SyncEngine` is intentionally left out.
+Nothing in `GoogleServiceManager`'s current surface (connect/disconnect/refreshSession/enableService/
+clientFor) needs a sync engine; `syncEngineProvider` already exists in `providers.dart` from the
+parallel Stage 7 task and is untouched here. Wiring `SyncEngine` into the facade is left for whichever
+future sprint actually registers a sync channel through it.
+
+## Files Modified / Created
+
+- `lib/domain/google_service.dart` — added `GoogleServiceStatus` enum and `ConnectedService` class (extends the Stages 4-5 `GoogleServiceId`-only file; no second domain file, per design §2.8's single-file layout)
+- `lib/data/connected_services_repository.dart` — NEW; `ConnectedServicesRepository` interface (`watchAll`, `get`, `setStatus`, `touchLastUsed`, `clearAll`)
+- `lib/data/connected_services_repository_impl.dart` — NEW; `DriftConnectedServicesRepository`, with the constructor-kicked-off `_seeded` Future fix for m5 described above
+- `lib/data/database.dart` — added `ConnectedServices` table (`@DataClassName('ConnectedServiceRow')`), bumped `schemaVersion` 5 → 6, added the additive `if (from < 6)` migration block, added low-level query primitives (`watchConnectedServices`, `fetchConnectedServices`, `upsertConnectedService`, `patchConnectedService`, `clearConnectedServices`) mirroring the existing `GoogleAccounts` primitives
+- `lib/platform/google/google_service_manager.dart` — added `ConnectedServicesRepository services` constructor dependency; implemented `enableService(GoogleServiceId)` per the decision above
+- `lib/providers.dart` — added `connectedServicesRepositoryProvider` and `connectedServicesProvider` in a new delimited block; updated the existing `googleServiceManagerProvider` block with one added line (`services: ref.watch(connectedServicesRepositoryProvider)`) rather than rewriting it
+- `lib/presentation/settings_screen.dart` — added a "Connected Services" section: `_GoogleAccountTile`/`_GoogleAccountCard` (watches `googleConnectionStateProvider`; the sprint's only functional action, `connect()`/`disconnect()`) and `_MoreServicesList`/`_ComingSoonServiceTile`/`_ComingSoonBadge` (watches `connectedServicesProvider`; every row inert this sprint). Imports only `domain/google_connection_state.dart` and `domain/google_service.dart` (pure domain) plus `providers.dart` — no `google_sign_in`, no `lib/platform/google/*` import.
+- `DECISIONS.md` — this entry

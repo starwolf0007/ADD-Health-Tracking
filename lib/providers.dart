@@ -15,6 +15,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 
+import 'data/connected_services_repository.dart';
+import 'data/connected_services_repository_impl.dart';
 import 'data/database.dart';
 import 'data/google_account_repository.dart';
 import 'data/google_account_repository_impl.dart';
@@ -26,6 +28,7 @@ import 'data/routine_repository_impl.dart';
 import 'data/task_repository.dart';
 import 'data/task_repository_impl.dart';
 import 'domain/google_connection_state.dart';
+import 'domain/google_service.dart';
 import 'domain/habit.dart';
 import 'domain/routine.dart';
 import 'domain/task.dart';
@@ -91,19 +94,18 @@ final syncEngineProvider = Provider<SyncEngine>((ref) {
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Google integration (Google Foundation Sprint, Stages 4-5)
+// Google integration (Google Foundation Sprint, Stages 4-6)
 //
 // Every Google interaction in the app passes through GoogleServiceManager —
 // widgets watch googleConnectionStateProvider for state and
-// ref.read(googleServiceManagerProvider) for actions (connect()/disconnect()).
-// No widget may import google_sign_in or lib/platform/google/* directly.
+// ref.read(googleServiceManagerProvider) for actions (connect()/disconnect()/
+// enableService()). Widgets read the Connected Services list directly via
+// connectedServicesProvider (read-only Drift metadata — see n2 in
+// STAGE2_CRITIC_REPORT.md for the documented read/write asymmetry). No
+// widget may import google_sign_in or lib/platform/google/* directly.
 //
-// Scope note: ConnectedServicesRepository and its providers
-// (connectedServicesRepositoryProvider, connectedServicesProvider) are a
-// separate, parallel Stage 6/7 task and are intentionally NOT added here —
-// see STAGE2_COMPONENT_DESIGN.md §4 and DECISIONS.md. (syncProgressProvider
-// belongs to that same follow-up work, surfacing syncEngineProvider.progress
-// above.)
+// Scope note: syncProgressProvider (surfacing syncEngineProvider.progress)
+// remains a separate, parallel Stage 7 follow-up — not added here.
 // ---------------------------------------------------------------------------
 
 /// The single shared google_sign_in plugin instance. Base scopes only
@@ -148,6 +150,7 @@ final googleServiceManagerProvider = Provider<GoogleServiceManager>((ref) {
     accounts: ref.watch(googleAccountRepositoryProvider),
     permissions: ref.watch(googlePermissionManagerProvider),
     apiFactory: apiFactory,
+    services: ref.watch(connectedServicesRepositoryProvider),
   );
   apiFactory.wireAuthFailureCallback(manager.notifyAuthFailure);
   ref.onDispose(manager.dispose);
@@ -158,6 +161,26 @@ final googleServiceManagerProvider = Provider<GoogleServiceManager>((ref) {
 /// late subscribers (see GoogleServiceManager.watchConnectionState()).
 final googleConnectionStateProvider = StreamProvider<GoogleConnectionState>((ref) {
   return ref.watch(googleServiceManagerProvider).watchConnectionState();
+});
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Connected services (Google Foundation Sprint, Stage 6)
+//
+// Account-independent metadata: works identically signed-in or signed-out.
+// The Settings "More services" list reads this directly; writes still go
+// exclusively through GoogleServiceManager.enableService() (never straight
+// to the repository from a widget).
+// ---------------------------------------------------------------------------
+
+final connectedServicesRepositoryProvider =
+    Provider<ConnectedServicesRepository>((ref) {
+  return DriftConnectedServicesRepository(ref.watch(databaseProvider));
+});
+
+final connectedServicesProvider =
+    StreamProvider<List<ConnectedService>>((ref) {
+  return ref.watch(connectedServicesRepositoryProvider).watchAll();
 });
 // ---------------------------------------------------------------------------
 

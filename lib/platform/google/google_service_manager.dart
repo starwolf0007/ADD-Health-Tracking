@@ -9,16 +9,12 @@
 // account; it returns a disconnected/empty result and never throws for
 // "not signed in".
 //
-// SCOPE NOTE (Google Foundation Sprint, Stages 4-5): the full facade in
-// STAGE2_COMPONENT_DESIGN.md §2.1 also takes a ConnectedServicesRepository
-// and a SyncEngine dependency, and exposes enableService(). Those two
-// components are a separate, parallel Stage 6/7 task and are not built
-// here — this class therefore does NOT depend on them and does NOT
-// implement enableService() (which is specified to write through
-// ConnectedServicesRepository). registerServiceIntegration()/clientFor()
-// ARE implemented: the registration seam itself needs no
-// ConnectedServicesRepository or SyncEngine, only an in-memory registry.
-// See DECISIONS.md for the full rationale.
+// SCOPE NOTE (Google Foundation Sprint, Stage 6): this class now depends on
+// ConnectedServicesRepository and implements enableService(). It still does
+// NOT depend on SyncEngine — nothing in this facade needs it yet, and the
+// parallel Stage 7 SyncEngine has its own independent provider (see
+// DECISIONS.md). registerServiceIntegration()/clientFor() were already
+// implemented in Stages 4-5.
 //
 // NEVER log tokens, ID tokens, refresh tokens, or user IDs here. Emails may
 // appear in GoogleConnectionState/GoogleAccount data, never in a
@@ -28,6 +24,7 @@ import 'dart:async';
 
 import 'package:http/http.dart' as http;
 
+import '../../data/connected_services_repository.dart';
 import '../../data/google_account_repository.dart';
 import '../../data/google_auth_repository.dart';
 import '../../domain/google_account.dart';
@@ -41,6 +38,7 @@ class GoogleServiceManager {
   final GoogleAccountRepository _accounts;
   final GooglePermissionManager _permissions;
   final GoogleApiFactory _apiFactory;
+  final ConnectedServicesRepository _services;
 
   final Map<GoogleServiceId, GoogleServiceIntegration> _registry = {};
 
@@ -53,10 +51,12 @@ class GoogleServiceManager {
     required GoogleAccountRepository accounts,
     required GooglePermissionManager permissions,
     required GoogleApiFactory apiFactory,
+    required ConnectedServicesRepository services,
   })  : _auth = auth,
         _accounts = accounts,
         _permissions = permissions,
-        _apiFactory = apiFactory;
+        _apiFactory = apiFactory,
+        _services = services;
 
   /// Broadcast stream of connection state. Emits the current state to new
   /// listeners immediately (seeded/behavior-subject semantics — a plain
@@ -238,6 +238,24 @@ class GoogleServiceManager {
   /// client may bypass this seam.
   void registerServiceIntegration(GoogleServiceIntegration integration) {
     _registry[integration.id] = integration;
+  }
+
+  /// User toggled a "coming soon" service in Settings. THIS SPRINT every
+  /// service is comingSoon (no product client exists for any of them — see
+  /// STAGE2_COMPONENT_DESIGN.md §7 non-goals), so this never requests scopes
+  /// and never flips status to enabled; it always returns false.
+  ///
+  /// "Records intent" (resolving the ambiguity flagged as n3 in
+  /// STAGE2_CRITIC_REPORT.md) concretely means: touch the service's
+  /// lastUsedAt via ConnectedServicesRepository.touchLastUsed(), NOT
+  /// setStatus() — status is a real state transition (comingSoon →
+  /// available/enabled/disabled) that only a future sprint with an actual
+  /// product client may perform, whereas lastUsedAt is a timestamp-only
+  /// signal that a user tapped the row. Writing status here would fabricate
+  /// a status change nothing backs. See DECISIONS.md.
+  Future<bool> enableService(GoogleServiceId service) async {
+    await _services.touchLastUsed(service);
+    return false;
   }
 
   /// Authenticated HTTP client for a registered service, or null when
