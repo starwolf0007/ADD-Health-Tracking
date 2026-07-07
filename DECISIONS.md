@@ -590,3 +590,44 @@ future sprint actually registers a sync channel through it.
 - `lib/providers.dart` — added `connectedServicesRepositoryProvider` and `connectedServicesProvider` in a new delimited block; updated the existing `googleServiceManagerProvider` block with one added line (`services: ref.watch(connectedServicesRepositoryProvider)`) rather than rewriting it
 - `lib/presentation/settings_screen.dart` — added a "Connected Services" section: `_GoogleAccountTile`/`_GoogleAccountCard` (watches `googleConnectionStateProvider`; the sprint's only functional action, `connect()`/`disconnect()`) and `_MoreServicesList`/`_ComingSoonServiceTile`/`_ComingSoonBadge` (watches `connectedServicesProvider`; every row inert this sprint). Imports only `domain/google_connection_state.dart` and `domain/google_service.dart` (pure domain) plus `providers.dart` — no `google_sign_in`, no `lib/platform/google/*` import.
 - `DECISIONS.md` — this entry
+
+---
+
+# Google Foundation Sprint — QA fix: `_reconcile()` grantedScopes is a union, not "fresh wins"
+
+## Bug
+
+`GoogleSignInAuthRepository._toAccount()` (`lib/platform/google/google_auth_repository_impl.dart`)
+always sets `grantedScopes: const ['email', 'profile']` — the base sign-in scopes are all the
+auth layer ever knows about; anything beyond that is `GooglePermissionManager`'s cache, by
+design (the auth repo deliberately does not depend on it). Because `fresh.grantedScopes` is
+therefore *never* empty, `GoogleServiceManager._reconcile()`'s old
+`fresh.grantedScopes.isNotEmpty ? fresh.grantedScopes : existing.grantedScopes` always took the
+`fresh` branch — the `existing` branch was permanently dead code. Harmless today (nothing this
+sprint calls `GooglePermissionManager.ensureScopes()` beyond email/profile — see
+STAGE2_COMPONENT_DESIGN.md §7 non-goals), but the moment a future sprint persists an
+incrementally-granted scope (e.g. Tasks) via `GoogleAccountRepository.touch(grantedScopes: ...)`,
+every subsequent `initialize()` (silent restore) or `refreshSession()` call would silently
+overwrite the persisted extra scope back down to just `['email', 'profile']`, since `_reconcile()`
+would trust `fresh` and `_persistAndHydrate()` writes the result straight back through.
+
+## Fix
+
+`_reconcile()` now computes `grantedScopes` as the **union** of `fresh.grantedScopes` and
+`existing.grantedScopes` instead of picking one or the other. `_toAccount()` is not made to lie
+about scopes it doesn't know it has — the union lives in `_reconcile()`, the one place that
+already sees both the freshly-reported base scopes and whatever was previously persisted. This
+is deliberately conservative: it never lets a base-scope-only result drop a previously-granted
+extra scope, at the cost of not handling scope *revocation* (a scope removed via Google's OAuth
+settings, detectable today only via a future 403 from that service's API — a known separate gap,
+m2 in `STAGE2_CRITIC_REPORT.md`, not addressed by this fix). All three call sites
+(`initialize()`, `connect()`, `refreshSession()`) pass `fresh` from the auth repository and
+`existing` from `GoogleAccountRepository` unchanged, so the union is a strict superset of the old
+(effectively fresh-only) behavior in every case — none of them regress.
+
+### Files Modified
+
+- `lib/platform/google/google_service_manager.dart` — `_reconcile()`: `grantedScopes` computed as
+  `{...existing.grantedScopes, ...fresh.grantedScopes}.toList()` instead of the dead-branch
+  `isNotEmpty` check
+- `DECISIONS.md` — this entry

@@ -303,8 +303,21 @@ class GoogleServiceManager {
       email: fresh.email,
       displayName: fresh.displayName,
       photoUrl: fresh.photoUrl,
-      grantedScopes:
-          fresh.grantedScopes.isNotEmpty ? fresh.grantedScopes : existing.grantedScopes,
+      // Union, not "fresh wins": GoogleSignInAuthRepository._toAccount() only
+      // ever reports the two base sign-in scopes (email/profile) — it has no
+      // visibility into scopes GooglePermissionManager may separately have
+      // cached (e.g. an incrementally-granted scope a future sprint
+      // persisted via GoogleAccountRepository.touch()). Treating
+      // fresh.grantedScopes as the full authoritative set would silently
+      // downgrade those extra scopes back to the base two on every restore
+      // (initialize()/refreshSession()). Scope *revocation* (a scope pulled
+      // via Google's OAuth settings, only observable via a future 403) is a
+      // known separate gap, intentionally not handled here — see m2 in
+      // STAGE2_CRITIC_REPORT.md.
+      grantedScopes: {
+        ...existing.grantedScopes,
+        ...fresh.grantedScopes,
+      }.toList(),
       isPrimary: existing.isPrimary,
       connectedAt: existing.connectedAt,
       lastRefreshAt: fresh.lastRefreshAt ?? existing.lastRefreshAt,
