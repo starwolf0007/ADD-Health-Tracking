@@ -746,3 +746,18 @@ hallucinated `taskTitle` is discarded silently, identical to any other malformed
 - `android/app/src/main/kotlin/com/neuroflow/lexi/LexiBridge.kt` — reimplemented against AICore
 - `android/app/src/main/AndroidManifest.xml` — added `<uses-feature>` (see above)
 - `lib/providers.dart` — import path updated for `LexiPlanAdvisor`'s new location
+
+## ADR-006: Dependency Modernization Policy
+
+Major dependency upgrades are performed one ecosystem at a time, with a green build
+(`flutter analyze`, `dart run build_runner build`) required before proceeding. Runtime
+libraries and build tooling are never upgraded in the same step unless strictly required
+by dependency resolution.
+
+**Verification caveat (this session):** no Flutter/Dart SDK exists in this sandbox
+(confirmed repeatedly across the Google Foundation Sprint and Lexi work above — not on
+PATH, no SDK anywhere on disk), and `android/app/build.gradle` still doesn't exist. The
+Green Gate this ADR mandates cannot be executed here. Every Modernization Sprint stage
+below is therefore applied with rigorous manual review (changelog/migration-guide
+research, cross-file consistency checks) substituting for the real gate, and is
+explicitly flagged as unverified-by-build until run through a real toolchain.
