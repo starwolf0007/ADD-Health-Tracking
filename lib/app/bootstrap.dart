@@ -24,6 +24,7 @@ class AppBootstrap {
 
     // 2. Data seeding (no-ops if already seeded)
     await _seedOnFirstLaunch(container);
+    await _cleanupDuplicates(container);
     
     // 3. State maintenance
     await resetRoutinesIfNewDay(container);
@@ -47,6 +48,31 @@ class AppBootstrap {
 
     final habitRepo = container.read(habitRepositoryProvider);
     await seedDefaultHabits(habitRepo);
+  }
+
+  static Future<void> _cleanupDuplicates(ProviderContainer container) async {
+    final routineRepo = container.read(routineRepositoryProvider);
+    final habitRepo = container.read(habitRepositoryProvider);
+
+    final routines = await routineRepo.watchActive().first;
+    final seenRoutines = <String>{};
+    for (final routine in routines) {
+      if (seenRoutines.contains(routine.name)) {
+        await routineRepo.delete(routine.id);
+      } else {
+        seenRoutines.add(routine.name);
+      }
+    }
+
+    final habits = await habitRepo.watchActive().first;
+    final seenHabits = <String>{};
+    for (final habit in habits) {
+      if (seenHabits.contains(habit.name)) {
+        await habitRepo.delete(habit.id);
+      } else {
+        seenHabits.add(habit.name);
+      }
+    }
   }
 
   static Future<void> _hydrateAdvisorTier(ProviderContainer container) async {

@@ -9,21 +9,33 @@ import 'package:neuroflow/domain/google/google_auth_repository.dart';
 
 class GoogleAuthRepositoryImpl implements GoogleAuthRepository {
   final GoogleSignIn _googleSignIn;
+  late final Stream<GoogleAccount?> _accountStream;
 
   GoogleAuthRepositoryImpl()
       : _googleSignIn = GoogleSignIn(
+          clientId: '287604372230-bpcl30912rp38ou92ltcs6iqe2977lrf.apps.googleusercontent.com',
+          serverClientId: '287604372230-bpcl30912rp38ou92ltcs6iqe2977lrf.apps.googleusercontent.com',
           scopes: [
+            'openid',
             'email',
             'profile',
-            'openid',
+            'https://www.googleapis.com/auth/tasks',
           ],
-        );
+        ) {
+    _accountStream = _googleSignIn.onCurrentUserChanged
+        .map(_mapAccount)
+        .asBroadcastStream();
+  }
 
   GoogleSignIn get googleSignIn => _googleSignIn;
 
   @override
-  Stream<GoogleAccount?> get onAccountChanged =>
-      _googleSignIn.onCurrentUserChanged.map(_mapAccount);
+  Stream<GoogleAccount?> get onAccountChanged async* {
+    // Yield the initial value immediately
+    yield _mapAccount(_googleSignIn.currentUser);
+    // Then yield all future changes
+    yield* _accountStream;
+  }
 
   @override
   Future<GoogleAccount?> get currentAccount async =>

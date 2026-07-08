@@ -45,6 +45,7 @@ dependencies:
   # Both are Phase 2 / §14 items. Stubs are in executive/planner.dart.
 
   googleapis_auth: any
+  firebase_core: ^4.11.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

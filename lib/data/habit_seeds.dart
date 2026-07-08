@@ -14,26 +14,35 @@ import 'package:neuroflow/domain/habit.dart';
 import 'package:neuroflow/data/habit_repository.dart';
 
 /// Call once during onboarding or first launch.
-/// Safe to call on every startup — no-ops if habits already exist.
+/// Safe to call on every startup — no-ops if habits with these names already exist.
 Future<void> seedDefaultHabits(HabitRepository repo) async {
-  await repo.save(
-    Habit.create(
-      name: 'Drink a glass of water',
-      frequency: HabitFrequency.daily,
-    ),
-  );
+  final existing = await repo.watchActive().first;
+  final existingNames = existing.map((h) => h.name).toSet();
 
-  await repo.save(
-    Habit.create(
-      name: 'Get outside for 5 minutes',
-      frequency: HabitFrequency.daily,
-    ),
-  );
+  if (!existingNames.contains('Drink a glass of water')) {
+    await repo.save(
+      Habit.create(
+        name: 'Drink a glass of water',
+        frequency: HabitFrequency.daily,
+      ),
+    );
+  }
 
-  await repo.save(
-    Habit.create(
-      name: 'Phone away 30 min before bed',
-      frequency: HabitFrequency.daily,
-    ),
-  );
+  if (!existingNames.contains('Get outside for 5 minutes')) {
+    await repo.save(
+      Habit.create(
+        name: 'Get outside for 5 minutes',
+        frequency: HabitFrequency.daily,
+      ),
+    );
+  }
+
+  if (!existingNames.contains('Phone away 30 min before bed')) {
+    await repo.save(
+      Habit.create(
+        name: 'Phone away 30 min before bed',
+        frequency: HabitFrequency.daily,
+      ),
+    );
+  }
 }

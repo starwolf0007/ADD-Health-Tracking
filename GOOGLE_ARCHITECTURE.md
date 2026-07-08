@@ -42,7 +42,7 @@ NeuroFlow uses a layered architecture to integrate Google services while maintai
 **Responsibility:** Manages the "Enabled" state of individual integrations.
 - Tracks which services (Tasks, Calendar, Gemini) the user has opted into.
 
-## 3. Dependency Graph
+## 3. Architecture Diagram
 
 ```mermaid
 graph TD
@@ -58,7 +58,14 @@ graph TD
 ## 4. Extension Points
 
 ### Adding a New Service (e.g., Google Drive)
-1. Add necessary scopes to `GooglePermissionManager`.
-2. Add a factory method to `GoogleApiFactory`.
-3. Create a `DriveSyncProvider` that implements the sync logic.
-4. Register the new service in the `ConnectedServicesScreen`.
+1.  **Scopes:** Add necessary scopes to `GooglePermissionManager.driveScopes`.
+2.  **API Client:** Add a factory method to `GoogleApiFactory` (e.g., `createDriveApi()`).
+3.  **Sync Provider:** Create a `DriveSyncProvider` that implements the sync logic for that specific service.
+4.  **UI:** Add a tile to `ConnectedServicesScreen` and wire it to `ConnectedServicesRepository`.
+
+## 5. Security
+
+-   **Tokens:** Access tokens are managed by `google_sign_in` and never stored in plain text or logged.
+-   **Secure Storage:** Sensitive configuration (like the linked account ID) is stored using `FlutterSecureStorage`.
+-   **Scopes:** Permissions are requested incrementally as needed to adhere to the principle of least privilege.
+-   **Account Switching:** Properly clears all service-specific caches and tokens before switching to a new account.
