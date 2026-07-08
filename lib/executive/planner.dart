@@ -36,6 +36,24 @@ class Plan {
     this.quickWins = const [],
     required this.reason,
   });
+
+  /// [mode] is intentionally not overridable here — LexiPlanAdvisor (the only
+  /// caller outside this file) may reorder/reword within a plan the
+  /// Executive already produced, but changing mode is a Plan-*selection*
+  /// decision that must stay deterministic. Construct a new Plan directly
+  /// if mode genuinely needs to change.
+  Plan copyWith({
+    Task? primaryTask,
+    List<Task>? quickWins,
+    String? reason,
+  }) {
+    return Plan(
+      mode: mode,
+      primaryTask: primaryTask ?? this.primaryTask,
+      quickWins: quickWins ?? this.quickWins,
+      reason: reason ?? this.reason,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

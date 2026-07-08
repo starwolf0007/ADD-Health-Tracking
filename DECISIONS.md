@@ -641,3 +641,108 @@ m2 in `STAGE2_CRITIC_REPORT.md`, not addressed by this fix). All three call site
   sanitization pattern already used in `google_service_manager.dart`/`google_auth_repository_impl.dart`.
 - `docs/GOOGLE_SETUP.md` — replaced the two committed real-email examples (`starwolf0007@gmail.com`,
   "User support email" §2 and "test users" §2) with the placeholder `<your-dev-email>`.
+
+## Decision: LexiPlanAdvisor moves to lib/intelligence/, real AICore wiring (supersedes prior draft)
+
+A more complete Lexi/AICore implementation (Dart + Kotlin) was provided to replace an earlier
+first-pass draft. Auditing it against this repo's actual code surfaced two real gaps between the
+new files and this codebase's current state, both fixed before wiring in:
+
+1. **`Plan.copyWith()` did not exist.** The new advisor calls it repeatedly (`plan.copyWith(reason:
+   ...)`, `plan.copyWith(primaryTask: ..., reason: ...)`, `plan.copyWith(quickWins: ..., reason:
+   ...)`). Added to `lib/executive/planner.dart` covering this repo's actual four `Plan` fields
+   (`mode`, `primaryTask`, `quickWins`, `reason`) — `mode` is deliberately NOT overridable via
+   `copyWith`, since changing mode is a Plan-*selection* decision that must stay deterministic;
+   only order/reason are AI-influenced (see below).
+2. **`Task.estimatedMinutes` did not exist** on this repo's `Task` domain model (confirmed:
+   `id, title, notes, energy, status, createdAt, dueDate, completedAt, isQuickWin` — no duration
+   field). The incoming `lexi_config.dart` referenced `t.estimatedMinutes` in its prompt builder —
+   removed rather than added as a new persisted field, since introducing one would be a schema
+   change (Drift migration, repository, provider updates) far outside the scope of wiring up Lexi.
+   The provided files' own handoff notes mention a "returnable list" field on `Plan` that likewise
+   doesn't exist in this codebase — evidence the incoming files were authored against a different
+   snapshot of the project; adapted rather than blindly applied.
+
+### Architectural relocation: `LexiPlanAdvisor` and `LexiConfig` move from `lib/executive/` to
+`lib/intelligence/`
+
+Both files' own headers declared their new home as `lib/intelligence/`, and the move is correct:
+`LexiPlanAdvisor` imports `dart:convert` and `package:flutter/services.dart` (a platform channel) —
+concerns the Executive layer must never own (per this repo's own architecture rule: Executive stays
+AI/platform-agnostic; `PlanAdvisor` is the seam interface, defined in `lib/executive/planner.dart`,
+implemented by AI-aware code living in `lib/intelligence/`). This mirrors the existing
+interface-in-one-layer / impl-in-another pattern used everywhere else in this codebase (e.g.
+`TaskRepository` interface in `lib/data/`, Drift impl alongside it; `GoogleAuthRepository` interface
+in `lib/data/`, plugin-binding impl in `lib/platform/google/`). `lib/executive/lexi_plan_advisor.dart`
+was deleted; `lib/intelligence/lexi_plan_advisor.dart`, `lib/intelligence/lexi_config.dart` (moved
+from `lib/executive/`), and a new `lib/intelligence/planning_context.dart` (typed prompt-context
+snapshot, avoids ad-hoc string building at call sites) take its place. `providers.dart`'s import
+updated accordingly; `LexiPlanAdvisor()`'s zero-arg construction site is unaffected.
+
+### `lib/intelligence/lexi_bridge.dart` removed (superseded, not kept as dead code)
+
+An earlier draft added a standalone `LexiBridge` Dart wrapper class (`isAvailable()`/`ping()`/
+`generate()`) that `LexiPlanAdvisor` called through. The new `lexi_plan_advisor.dart` owns its own
+channel calls directly (`_checkAvailabilityNative()`/`_generate()`), matching the original
+pre-existing code shape and the native side's own contract doc ("must match
+lib/intelligence/lexi_plan_advisor.dart exactly"). Keeping the old wrapper around unused would leave
+two independent implementations of the same channel call — deleted rather than left as a trap.
+
+### Kotlin: `LexiBridge.kt` reimplemented against AICore's documented exp01 surface
+
+Replaces the always-`false`/always-`null` stub (and an earlier draft's `.candidates.firstOrNull()?.text`
+guess) with `GenerativeModel.generateContent(prompt).text` — the exp01 reference's actual response
+shape — plus:
+- `prepareInferenceEngine()` success as the availability signal (never triggers a model download —
+  a multi-GB silent fetch would violate this app's calm/no-surprise principle; not-yet-downloaded
+  reports as unavailable, same as any other ineligible-device case).
+- Two independent 5-second timeouts: Kotlin's `withTimeout(5_000L)` around inference (surfaced as
+  `PlatformException("LEXI_TIMEOUT")`), and Dart's own `.timeout()` around the whole channel
+  round-trip (covers channel latency and any native path that forgets its own timeout). Both land
+  on the identical "return plan unchanged" path.
+- Runtime-gated at `Build.VERSION.SDK_INT >= 34` (Android 14 QPR1, AICore's actual system-service
+  floor) rather than raising the app's `minSdk` — see `lib/intelligence/GRADLE_AICORE_SETUP.md`,
+  which also documents the separate `minSdk 31` *compile/install* floor the AI Edge SDK itself
+  requires (two different numbers, two different jobs: install floor vs. runtime feature gate).
+- Channel method names kept as `checkGeminiNanoAvailable`/`generateResponse` (not renamed to
+  `isAvailable`/`generate`) — that contract was already established and verified across both Dart
+  and Kotlin; renaming would be pure churn with no benefit.
+
+### AndroidManifest.xml: `<uses-feature android:name="android.software.ai_capabilities"
+android:required="false"/>` added
+
+Supersedes this repo's prior position (documented in an earlier commit) that no manifest feature
+declaration was needed. `required="false"` keeps the app installable on every device (Play Store
+never filters it out); it declares interest in on-device AI without gating install eligibility,
+while `LexiBridge`'s own `SDK_INT >= 34` + `prepareInferenceEngine()` runtime check remains the real
+availability gate. No new `<uses-permission>` — AICore has no runtime permission, and inference is
+on-device (no network call).
+
+### Reordering contract (unchanged in spirit, restated precisely for the new code)
+
+Lexi may reorder within the Executive's own candidate set (`primaryTask` in normal mode is
+replaceable only by an exact/case-insensitive title match already present in `allPending`;
+`quickWins` may be reordered only among tasks already in that list) and may reword `reason`. She may
+never introduce a task absent from `allPending`, and can never change `plan.mode`. An unmatched or
+hallucinated `taskTitle` is discarded silently, identical to any other malformed-response case.
+
+### Files Modified / Created
+
+- `lib/executive/planner.dart` — added `Plan.copyWith()` (mode excluded, see above)
+- `lib/executive/lexi_plan_advisor.dart` — deleted (moved, see below)
+- `lib/executive/lexi_config.dart` — deleted (moved to `lib/intelligence/`)
+- `lib/intelligence/lexi_bridge.dart` — deleted (superseded, see above)
+- `lib/intelligence/lexi_plan_advisor.dart` — new location; full advisor incl. fence-tolerant JSON
+  parsing, exact/case-insensitive task-title resolution, airtight fallback chain
+- `lib/intelligence/lexi_config.dart` — new location; system prompt updated to the
+  `{taskTitle, reason}` contract, `buildPrioritizationPrompt()`; `estimatedMinutes` reference
+  removed (field doesn't exist in this repo — see above)
+- `lib/intelligence/planning_context.dart` — new; typed prompt-context snapshot
+- `lib/intelligence/GRADLE_AICORE_SETUP.md` — new; exact Gradle dependency + minSdk reasoning +
+  manifest snippet + device-support table (this repo's `android/app/build.gradle` still doesn't
+  exist — this doc is what to apply once it does)
+- `lib/intelligence/README.md` — status updated (Android side implemented, pending Gradle scaffold;
+  iOS not started)
+- `android/app/src/main/kotlin/com/neuroflow/lexi/LexiBridge.kt` — reimplemented against AICore
+- `android/app/src/main/AndroidManifest.xml` — added `<uses-feature>` (see above)
+- `lib/providers.dart` — import path updated for `LexiPlanAdvisor`'s new location
