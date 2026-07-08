@@ -64,8 +64,7 @@ final googleAccountRepositoryProvider = Provider<GoogleAccountRepository>((ref) 
 });
 
 final googlePermissionManagerProvider = Provider<GooglePermissionManager>((ref) {
-  final authRepo = ref.watch(googleAuthRepositoryProvider) as GoogleAuthRepositoryImpl;
-  return GooglePermissionManagerImpl(authRepo.googleSignIn);
+  return GooglePermissionManagerImpl();
 });
 
 final connectedServicesRepositoryProvider = Provider<ConnectedServicesRepository>((ref) {
@@ -151,9 +150,18 @@ enum AdvisorTier {
   cloud,
 }
 
-final advisorTierProvider = StateProvider<AdvisorTier>((ref) {
-  return AdvisorTier.lexi;
-});
+class AdvisorTierNotifier extends Notifier<AdvisorTier> {
+  @override
+  AdvisorTier build() => AdvisorTier.lexi;
+
+  // ignore: use_setters_to_change_properties
+  void set(AdvisorTier tier) => state = tier;
+}
+
+final advisorTierProvider =
+    NotifierProvider<AdvisorTierNotifier, AdvisorTier>(
+  AdvisorTierNotifier.new,
+);
 
 final planAdvisorProvider = Provider<PlanAdvisor>((ref) {
   switch (ref.watch(advisorTierProvider)) {

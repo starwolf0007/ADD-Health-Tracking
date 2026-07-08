@@ -51,8 +51,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     });
     // Hydrate the in-memory advisor tier so it matches persisted prefs,
     // even if the user never toggled the switch in this session.
-    ref.read(advisorTierProvider.notifier).state =
-        cloud ? AdvisorTier.cloud : AdvisorTier.lexi;
+    ref.read(advisorTierProvider.notifier).set(
+        cloud ? AdvisorTier.cloud : AdvisorTier.lexi);
   }
 
   Future<void> _saveName(String value) async {
@@ -82,8 +82,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await ref.read(settingsServiceProvider).setCloudGeminiEnabled(value);
     // Immediately swap the live advisor so TodayController picks it up
     // without requiring an app restart.
-    ref.read(advisorTierProvider.notifier).state =
-        value ? AdvisorTier.cloud : AdvisorTier.lexi;
+    ref.read(advisorTierProvider.notifier).set(
+        value ? AdvisorTier.cloud : AdvisorTier.lexi);
   }
 
   Future<bool> _confirmCloudGemini() async {

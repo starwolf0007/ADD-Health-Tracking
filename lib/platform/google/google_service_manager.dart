@@ -1,6 +1,7 @@
 // lib/platform/google/google_service_manager.dart
 
 import 'dart:async';
+import 'package:http/http.dart' as http;
 import 'package:neuroflow/domain/google/google_account.dart';
 import 'package:neuroflow/domain/google/google_auth_repository.dart';
 import 'package:neuroflow/domain/google/google_account_repository.dart';
@@ -11,7 +12,9 @@ class GoogleServiceManager {
   final GoogleAccountRepository _accountRepo;
 
   final _connectionController = StreamController<GoogleConnectionState>.broadcast();
-  GoogleConnectionState _currentState = const GoogleConnectionState(status: GoogleConnectionStatus.notConnected);
+  GoogleConnectionState _currentState = const GoogleConnectionState(
+    status: GoogleConnectionStatus.disconnected,
+  );
 
   GoogleServiceManager(
     this._authRepo,
@@ -26,39 +29,91 @@ class GoogleServiceManager {
   Stream<GoogleAccount?> get accountChanges => _authRepo.onAccountChanged;
 
   Future<void> _initStatus() async {
+    _setState(const GoogleConnectionState(status: GoogleConnectionStatus.connecting));
     final account = await _authRepo.currentAccount;
     _handleAccountChange(account);
   }
 
   void _handleAccountChange(GoogleAccount? account) {
     if (account != null) {
-      _currentState = GoogleConnectionState(
-        status: GoogleConnectionStatus.connected,
+      _setState(GoogleConnectionState(
+        status: GoogleConnectionStatus.authenticated,
         lastCheck: DateTime.now(),
-      );
+      ));
       _accountRepo.saveAccount(account);
     } else {
-      _currentState = const GoogleConnectionState(status: GoogleConnectionStatus.notConnected);
+      _setState(const GoogleConnectionState(status: GoogleConnectionStatus.disconnected));
       _accountRepo.clearAccount();
     }
-    _connectionController.add(_currentState);
   }
 
-  Future<GoogleAccount?> signIn() => _authRepo.signIn();
+  void _setState(GoogleConnectionState state) {
+    _currentState = state;
+    _connectionController.add(state);
+  }
 
-  Future<GoogleAccount?> restoreSession() => _authRepo.signInSilently();
+  Future<GoogleAccount?> signIn() async {
+    _setState(const GoogleConnectionState(status: GoogleConnectionStatus.connecting));
+    try {
+      final account = await _authRepo.signIn();
+      if (account == null) {
+        _setState(const GoogleConnectionState(status: GoogleConnectionStatus.disconnected));
+      }
+      return account;
+    } catch (e) {
+      _setState(GoogleConnectionState(
+        status: GoogleConnectionStatus.failed,
+        errorMessage: e.toString(),
+        lastCheck: DateTime.now(),
+      ));
+      return null;
+    }
+  }
+
+  Future<GoogleAccount?> restoreSession() async {
+    _setState(const GoogleConnectionState(status: GoogleConnectionStatus.connecting));
+    try {
+      final account = await _authRepo.signInSilently();
+      if (account == null) {
+        _setState(const GoogleConnectionState(status: GoogleConnectionStatus.disconnected));
+      }
+      return account;
+    } catch (e) {
+      _setState(GoogleConnectionState(
+        status: GoogleConnectionStatus.failed,
+        errorMessage: e.toString(),
+        lastCheck: DateTime.now(),
+      ));
+      return null;
+    }
+  }
 
   Future<void> signOut() => _authRepo.signOut();
 
   Future<void> switchAccount() async {
-    await signOut();
+    await _authRepo.signOut();
     await signIn();
   }
 
-  Future<void> refreshToken() => _authRepo.refreshToken();
+  Future<void> refreshToken() async {
+    _setState(const GoogleConnectionState(status: GoogleConnectionStatus.connecting));
+    try {
+      await _authRepo.refreshToken();
+      _setState(GoogleConnectionState(
+        status: GoogleConnectionStatus.authenticated,
+        lastCheck: DateTime.now(),
+      ));
+    } catch (e) {
+      _setState(GoogleConnectionState(
+        status: GoogleConnectionStatus.expired,
+        errorMessage: e.toString(),
+        lastCheck: DateTime.now(),
+      ));
+    }
+  }
 
   // Helper for internal service factories
-  Future<dynamic> getAuthenticatedClient(List<String> scopes) =>
+  Future<http.Client?> getAuthenticatedClient(List<String> scopes) =>
       _authRepo.getAuthenticatedClient(scopes);
 
   /// Registration point for future Google services (Tasks, Calendar, etc.)

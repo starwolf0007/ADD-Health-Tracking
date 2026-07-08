@@ -80,7 +80,7 @@ class AppBootstrap {
       final svc = container.read(settingsServiceProvider);
       final cloudEnabled = await svc.getCloudGeminiEnabled();
       if (cloudEnabled) {
-        container.read(advisorTierProvider.notifier).state = AdvisorTier.cloud;
+        container.read(advisorTierProvider.notifier).set(AdvisorTier.cloud);
       }
     } catch (_) {
       // Non-fatal

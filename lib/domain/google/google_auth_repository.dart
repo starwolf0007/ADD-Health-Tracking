@@ -1,6 +1,6 @@
 // lib/domain/google/google_auth_repository.dart
 
-import 'package:googleapis_auth/googleapis_auth.dart' as auth;
+import 'package:http/http.dart' as http;
 import 'package:neuroflow/domain/google/google_account.dart';
 
 abstract class GoogleAuthRepository {
@@ -20,7 +20,7 @@ abstract class GoogleAuthRepository {
   Future<void> signOut();
 
   /// Returns an authenticated HTTP client for the given scopes.
-  Future<auth.AuthClient?> getAuthenticatedClient(List<String> scopes);
+  Future<http.Client?> getAuthenticatedClient(List<String> scopes);
 
   /// Forces a token refresh.
   Future<void> refreshToken();

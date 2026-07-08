@@ -88,7 +88,7 @@ class _GreetingHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = nameAsync.valueOrNull ?? '';
+    final name = nameAsync.value ?? '';
     final greeting = name.isNotEmpty ? 'Hey, $name' : 'Today';
     return Text(
       greeting,
@@ -104,7 +104,7 @@ class _HeartbeatCount extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final count = completedAsync.valueOrNull ?? 0;
+    final count = completedAsync.value ?? 0;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [

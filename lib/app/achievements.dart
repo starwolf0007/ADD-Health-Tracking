@@ -14,7 +14,18 @@ enum AchievementKind {
 }
 
 /// Kill switch for the entire achievement layer.
-final achievementsEnabledProvider = StateProvider<bool>((ref) => true);
+class AchievementsEnabledNotifier extends Notifier<bool> {
+  @override
+  bool build() => true;
+
+  // ignore: use_setters_to_change_properties
+  void set(bool value) => state = value;
+}
+
+final achievementsEnabledProvider =
+    NotifierProvider<AchievementsEnabledNotifier, bool>(
+  AchievementsEnabledNotifier.new,
+);
 
 /// Internal event bus for achievements.
 class AchievementBus {
