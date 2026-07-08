@@ -761,3 +761,131 @@ Green Gate this ADR mandates cannot be executed here. Every Modernization Sprint
 below is therefore applied with rigorous manual review (changelog/migration-guide
 research, cross-file consistency checks) substituting for the real gate, and is
 explicitly flagged as unverified-by-build until run through a real toolchain.
+
+## Modernization Sprint — Stage 1: dev_dependencies version bumps
+
+Scope per ADR-006: `dev_dependencies` only (`build_runner`, `drift_dev`,
+`riverpod_generator`, `flutter_lints`). `dependencies` (flutter_riverpod, riverpod_annotation,
+drift, google_sign_in, etc.), `lib/`, and `analysis_options.yaml` (which doesn't exist in
+this repo) are untouched — those are later stages. All versions below were verified live
+against `https://pub.dev/api/packages/<name>` and `.../versions/<version>` (pubspec.yaml
+of the specific version), not recalled from training data. **Not verified by a real
+build** — no Flutter/Dart SDK in this sandbox; `flutter pub get` / `dart run build_runner
+build` / `flutter analyze` were not run.
+
+### Discontinued-packages check: no-op
+
+The brief's removal list (`js`, `build_resolvers`, `build_runner_core`, `analyzer_plugin`,
+`custom_lint_core`, `custom_lint_visitor`) does not appear anywhere in this repo's
+`pubspec.yaml` (dependencies or dev_dependencies) — confirmed via grep. They do appear in
+`pubspec.lock` as transitive entries (pulled in by `build_runner`/`drift_dev` themselves),
+which is expected and not something this repo's manifest controls. No pubspec.yaml change
+made for this step.
+
+### Version changes
+
+| Package | Old | New | Note |
+|---|---|---|---|
+| `build_runner` | `^2.4.11` | `^2.15.0` | True pub.dev latest; still major `2.x` (build_runner has not shipped a `3.x`). Changelog 2.4.11→2.15.0 reviewed: no `build.yaml` format changes, no generated-file-convention changes, no breaking changes affecting `drift_dev`/`riverpod_generator` as builders (repo has no `build.yaml` to begin with). |
+| `drift_dev` | `^2.18.0` | `^2.28.2` | **Capped, not pub.dev's true latest (`2.34.2+1`).** See lockstep finding below. |
+| `riverpod_generator` | `^2.4.0` | `^2.6.5` | **Capped, not pub.dev's true latest (`4.0.4`).** See lockstep finding below. |
+| `flutter_lints` | `^4.0.0` | `^6.0.0` | True pub.dev latest major. See lint-rule and SDK-floor findings below. |
+
+### Compatibility research: `drift_dev` vs. `drift` (lockstep coupling)
+
+`drift_dev`'s pubspec pins an exact minor-version range on `drift` per release (verified by
+fetching the pubspec of several `drift_dev` versions via the pub.dev API):
+
+- `drift_dev 2.19.0` → `drift ">=2.19.0 <2.20.0"`
+- `drift_dev 2.21.0` → `drift ">=2.21.0 <2.22.0"`
+- `drift_dev 2.24.0` → `drift ">=2.24.0 <2.25.0"`
+- `drift_dev 2.27.0` → `drift ">=2.27.0 <2.28.0"`
+- `drift_dev 2.28.0`/`2.28.2` → `drift ">=2.28.0 <2.29.0"`
+- `drift_dev 2.29.0` → `drift ">=2.29.0 <2.30.0"`
+- `drift_dev 2.34.2+1` (true latest) → `drift ">=2.30.0 <2.35.0"`
+
+This repo's `pubspec.lock` currently has `drift` resolved to `2.28.2` (the `dependencies:
+drift: ^2.18.0` caret constraint already permits this — carets don't pin, so the runtime
+package has quietly drifted upward via transitive resolution independent of this stage).
+`drift_dev 2.28.2` is the newest release whose required `drift` range (`>=2.28.0 <2.29.0`)
+is still satisfied by that already-resolved `2.28.2` — going to `drift_dev 2.29.0` or
+higher would force `drift` to re-resolve to `>=2.29.0`, i.e. pull the runtime package
+forward before Stage 2 does it deliberately. Picked `^2.28.2` for that reason. Note this
+means the *effective* ceiling this stage imposes on the `drift` runtime is `<2.29.0`, one
+tick below `drift_dev`'s own requirement — worth Stage 2 knowing about explicitly, since
+Stage 2 will need to move both `drift` and `drift_dev` together to get past `2.28.x`.
+
+Reviewed `drift_dev`'s changelog 2.18.0→2.28.2 for anything that would break hand-written
+code calling into `AppDatabase`: no changes to generated table classes, `@DataClassName`
+behavior, `Companion` classes, `insertOnConflictUpdate()`, `MigrationStrategy`,
+`selectOnly()`/`addColumns()`, `.watch()` semantics, or `schemaVersion` handling. The one
+noted breaking change (2.15.0, NULL-column-constraint fix) affects migration-export
+tooling output, not the generated runtime API `lib/data/database.dart` calls. Manually
+re-read `lib/data/database.dart` in full against this: it uses only stable, long-standing
+Drift patterns (`@DriftDatabase`, `@DataClassName`, `Table`/`TextColumn`/`IntColumn`/
+`DateTimeColumn`, `MigrationStrategy.onUpgrade` with `if (from < N)` blocks,
+`insertOnConflictUpdate`, `selectOnly`+`addColumns`+`.count()`, `.watch()`/`.watchSingle()`)
+— nothing in the reviewed changelog range touches any of these.
+
+### Compatibility research: `riverpod_generator` vs. `riverpod_annotation`/`flutter_riverpod` (lockstep coupling)
+
+`riverpod_generator` pins an **exact** `riverpod_annotation` version per release (verified
+via pub.dev API):
+
+- `riverpod_generator 2.6.5` (last `2.x`) → `riverpod_annotation 2.6.1` exactly — matches
+  this repo's already-resolved lockfile version (`2.6.1`).
+- `riverpod_generator 3.0.0` → `riverpod_annotation 3.0.0` exactly.
+- `riverpod_generator 4.0.4` (true pub.dev latest) → `riverpod_annotation 4.0.3` exactly.
+
+`riverpod` 3.x is a major rewrite (this repo's own `flutter_riverpod: ^2.5.1` /
+`riverpod_annotation: ^2.3.5` stay on the 2.x line this stage per ADR-006). There is
+therefore **no `riverpod_generator` version newer than the 2.x line that is compatible
+with this stage's runtime pins** — every 3.x/4.x release requires bumping the runtime
+package in lockstep, which is explicitly out of scope here. Picked `riverpod_generator:
+^2.6.5`, the last 2.x release (also already the resolved lockfile version), and left it
+there rather than forcing a partial/inconsistent bump. Reviewed the 2.4.0→2.6.5 changelog:
+no breaking changes in that range; one deprecation notice (2.6.0, "generated `Ref`
+subclasses") that's a future-migration heads-up, not a break. Grepped `lib/` for `@riverpod`
+usage: none found — this repo's `providers.dart` uses riverpod's manual `Provider`/
+`StateProvider`/`StreamProvider` APIs, not the `@riverpod` code-gen macro, so
+`riverpod_generator` is a currently-idle dev tool in this codebase either way.
+
+### `flutter_lints` 6.0.0: new rules and SDK-floor flag
+
+No `analysis_options.yaml` exists in this repo, so there is no existing ruleset to check for
+newly-failing entries — noting that absence itself as the answer to that check.
+
+Changelog review, 4.0.0 → 6.0.0:
+- **5.0.0**: added `invalid_runtime_check_with_js_interop_types` (catches real bugs — bad
+  runtime type checks against JS-interop types; irrelevant here, no `dart:js_interop` usage
+  in this repo) and `unnecessary_library_name`; removed `avoid_null_checks_in_equality_operators`,
+  `prefer_const_constructors`, `prefer_const_declarations`, `prefer_const_literals_to_create_immutables`
+  (style-only, removed from the recommended set, not correctness rules).
+  Minimum SDK: Flutter 3.24 / Dart 3.5.
+- **6.0.0**: added `strict_top_level_inference` and `unnecessary_underscores` — both are
+  style/inference-strictness nits, not bug-shaped. Minimum SDK: Flutter 3.32 / Dart 3.8.
+
+**Flag:** `flutter_lints 6.0.0` requires Dart SDK `^3.8.0`; this repo's `pubspec.yaml`
+`environment:` still declares `sdk: '>=3.4.0 <4.0.0'` / `flutter: '>=3.22.0'` (untouched —
+out of scope for this stage). If the real toolchain this repo is built with is older than
+Dart 3.8 / Flutter 3.32, `flutter pub get` will reject this bump outright. Same class of
+finding for `build_runner 2.15.0` (requires Dart `^3.7.0`) and, to a lesser degree,
+`drift_dev 2.28.2` (requires Dart `>=3.5.0`) — all above this repo's declared floor.
+Cannot be verified in this sandbox (no SDK installed); must be confirmed against the
+actual dev/CI toolchain before this lands. `riverpod_generator 2.6.5` has no such issue
+(`>=2.17.0 <4.0.0`).
+
+### Observation (not fixed, out of scope): duplicate database file
+
+`lib/platform/local/database.dart` is a second, independent Drift database — its own
+`@DriftDatabase`/`part 'database.g.dart'`, a differently-shaped `Tasks` table (`intEnum`
+status/energy/priority columns, `estimatedMinutes`, `snapRef`, etc.) that does not match
+the domain `Task` model or the actively-used `AppDatabase` in `lib/data/database.dart`.
+It appears to be legacy/orphaned from an earlier draft, not wired into `providers.dart`.
+Flagging for the final handover doc; no action taken here — merging/removing it is a
+separate, out-of-scope task.
+
+### Files Modified
+
+- `pubspec.yaml` — `dev_dependencies` versions only (see table above)
+- `DECISIONS.md` — this entry
