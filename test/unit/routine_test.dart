@@ -95,15 +95,104 @@ void main() {
       expect(r.completedCount, 2);
     });
   });
+
+  // ─── firesOn ────────────────────────────────────────────────────────────────
+  group('firesOn', () {
+    // 2024-01-01 is a Monday; 2024-01-06 is a Saturday.
+    final monday = DateTime(2024, 1, 1);
+    final saturday = DateTime(2024, 1, 6);
+
+    test('fires every day when activeDays is null', () {
+      final r = _routine([]);
+      expect(r.firesOn(monday), isTrue);
+      expect(r.firesOn(saturday), isTrue);
+    });
+
+    test('fires every day when activeDays is empty', () {
+      final r = _routine([], activeDays: '');
+      expect(r.firesOn(monday), isTrue);
+      expect(r.firesOn(saturday), isTrue);
+    });
+
+    test('fires only on listed weekdays', () {
+      final weekdaysOnly = _routine([], activeDays: '12345');
+      expect(weekdaysOnly.firesOn(monday), isTrue);
+      expect(weekdaysOnly.firesOn(saturday), isFalse);
+    });
+
+    test('fires only on listed weekends', () {
+      final weekendsOnly = _routine([], activeDays: '67');
+      expect(weekendsOnly.firesOn(monday), isFalse);
+      expect(weekendsOnly.firesOn(saturday), isTrue);
+    });
+  });
+
+  // ─── Routine.create / copyWith ──────────────────────────────────────────────
+  group('Routine.create', () {
+    test('sets defaults and generates an id', () {
+      final r = Routine.create(name: 'Morning', anchor: RoutineAnchor.morning);
+      expect(r.name, 'Morning');
+      expect(r.anchor, RoutineAnchor.morning);
+      expect(r.isActive, isTrue);
+      expect(r.steps, isEmpty);
+      expect(r.id, isNotEmpty);
+    });
+  });
+
+  group('Routine.copyWith', () {
+    test('preserves id/createdAt and overrides given fields', () {
+      final r = Routine.create(name: 'Morning', anchor: RoutineAnchor.morning);
+      final updated = r.copyWith(name: 'Evening', anchor: RoutineAnchor.evening);
+      expect(updated.id, r.id);
+      expect(updated.createdAt, r.createdAt);
+      expect(updated.name, 'Evening');
+      expect(updated.anchor, RoutineAnchor.evening);
+    });
+  });
+
+  // ─── RoutineStep.create / copyWith ──────────────────────────────────────────
+  group('RoutineStep.create', () {
+    test('sets fields and defaults to incomplete', () {
+      final s = RoutineStep.create(
+        routineId: 'r1',
+        position: 2,
+        title: 'Brush teeth',
+        durationMinutes: 3,
+      );
+      expect(s.routineId, 'r1');
+      expect(s.position, 2);
+      expect(s.title, 'Brush teeth');
+      expect(s.durationMinutes, 3);
+      expect(s.isComplete, isFalse);
+      expect(s.id, isNotEmpty);
+    });
+  });
+
+  group('RoutineStep.copyWith', () {
+    test('preserves id/routineId and overrides given fields', () {
+      final s = RoutineStep.create(
+        routineId: 'r1',
+        position: 0,
+        title: 'Old',
+      );
+      final updated = s.copyWith(title: 'New', isComplete: true, position: 5);
+      expect(updated.id, s.id);
+      expect(updated.routineId, s.routineId);
+      expect(updated.title, 'New');
+      expect(updated.isComplete, isTrue);
+      expect(updated.position, 5);
+    });
+  });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
-Routine _routine(List<RoutineStep> steps) {
+Routine _routine(List<RoutineStep> steps, {String? activeDays}) {
   return Routine(
     id: 'test-routine',
     name: 'Test Routine',
     anchor: RoutineAnchor.morning,
+    activeDays: activeDays,
     steps: steps,
     createdAt: DateTime.now(),
   );
