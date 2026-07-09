@@ -223,7 +223,24 @@ class Task {
           pausedNote: note,
         );
       case TaskState.complete:
-        return copyWith(state: next, completedAt: DateTime.now());
+        // Completing clears any prior pause context — a finished task should
+        // never carry stale pausedAt/pausedStep/pausedNote from an earlier
+        // interruption.
+        return Task(
+          id: id,
+          title: title,
+          notes: notes,
+          energy: energy,
+          state: next,
+          createdAt: createdAt,
+          dueDate: dueDate,
+          isQuickWin: isQuickWin,
+          estimatedMinutes: estimatedMinutes,
+          completedAt: DateTime.now(),
+          pausedAt: null,
+          pausedStep: null,
+          pausedNote: null,
+        );
       default:
         return Task(
           id: id,
