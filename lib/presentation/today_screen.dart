@@ -21,6 +21,7 @@ import 'package:neuroflow/presentation/routine_screen.dart';
 import 'package:neuroflow/presentation/settings_screen.dart';
 import 'package:neuroflow/presentation/theme.dart';
 import 'package:neuroflow/presentation/widgets/capture_sheet.dart';
+import 'package:neuroflow/presentation/widgets/re_entry_card.dart';
 
 class TodayScreen extends ConsumerWidget {
   const TodayScreen({super.key});
@@ -59,6 +60,7 @@ class TodayScreen extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const ReEntryCard(),
               _TodayBody(state: state),
               const _DueRoutinesSection(),
               const SizedBox(height: 8),

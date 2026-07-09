@@ -55,13 +55,9 @@ class LexiPlanAdvisor implements PlanAdvisor {
 
       if (reason == null || reason.trim().isEmpty) return plan;
 
-      // Only override the reason line — everything else stays deterministic.
-      return Plan(
-        mode: plan.mode,
-        primaryTask: plan.primaryTask,
-        quickWins: plan.quickWins,
-        reason: reason.trim(),
-      );
+      // Only override the reason line — everything else (including the
+      // living-state returnable list) stays deterministic.
+      return plan.copyWith(reason: reason.trim());
     } catch (_) {
       // Silent fallback — never surface LLM errors to the user.
       return plan;

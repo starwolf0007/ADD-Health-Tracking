@@ -28,13 +28,20 @@ class Tasks extends Table {
   TextColumn get title => text()();
   TextColumn get notes => text().nullable()();
   TextColumn get energy => text()(); // 'low' | 'medium' | 'high'
-  TextColumn get status => text()(); // 'pending' | 'completed' | 'skipped'
+  // Living-state storage key (v3): 'not_started' | 'preparing' | 'in_progress'
+  // | 'paused' | 'blocked' | 'checkpoint' | 'complete'. See TaskState.
+  TextColumn get status => text()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get dueDate => dateTime().nullable()();
   BoolColumn get isQuickWin => boolean().withDefault(const Constant(false))();
   IntColumn get estimatedMinutes => integer().nullable()();
   DateTimeColumn get completedAt => dateTime().nullable()();
   TextColumn get googleTaskId => text().nullable()();
+
+  // --- Living-state / Re-Entry metadata (v3) ---
+  DateTimeColumn get pausedAt => dateTime().nullable()();
+  TextColumn get pausedStep => text().nullable()();
+  TextColumn get pausedNote => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -153,7 +160,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -161,6 +168,19 @@ class AppDatabase extends _$AppDatabase {
         onUpgrade: (m, from, to) async {
           if (from < 2) {
             await m.addColumn(routines, routines.activeDays);
+          }
+          if (from < 3) {
+            // Living-state model: add the re-entry metadata columns …
+            await m.addColumn(tasks, tasks.pausedAt);
+            await m.addColumn(tasks, tasks.pausedStep);
+            await m.addColumn(tasks, tasks.pausedNote);
+            // … and rewrite legacy status strings to stable storage keys.
+            await customStatement(
+                "UPDATE tasks SET status = 'not_started' WHERE status = 'pending'");
+            await customStatement(
+                "UPDATE tasks SET status = 'complete' WHERE status = 'completed'");
+            await customStatement(
+                "UPDATE tasks SET status = 'blocked' WHERE status = 'skipped'");
           }
         },
       );
@@ -178,25 +198,75 @@ class AppDatabase extends _$AppDatabase {
   Future<void> markComplete(String id) =>
       (update(tasks)..where((t) => t.id.equals(id))).write(
         TasksCompanion(
-          status: const Value('completed'),
+          status: const Value('complete'),
           completedAt: Value(DateTime.now()),
+        ),
+      );
+
+  /// Resume an interrupted task back into progress, explicitly clearing the
+  /// stale re-entry metadata so a paused → in_progress hop never carries an
+  /// old pausedAt / pausedStep / pausedNote.
+  Future<void> resumeTask(String id) =>
+      (update(tasks)..where((t) => t.id.equals(id))).write(
+        const TasksCompanion(
+          status: Value('in_progress'),
+          pausedAt: Value(null),
+          pausedStep: Value(null),
+          pausedNote: Value(null),
         ),
       );
 
   Future<void> deleteTask(String id) =>
       (delete(tasks)..where((t) => t.id.equals(id))).go();
 
+  /// Active plan stream (§Today): every open, non-interrupted task —
+  /// not_started AND the transition states (preparing / in_progress /
+  /// checkpoint), which previously fell out of the plan. Interrupted
+  /// (paused / blocked) tasks are surfaced separately via [watchInterrupted].
   Stream<List<TaskRow>> watchPendingByEnergyAsc() {
     return (select(tasks)
-          ..where((t) => t.status.equals('pending'))
-          ..orderBy([(t) => OrderingTerm.asc(t.energy)]))
+          ..where((t) => t.status.isIn(const [
+                'not_started',
+                'preparing',
+                'in_progress',
+                'checkpoint',
+              ]))
+          ..orderBy([
+            (t) => OrderingTerm.asc(t.energy),
+            // Deterministic tiebreaker so equal-energy tasks keep a stable
+            // order across rebuilds (createdAt, then id).
+            (t) => OrderingTerm.asc(t.createdAt),
+            (t) => OrderingTerm.asc(t.id),
+          ]))
+        .watch();
+  }
+
+  /// Interrupted tasks — the Re-Entry Card's source. Most-recently paused
+  /// first, with a deterministic id tiebreaker for identical timestamps.
+  Stream<List<TaskRow>> watchInterrupted() {
+    return (select(tasks)
+          ..where((t) => t.status.isIn(const ['paused', 'blocked']))
+          ..orderBy([
+            (t) => OrderingTerm.desc(t.pausedAt),
+            (t) => OrderingTerm.asc(t.id),
+          ]))
+        .watch();
+  }
+
+  /// Tasks completed today, as rows — for the timeline projection.
+  Stream<List<TaskRow>> watchCompletedToday() {
+    return (select(tasks)
+          ..where((t) =>
+              t.status.equals('complete') &
+              t.completedAt.isBiggerOrEqualValue(_startOfToday))
+          ..orderBy([(t) => OrderingTerm.asc(t.completedAt)]))
         .watch();
   }
 
   Stream<int> watchCompletedTodayCount() {
     final query = select(tasks)
       ..where((t) =>
-          t.status.equals('completed') &
+          t.status.equals('complete') &
           t.completedAt.isBiggerOrEqualValue(_startOfToday));
     return query.watch().map((rows) => rows.length);
   }

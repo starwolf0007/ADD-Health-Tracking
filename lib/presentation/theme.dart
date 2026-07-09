@@ -27,6 +27,7 @@ class AppColors {
   // Semantic
   static const warning = Color(0xFFD9A441);
   static const attention = Color(0xFFD9A441);
+  static const attentionWash = Color(0x1AD9A441); // 10%
 
   // -- Trial colors (v-trial) --
   static const gold = Color(0xFFFFD700);

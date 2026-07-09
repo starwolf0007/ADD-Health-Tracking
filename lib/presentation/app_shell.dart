@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:neuroflow/presentation/notes_screen.dart';
 import 'package:neuroflow/presentation/reflect_screen.dart';
 import 'package:neuroflow/presentation/routines_list_screen.dart';
+import 'package:neuroflow/presentation/timeline_screen.dart';
 import 'package:neuroflow/presentation/today_screen.dart';
 
 class AppShell extends StatefulWidget {
@@ -27,6 +28,7 @@ class _AppShellState extends State<AppShell> {
         index: _index,
         children: const [
           TodayScreen(),
+          TimelineScreen(),
           NotesScreen(),
           RoutinesListScreen(),
           ReflectScreen(),
@@ -44,6 +46,11 @@ class _AppShellState extends State<AppShell> {
             icon: Icon(Icons.wb_sunny_outlined),
             selectedIcon: Icon(Icons.wb_sunny),
             label: 'Today',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.timeline_outlined),
+            selectedIcon: Icon(Icons.timeline),
+            label: 'Your Day',
           ),
           NavigationDestination(
             icon: Icon(Icons.sticky_note_2_outlined),

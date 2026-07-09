@@ -13,6 +13,7 @@ import 'package:neuroflow/data/routine_repository_impl.dart';
 import 'package:neuroflow/data/task_repository.dart';
 import 'package:neuroflow/data/task_repository_impl.dart';
 import 'package:neuroflow/domain/habit.dart';
+import 'package:neuroflow/domain/mood.dart';
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/executive/planner.dart';
@@ -228,12 +229,20 @@ class TodayController extends AsyncNotifier<TodayState> {
   Future<TodayState> _computeState(List<Task> pending) async {
     final executive = ref.read(executiveProvider);
     final advisor = ref.read(planAdvisorProvider);
+    final repo = ref.read(taskRepositoryProvider);
 
     final active = _snoozedIds.isEmpty
         ? pending
         : pending.where((t) => !_snoozedIds.contains(t.id)).toList();
 
-    final raw = executive.evaluate(active);
+    // Living-state signals passed IN as data — the Executive stays pure.
+    final interrupted = await repo.watchInterrupted().first;
+    final moodRow =
+        await ref.read(databaseProvider).watchTodayLatestMood().first;
+    final mood =
+        moodRow == null ? null : MoodLevelX.fromScore(moodRow.level);
+
+    final raw = executive.evaluate(active, mood: mood, interrupted: interrupted);
     final refined = await advisor.refine(raw, active);
 
     return TodayState(
@@ -250,6 +259,12 @@ class TodayController extends AsyncNotifier<TodayState> {
     ref.invalidateSelf();
   }
 
+  /// Resume a paused/blocked task — clears stale re-entry metadata (§ Re-Entry).
+  Future<void> resumePausedTask(String taskId) async {
+    await ref.read(taskRepositoryProvider).resume(taskId);
+    ref.invalidateSelf();
+  }
+
   void snoozeForSession(String taskId) {
     _snoozedIds.add(taskId);
     ref.invalidateSelf();
@@ -261,6 +276,30 @@ final todayControllerProvider =
 
 final completedTodayCountProvider = StreamProvider<int>((ref) {
   return ref.watch(taskRepositoryProvider).watchCompletedTodayCount();
+});
+
+/// Interrupted (paused/blocked) tasks — the Re-Entry Card's source.
+final interruptedTasksProvider = StreamProvider<List<Task>>((ref) {
+  return ref.watch(taskRepositoryProvider).watchInterrupted();
+});
+
+/// Tasks completed today, as objects — for the timeline projection.
+final completedTodayProvider = StreamProvider<List<Task>>((ref) {
+  return ref.watch(taskRepositoryProvider).watchCompletedToday();
+});
+
+/// Today's latest mood check-in as a domain [MoodLog], or null.
+final todayMoodProvider = StreamProvider<MoodLog?>((ref) {
+  return ref.watch(databaseProvider).watchTodayLatestMood().map(
+        (row) => row == null
+            ? null
+            : MoodLog(
+                id: row.id,
+                level: MoodLevelX.fromScore(row.level),
+                note: row.note,
+                loggedAt: row.loggedAt,
+              ),
+      );
 });
 
 final activeRoutinesProvider = StreamProvider<List<Routine>>((ref) {
