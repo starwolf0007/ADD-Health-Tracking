@@ -7,7 +7,10 @@
 #   3. flutter test
 #   4. flutter build apk --release (push-only, produces artifact)
 #
-# Requires Flutter >= 3.22.0 / Dart >= 3.4.0 (matches pubspec constraints).
+# Requires Flutter >= 3.32.0 / Dart >= 3.8.0 — flutter_lints ^6.0.0 (dev_dependency)
+# pins to Dart SDK ^3.8.0, which is stricter than pubspec.yaml's own
+# `environment.sdk: '>=3.4.0 <4.0.0'`. Pinned below to the current stable
+# release so this stays comfortably ahead of that floor.
 
 name: Android CI
 
@@ -35,7 +38,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0'
+          flutter-version: '3.44.4'
           channel: stable
           cache: true
 
