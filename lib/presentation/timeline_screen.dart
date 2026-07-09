@@ -12,6 +12,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/timeline.dart';
 import 'theme.dart';
+import 'widgets/re_entry_card.dart';
 
 class TimelineScreen extends ConsumerWidget {
   const TimelineScreen({super.key});
@@ -22,25 +23,33 @@ class TimelineScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(title: const Text('Your Day'), centerTitle: false),
-      body: events.isEmpty
-          ? const Center(
-              child: Padding(
-                padding: EdgeInsets.all(AppSpace.xl),
-                child: Text(
-                  'Your day builds itself here.\nComplete a task, log a mood, '
-                  'run a routine — it all lands on one spine.',
-                  textAlign: TextAlign.center,
-                  style: AppTextStyles.bodyMedium,
-                ),
-              ),
-            )
-          : ListView.separated(
-              padding: const EdgeInsets.fromLTRB(
-                  AppSpace.xl, AppSpace.lg, AppSpace.xl, AppSpace.xxl),
-              itemCount: events.length,
-              separatorBuilder: (_, __) => const SizedBox(height: AppSpace.md),
-              itemBuilder: (context, i) => _EventRow(event: events[i]),
-            ),
+      body: Column(
+        children: [
+          const ReEntryCard(),
+          Expanded(
+            child: events.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(AppSpace.xl),
+                      child: Text(
+                        'Your day builds itself here.\nComplete a task, log a mood, '
+                        'run a routine — it all lands on one spine.',
+                        textAlign: TextAlign.center,
+                        style: AppTextStyles.bodyMedium,
+                      ),
+                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(
+                        AppSpace.xl, AppSpace.lg, AppSpace.xl, AppSpace.xxl),
+                    itemCount: events.length,
+                    separatorBuilder: (_, __) =>
+                        const SizedBox(height: AppSpace.md),
+                    itemBuilder: (context, i) => _EventRow(event: events[i]),
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -1,7 +1,9 @@
 // lib/presentation/app_shell.dart
 //
-// The hub (v2, approved): four tabs, one job each.
+// The hub (v2, approved; Phase 2 · Stage 3 adds Your Day): five tabs, one
+// job each.
 //   Today    — the one thing (+ focus timer)
+//   Your Day — the read-only timeline spine + Re-Entry Card
 //   Notes    — frictionless capture, promote to task
 //   Routines — one-step-at-a-time runners
 //   Reflect  — mood check-in, gentle week view, habits
@@ -17,6 +19,7 @@ import 'notes_screen.dart';
 import 'reflect_screen.dart';
 import 'routines_list_screen.dart';
 import 'theme.dart';
+import 'timeline_screen.dart';
 import 'today_screen.dart';
 
 class AppShell extends StatefulWidget {
@@ -36,6 +39,7 @@ class _AppShellState extends State<AppShell> {
         index: _index,
         children: const [
           TodayScreen(),
+          TimelineScreen(),
           NotesScreen(),
           RoutinesListScreen(),
           ReflectScreen(),
@@ -76,6 +80,11 @@ class _AppShellState extends State<AppShell> {
               icon: Icon(Icons.wb_sunny_outlined),
               selectedIcon: Icon(Icons.wb_sunny),
               label: 'Today',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.view_day_outlined),
+              selectedIcon: Icon(Icons.view_day),
+              label: 'Your Day',
             ),
             NavigationDestination(
               icon: Icon(Icons.sticky_note_2_outlined),
