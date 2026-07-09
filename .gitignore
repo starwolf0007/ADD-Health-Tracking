@@ -45,3 +45,7 @@ lib/data/database.g.dart
 # OS
 .DS_Store
 Thumbs.db
+
+# Build/session artifacts that don't belong in version control
+*.bundle
+green_gate_log.txt
