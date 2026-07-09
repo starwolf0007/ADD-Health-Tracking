@@ -149,7 +149,7 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
           // Subtle progress bar — updates on step completion (no idle animation)
           AnimatedBuilder(
             animation: _progressAnim,
-            builder: (_, __) => _ProgressBar(fraction: _progressAnim.value),
+            builder: (_, _) => _ProgressBar(fraction: _progressAnim.value),
           ),
           Expanded(
             child: active == null

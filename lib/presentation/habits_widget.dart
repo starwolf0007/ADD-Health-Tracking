@@ -25,7 +25,7 @@ class HabitsWidget extends ConsumerWidget {
 
     return habitsAsync.when(
       loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
+      error: (_, _) => const SizedBox.shrink(),
       data: (habits) {
         if (habits.isEmpty) return const SizedBox.shrink();
         // Cap at 3 — ADHD principle: don't overwhelm.

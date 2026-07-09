@@ -41,7 +41,7 @@ class TimelineScreen extends ConsumerWidget {
                     padding: const EdgeInsets.fromLTRB(
                         AppSpace.xl, AppSpace.lg, AppSpace.xl, AppSpace.xxl),
                     itemCount: events.length,
-                    separatorBuilder: (_, __) =>
+                    separatorBuilder: (_, _) =>
                         const SizedBox(height: AppSpace.md),
                     itemBuilder: (context, i) => _EventRow(event: events[i]),
                   ),

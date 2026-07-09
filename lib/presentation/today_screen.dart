@@ -370,7 +370,7 @@ class _DueRoutinesSection extends ConsumerWidget {
 
     return dueAsync.when(
       loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
+      error: (_, _) => const SizedBox.shrink(),
       data: (routines) {
         if (routines.isEmpty) return const SizedBox.shrink();
         return Column(

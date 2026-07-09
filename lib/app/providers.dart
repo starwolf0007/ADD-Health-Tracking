@@ -217,30 +217,32 @@ class TodayController extends AsyncNotifier<TodayState> {
 
   @override
   Future<TodayState> build() async {
-    final pending = await ref.watch(taskRepositoryProvider).watchPending().first;
-    final state = await _computeState(pending);
-    
+    // Watch the living-state signals reactively: a new mood check-in or a
+    // newly paused/resumed task must reshape the plan on its own (§6 Quick
+    // Wins), not wait for an unrelated complete/snooze to force a rebuild.
+    final pending = await ref.watch(pendingTasksProvider.future);
+    final interrupted = await ref.watch(interruptedTasksProvider.future);
+    final mood = (await ref.watch(todayMoodProvider.future))?.level;
+
+    final state = await _computeState(pending, interrupted, mood);
+
     // Push to watch after state change
     await ref.read(wearSyncServiceProvider).pushPrimaryTask(state);
-    
+
     return state;
   }
 
-  Future<TodayState> _computeState(List<Task> pending) async {
+  Future<TodayState> _computeState(
+    List<Task> pending,
+    List<Task> interrupted,
+    MoodLevel? mood,
+  ) async {
     final executive = ref.read(executiveProvider);
     final advisor = ref.read(planAdvisorProvider);
-    final repo = ref.read(taskRepositoryProvider);
 
     final active = _snoozedIds.isEmpty
         ? pending
         : pending.where((t) => !_snoozedIds.contains(t.id)).toList();
-
-    // Living-state signals passed IN as data — the Executive stays pure.
-    final interrupted = await repo.watchInterrupted().first;
-    final moodRow =
-        await ref.read(databaseProvider).watchTodayLatestMood().first;
-    final mood =
-        moodRow == null ? null : MoodLevelX.fromScore(moodRow.level);
 
     final raw = executive.evaluate(active, mood: mood, interrupted: interrupted);
     final refined = await advisor.refine(raw, active);
@@ -276,6 +278,12 @@ final todayControllerProvider =
 
 final completedTodayCountProvider = StreamProvider<int>((ref) {
   return ref.watch(taskRepositoryProvider).watchCompletedTodayCount();
+});
+
+/// Active plan tasks (open, non-interrupted), ordered by energy ascending.
+/// Watched by [TodayController] so new/changed tasks reshape the plan live.
+final pendingTasksProvider = StreamProvider<List<Task>>((ref) {
+  return ref.watch(taskRepositoryProvider).watchPending();
 });
 
 /// Interrupted (paused/blocked) tasks — the Re-Entry Card's source.

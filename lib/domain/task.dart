@@ -204,8 +204,20 @@ class Task {
     switch (next) {
       case TaskState.paused:
       case TaskState.blocked:
-        return copyWith(
+        // Build explicitly so passing no step/note *replaces* (clears) any
+        // prior re-entry context — copyWith's `??` would otherwise retain a
+        // stale pausedStep/pausedNote across a paused → blocked hop.
+        return Task(
+          id: id,
+          title: title,
+          notes: notes,
+          energy: energy,
           state: next,
+          createdAt: createdAt,
+          dueDate: dueDate,
+          isQuickWin: isQuickWin,
+          estimatedMinutes: estimatedMinutes,
+          completedAt: completedAt,
           pausedAt: DateTime.now(),
           pausedStep: step,
           pausedNote: note,

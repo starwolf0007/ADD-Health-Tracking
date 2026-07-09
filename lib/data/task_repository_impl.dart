@@ -18,8 +18,7 @@ class DriftTaskRepository implements TaskRepository {
 
   /// [syncQueue] is optional — passing null disables sync enqueueing.
   /// The WorkManager isolate omits it; the main isolate supplies it.
-  DriftTaskRepository(this._db, {SyncQueueRepository? syncQueue})
-      : _syncQueue = syncQueue;
+  DriftTaskRepository(this._db, {this._syncQueue});
 
   // ------------------------------------------------------------------
   // Mappers
