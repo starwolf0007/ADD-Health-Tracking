@@ -195,11 +195,17 @@ class AppDatabase extends _$AppDatabase {
   Future<void> upsertTask(TasksCompanion entry) =>
       into(tasks).insertOnConflictUpdate(entry);
 
+  /// Complete a task, clearing any re-entry metadata — a finished task should
+  /// never retain a pausedAt / pausedStep / pausedNote from an earlier
+  /// interruption (mirrors Task.transitionTo(complete)).
   Future<void> markComplete(String id) =>
       (update(tasks)..where((t) => t.id.equals(id))).write(
         TasksCompanion(
           status: const Value('complete'),
           completedAt: Value(DateTime.now()),
+          pausedAt: const Value(null),
+          pausedStep: const Value(null),
+          pausedNote: const Value(null),
         ),
       );
 
