@@ -40,17 +40,23 @@ class GoogleAuthRepositoryImpl implements GoogleAuthRepository {
 
   GoogleSignInAccount? _currentUser;
   final _accountController = StreamController<GoogleAccount?>.broadcast();
+  late final Future<void> _initialization;
 
   GoogleAuthRepositoryImpl() {
-    // Initialize the singleton then start listening to auth events.
-    _signIn
-        .initialize(
-          clientId:
-              '287604372230-bpcl30912rp38ou92ltcs6iqe2977lrf.apps.googleusercontent.com',
-          serverClientId:
-              '287604372230-bpcl30912rp38ou92ltcs6iqe2977lrf.apps.googleusercontent.com',
-        )
-        .then((_) => _signIn.authenticationEvents.listen(_handleAuthEvent));
+    _initialization = _initialize();
+  }
+
+  Future<void> _initialize() async {
+    await _signIn.initialize(
+      clientId:
+          '287604372230-bpcl30912rp38ou92ltcs6iqe2977lrf.apps.googleusercontent.com',
+      serverClientId:
+          '287604372230-bpcl30912rp38ou92ltcs6iqe2977lrf.apps.googleusercontent.com',
+    );
+    _signIn.authenticationEvents.listen(
+      _handleAuthEvent,
+      onError: _accountController.addError,
+    );
   }
 
   void _handleAuthEvent(GoogleSignInAuthenticationEvent event) {
@@ -65,48 +71,47 @@ class GoogleAuthRepositoryImpl implements GoogleAuthRepository {
 
   @override
   Stream<GoogleAccount?> get onAccountChanged async* {
+    await _initialization;
     // Emit current state immediately, then stream future changes.
     yield _mapAccount(_currentUser);
     yield* _accountController.stream;
   }
 
   @override
-  Future<GoogleAccount?> get currentAccount async =>
-      _mapAccount(_currentUser);
+  Future<GoogleAccount?> get currentAccount async {
+    await _initialization;
+    return _mapAccount(_currentUser);
+  }
 
   @override
   Future<GoogleAccount?> signIn() async {
-    try {
-      if (!_signIn.supportsAuthenticate()) return null;
-      final user = await _signIn.authenticate();
-      _currentUser = user;
-      return _mapAccount(user);
-    } catch (_) {
-      return null;
-    }
+    await _initialization;
+    if (!_signIn.supportsAuthenticate()) return null;
+    final user = await _signIn.authenticate();
+    _currentUser = user;
+    return _mapAccount(user);
   }
 
   @override
   Future<GoogleAccount?> signInSilently() async {
-    try {
-      // attemptLightweightAuthentication() returns null Future on unsupported platforms.
-      final user = await (_signIn.attemptLightweightAuthentication() ??
-          Future.value(null));
-      if (user != null) _currentUser = user;
-      return _mapAccount(user);
-    } catch (_) {
-      return null;
-    }
+    await _initialization;
+    // attemptLightweightAuthentication() returns null Future on unsupported platforms.
+    final user = await (_signIn.attemptLightweightAuthentication() ??
+        Future.value(null));
+    if (user != null) _currentUser = user;
+    return _mapAccount(user);
   }
 
   @override
   Future<void> signOut() async {
+    await _initialization;
     await _signIn.signOut();
     // The sign-out event will arrive via authenticationEvents → _handleAuthEvent.
   }
 
   @override
   Future<http.Client?> getAuthenticatedClient(List<String> scopes) async {
+    await _initialization;
     final account = _currentUser;
     if (account == null) return null;
 
@@ -120,6 +125,7 @@ class GoogleAuthRepositoryImpl implements GoogleAuthRepository {
 
   @override
   Future<void> refreshToken() async {
+    await _initialization;
     // Lightweight re-auth; the event stream updates _currentUser.
     await (_signIn.attemptLightweightAuthentication() ?? Future.value(null));
   }

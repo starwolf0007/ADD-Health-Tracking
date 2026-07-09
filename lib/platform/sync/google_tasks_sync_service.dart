@@ -23,43 +23,76 @@
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'package:neuroflow/platform/error_reporter.dart';
 import 'package:neuroflow/platform/sync/sync_operation.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
 
 const _kGoogleTasksToken = 'neuroflow_google_tasks_token';
 const _kGoogleTasksListId = 'neuroflow_google_tasks_list_id';
 
+class SyncFlushException implements Exception {
+  final int failedOperationCount;
+  final Object cause;
+
+  const SyncFlushException(this.failedOperationCount, this.cause);
+
+  @override
+  String toString() =>
+      'Google Tasks sync failed for $failedOperationCount operation(s): $cause';
+}
+
 class GoogleTasksSyncService {
   static const _storage = FlutterSecureStorage();
 
   final SyncQueueRepository _queue;
+  final Future<String?> Function(String key) _readSecureValue;
 
-  GoogleTasksSyncService(this._queue);
+  GoogleTasksSyncService(
+    this._queue, {
+    Future<String?> Function(String key)? readSecureValue,
+  }) : _readSecureValue = readSecureValue ?? ((key) => _storage.read(key: key));
 
   /// Flush pending sync ops to Google Tasks.
   /// Safe to call from any isolate — reads its own DB connection via _queue.
   Future<void> flush() async {
     // 1. Auth gate — if no token, nothing to do.
-    final token = await _storage.read(key: _kGoogleTasksToken);
+    final token = await _readSecureValue(_kGoogleTasksToken);
     if (token == null || token.isEmpty) {
       // User hasn't connected Google Tasks yet. Queue stays warm.
       return;
     }
 
-    final listId = await _storage.read(key: _kGoogleTasksListId) ?? '@default';
+    final listId = await _readSecureValue(_kGoogleTasksListId) ?? '@default';
     final ops = await _queue.fetchPending(limit: 50);
+    var failedOperationCount = 0;
+    Object? firstError;
+    StackTrace? firstStackTrace;
 
     for (final op in ops) {
       try {
         await _processOp(op, token: token, listId: listId);
         await _queue.markDone(op.id);
-      } catch (_) {
+      } catch (error, stackTrace) {
+        failedOperationCount++;
+        firstError ??= error;
+        firstStackTrace ??= stackTrace;
+        reportNonFatalError(
+          'Failed to sync Google Tasks operation ${op.id}',
+          error,
+          stackTrace,
+        );
         await _queue.incrementRetry(op.id);
       }
     }
 
     // Housekeeping — purge old done entries.
     await _queue.clearCompleted();
+    if (firstError != null) {
+      Error.throwWithStackTrace(
+        SyncFlushException(failedOperationCount, firstError),
+        firstStackTrace!,
+      );
+    }
   }
 
   Future<void> _processOp(
@@ -72,15 +105,21 @@ class GoogleTasksSyncService {
         await _createRemoteTask(op, token: token, listId: listId);
         break;
       case SyncOperationType.update:
-        if (op.googleTaskId == null) return; // not yet synced, skip
+        if (op.googleTaskId == null) {
+          throw StateError('Update operation ${op.id} has no Google Task ID');
+        }
         await _updateRemoteTask(op, token: token, listId: listId);
         break;
       case SyncOperationType.complete:
-        if (op.googleTaskId == null) return;
+        if (op.googleTaskId == null) {
+          throw StateError('Complete operation ${op.id} has no Google Task ID');
+        }
         await _completeRemoteTask(op, token: token, listId: listId);
         break;
       case SyncOperationType.delete:
-        if (op.googleTaskId == null) return;
+        if (op.googleTaskId == null) {
+          throw StateError('Delete operation ${op.id} has no Google Task ID');
+        }
         await _deleteRemoteTask(op, token: token, listId: listId);
         break;
     }
@@ -140,8 +179,7 @@ class GoogleTasksSyncService {
       _storage.write(key: _kGoogleTasksToken, value: token);
 
   /// Clear token on sign-out — deactivates sync.
-  static Future<void> clearToken() =>
-      _storage.delete(key: _kGoogleTasksToken);
+  static Future<void> clearToken() => _storage.delete(key: _kGoogleTasksToken);
 
   /// Whether the user has connected Google Tasks.
   static Future<bool> isConnected() async {

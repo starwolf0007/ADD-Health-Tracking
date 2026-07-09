@@ -20,6 +20,7 @@ import 'package:workmanager/workmanager.dart';
 
 import 'package:neuroflow/data/database.dart';
 import 'package:neuroflow/data/task_repository_impl.dart';
+import 'package:neuroflow/platform/error_reporter.dart';
 import 'package:neuroflow/platform/notifications/notification_service.dart';
 import 'package:neuroflow/platform/sync/google_tasks_sync_service.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository_impl.dart';
@@ -37,15 +38,26 @@ void callbackDispatcher() {
     // 12+ in Doze; DartPluginRegistrant is the correct companion call.
     DartPluginRegistrant.ensureInitialized();
 
-    switch (taskName) {
-      case _taskMorningRefresh:
-        await _runMorningRefresh();
-        break;
-      case _taskSyncFlush:
-        await _runSyncFlush();
-        break;
+    try {
+      switch (taskName) {
+        case _taskMorningRefresh:
+          await _runMorningRefresh();
+          break;
+        case _taskSyncFlush:
+          await _runSyncFlush();
+          break;
+        default:
+          throw UnsupportedError('Unknown background task: $taskName');
+      }
+      return true;
+    } catch (error, stackTrace) {
+      reportNonFatalError(
+        'Background task $taskName failed',
+        error,
+        stackTrace,
+      );
+      return false;
     }
-    return Future.value(true);
   });
 }
 
@@ -61,8 +73,6 @@ Future<void> _runMorningRefresh() async {
       await svc.init();
       await svc.showMorningBriefing(pendingCount: pending.length);
     }
-  } catch (_) {
-    // Non-fatal — user simply doesn't get the morning nudge if something fails.
   } finally {
     await db.close();
   }
@@ -76,16 +86,13 @@ Future<void> _runSyncFlush() async {
     final queue = DriftSyncQueueRepository(db);
     final svc = GoogleTasksSyncService(queue);
     await svc.flush();
-  } catch (_) {
-    // Non-fatal — ops stay pending and will retry next flush.
   } finally {
     await db.close();
   }
 }
 
 class BackgroundScheduler {
-  static final BackgroundScheduler _instance =
-      BackgroundScheduler._internal();
+  static final BackgroundScheduler _instance = BackgroundScheduler._internal();
   factory BackgroundScheduler() => _instance;
   BackgroundScheduler._internal();
 

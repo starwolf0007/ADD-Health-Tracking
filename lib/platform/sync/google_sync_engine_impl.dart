@@ -1,7 +1,9 @@
 // lib/platform/sync/google_sync_engine_impl.dart
 
 import 'dart:async';
+
 import 'package:neuroflow/domain/google/sync_engine.dart';
+import 'package:neuroflow/platform/error_reporter.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
 import 'package:neuroflow/platform/sync/sync_operation.dart';
 
@@ -22,14 +24,17 @@ class GoogleSyncEngineImpl implements SyncEngine {
 
     try {
       _emit(const SyncProgress(phase: SyncPhase.running));
-      
+
       final pending = await _queue.fetchPending(limit: 50);
       if (pending.isEmpty) {
         _emit(const SyncProgress(phase: SyncPhase.idle));
         return;
       }
 
-      int processed = 0;
+      var processed = 0;
+      var failedOperationCount = 0;
+      Object? firstError;
+      StackTrace? firstStackTrace;
       for (final op in pending) {
         processed++;
         _emit(SyncProgress(
@@ -42,15 +47,33 @@ class GoogleSyncEngineImpl implements SyncEngine {
         try {
           await _processOperation(op);
           await _queue.markDone(op.id);
-        } catch (e) {
+        } catch (error, stackTrace) {
+          failedOperationCount++;
+          firstError ??= error;
+          firstStackTrace ??= stackTrace;
+          reportNonFatalError(
+            'Failed to process sync operation ${op.id}',
+            error,
+            stackTrace,
+          );
           await _queue.incrementRetry(op.id);
         }
       }
 
       await _queue.clearCompleted();
+      if (firstError != null) {
+        Error.throwWithStackTrace(
+          SyncEngineException(failedOperationCount, firstError),
+          firstStackTrace!,
+        );
+      }
       _emit(const SyncProgress(phase: SyncPhase.idle));
-    } catch (e) {
-      _emit(const SyncProgress(phase: SyncPhase.error));
+    } catch (error) {
+      _emit(SyncProgress(
+        phase: SyncPhase.error,
+        errorMessage: error.toString(),
+      ));
+      rethrow;
     } finally {
       _isRunning = false;
     }
@@ -63,7 +86,8 @@ class GoogleSyncEngineImpl implements SyncEngine {
   }
 
   @override
-  Future<void> resolveConflict(String entityId, dynamic local, dynamic remote) async {
+  Future<void> resolveConflict(
+      String entityId, dynamic local, dynamic remote) async {
     // TODO: Implement default conflict resolution (e.g., local wins or most recent wins).
   }
 
@@ -73,7 +97,7 @@ class GoogleSyncEngineImpl implements SyncEngine {
   }
 
   void _emit(SyncProgress p) => _progressController.add(p);
-  
+
   void dispose() {
     _progressController.close();
   }

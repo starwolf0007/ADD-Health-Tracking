@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:neuroflow/data/habit_seeds.dart';
 import 'package:neuroflow/data/routine_seeds.dart';
 import 'package:neuroflow/platform/daily_reset.dart';
+import 'package:neuroflow/platform/error_reporter.dart';
 import 'package:neuroflow/platform/notifications/notification_service.dart';
 import 'package:neuroflow/platform/background/background_scheduler.dart';
 import 'package:neuroflow/platform/wear/wear_action_handler.dart';
@@ -25,20 +26,35 @@ class AppBootstrap {
     // 2. Data seeding (no-ops if already seeded)
     await _seedOnFirstLaunch(container);
     await _cleanupDuplicates(container);
-    
+
     // 3. State maintenance
     await resetRoutinesIfNewDay(container);
     await _hydrateAdvisorTier(container);
-    await container.read(googleServiceManagerProvider).restoreSession();
+    try {
+      await container.read(googleServiceManagerProvider).restoreSession();
+    } catch (error, stackTrace) {
+      reportNonFatalError(
+          'Failed to restore Google session', error, stackTrace);
+    }
 
     // 4. Integrations
     WearActionHandler(container).start();
     ForegroundSyncObserver(container).start();
 
     // 5. Alarms
-    final briefingEnabled = await container.read(settingsServiceProvider).getMorningBriefingEnabled();
+    final briefingEnabled = await container
+        .read(settingsServiceProvider)
+        .getMorningBriefingEnabled();
     if (briefingEnabled) {
-      await AlarmScheduler.scheduleMorning();
+      try {
+        await AlarmScheduler.scheduleMorning();
+      } catch (error, stackTrace) {
+        reportNonFatalError(
+          'Failed to schedule the morning briefing',
+          error,
+          stackTrace,
+        );
+      }
     }
   }
 
@@ -82,8 +98,8 @@ class AppBootstrap {
       if (cloudEnabled) {
         container.read(advisorTierProvider.notifier).set(AdvisorTier.cloud);
       }
-    } catch (_) {
-      // Non-fatal
+    } catch (error, stackTrace) {
+      reportNonFatalError('Failed to restore advisor tier', error, stackTrace);
     }
   }
 }

@@ -12,10 +12,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/executive/planner.dart';
-import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/platform/error_reporter.dart';
 import 'package:neuroflow/presentation/habits_widget.dart';
 import 'package:neuroflow/presentation/routine_screen.dart';
 import 'package:neuroflow/presentation/settings_screen.dart';
@@ -109,7 +110,8 @@ class _HeartbeatCount extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(Icons.check_circle_outline,
-            size: 14, color: count > 0 ? AppColors.accent : AppColors.textMuted),
+            size: 14,
+            color: count > 0 ? AppColors.accent : AppColors.textMuted),
         const SizedBox(width: 4),
         Text(
           '$count',
@@ -200,9 +202,11 @@ class _NormalBody extends StatelessWidget {
         children: [
           const Text('Next up', style: AppTextStyles.bodySmall),
           const SizedBox(height: 12),
-          _TaskCard(task: task, onComplete: () {
-            ref.read(todayControllerProvider.notifier).complete(task.id);
-          }),
+          _TaskCard(
+              task: task,
+              onComplete: () {
+                _completeTask(context, ref, task.id);
+              }),
           if (state.reason.isNotEmpty) ...[
             const SizedBox(height: 16),
             Text(state.reason, style: AppTextStyles.bodySmall),
@@ -241,7 +245,7 @@ class _QuickWinsBody extends StatelessWidget {
               child: _TaskCard(
                 task: task,
                 onComplete: () {
-                  ref.read(todayControllerProvider.notifier).complete(task.id);
+                  _completeTask(context, ref, task.id);
                 },
               ),
             ),
@@ -322,8 +326,8 @@ class _TaskCard extends StatelessWidget {
                 border: Border.all(color: AppColors.textMuted, width: 1.5),
                 borderRadius: BorderRadius.circular(6),
               ),
-              child: const Icon(Icons.check,
-                  size: 16, color: AppColors.textMuted),
+              child:
+                  const Icon(Icons.check, size: 16, color: AppColors.textMuted),
             ),
           ),
         ],
@@ -347,8 +351,7 @@ class _EnergyGlyph extends StatelessWidget {
     };
     return Semantics(
       label: '$label energy',
-      child:
-          Icon(icon, size: 18, color: AppColors.textSecondary),
+      child: Icon(icon, size: 18, color: AppColors.textSecondary),
     );
   }
 }
@@ -368,7 +371,16 @@ class _DueRoutinesSection extends ConsumerWidget {
 
     return dueAsync.when(
       loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
+      error: (error, stackTrace) {
+        reportNonFatalError('Failed to load due routines', error, stackTrace);
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: TextButton(
+            onPressed: () => ref.invalidate(dueRoutinesProvider),
+            child: const Text('Routines unavailable — tap to retry'),
+          ),
+        );
+      },
       data: (routines) {
         if (routines.isEmpty) return const SizedBox.shrink();
         return Column(
@@ -387,6 +399,22 @@ class _DueRoutinesSection extends ConsumerWidget {
           ],
         );
       },
+    );
+  }
+}
+
+Future<void> _completeTask(
+  BuildContext context,
+  WidgetRef ref,
+  String taskId,
+) async {
+  try {
+    await ref.read(todayControllerProvider.notifier).complete(taskId);
+  } catch (error, stackTrace) {
+    reportNonFatalError('Failed to complete task $taskId', error, stackTrace);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Task could not be completed.')),
     );
   }
 }
@@ -442,8 +470,8 @@ class _RoutineCard extends StatelessWidget {
               ),
               Text(
                 inProgress ? 'Continue' : 'Start',
-                style: AppTextStyles.bodySmall
-                    .copyWith(color: AppColors.accent),
+                style:
+                    AppTextStyles.bodySmall.copyWith(color: AppColors.accent),
               ),
               const SizedBox(width: 2),
               const Icon(

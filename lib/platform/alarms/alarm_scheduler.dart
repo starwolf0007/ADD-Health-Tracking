@@ -26,28 +26,26 @@ class AlarmScheduler {
   /// Schedule the morning briefing exact alarm.
   /// Defaults to 8:00 AM if [hour]/[minute] not provided.
   /// Safe to call every app launch — cancels any existing alarm first.
-  static Future<void> scheduleMorning({int hour = 8, int minute = 0}) async {
+  static Future<bool> scheduleMorning({int hour = 8, int minute = 0}) async {
     try {
       await _channel.invokeMethod<void>(_kSchedule, {
         'hour': hour,
         'minute': minute,
       });
-    } on PlatformException catch (_) {
-      // Non-fatal — WorkManager periodic task provides degraded fallback.
-    } on MissingPluginException catch (_) {
-      // Running on simulator or before native channel is wired.
+      return true;
+    } on MissingPluginException {
+      return false;
     }
   }
 
   /// Cancel the morning briefing alarm.
   /// Call when user disables morning briefing in Settings.
-  static Future<void> cancelMorning() async {
+  static Future<bool> cancelMorning() async {
     try {
       await _channel.invokeMethod<void>(_kCancel);
-    } on PlatformException catch (_) {
-      // Non-fatal.
-    } on MissingPluginException catch (_) {
-      // Non-fatal.
+      return true;
+    } on MissingPluginException {
+      return false;
     }
   }
 }

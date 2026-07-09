@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/platform/error_reporter.dart';
 import 'package:neuroflow/presentation/theme.dart';
 
 Future<void> showCaptureSheet(BuildContext context) {
@@ -45,13 +46,22 @@ class _CaptureSheetBodyState extends ConsumerState<_CaptureSheetBody> {
       energy: _energy,
       isQuickWin: _quickWin || _energy == EnergyLevel.low,
     );
-    await ref.read(taskRepositoryProvider).save(task);
-
-    if (!mounted) return;
-    Navigator.of(context).pop();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Captured'), duration: Duration(seconds: 1)),
-    );
+    try {
+      await ref.read(taskRepositoryProvider).save(task);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('Captured'), duration: Duration(seconds: 1)),
+      );
+    } catch (error, stackTrace) {
+      reportNonFatalError('Failed to capture task', error, stackTrace);
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Task could not be saved.')),
+      );
+    }
   }
 
   @override

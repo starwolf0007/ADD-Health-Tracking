@@ -15,6 +15,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:neuroflow/platform/alarms/alarm_scheduler.dart';
 import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/platform/error_reporter.dart';
 import 'package:neuroflow/presentation/connected_services_screen.dart';
 import 'package:neuroflow/presentation/theme.dart';
 
@@ -38,37 +39,70 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _load() async {
-    final svc = ref.read(settingsServiceProvider);
-    final name = await svc.getDisplayName();
-    final briefing = await svc.getMorningBriefingEnabled();
-    final cloud = await svc.getCloudGeminiEnabled();
-    if (!mounted) return;
-    setState(() {
-      _nameController.text = name;
-      _morningBriefing = briefing;
-      _cloudGemini = cloud;
-      _loading = false;
-    });
-    // Hydrate the in-memory advisor tier so it matches persisted prefs,
-    // even if the user never toggled the switch in this session.
-    ref.read(advisorTierProvider.notifier).set(
-        cloud ? AdvisorTier.cloud : AdvisorTier.lexi);
+    try {
+      final svc = ref.read(settingsServiceProvider);
+      final name = await svc.getDisplayName();
+      final briefing = await svc.getMorningBriefingEnabled();
+      final cloud = await svc.getCloudGeminiEnabled();
+      if (!mounted) return;
+      setState(() {
+        _nameController.text = name;
+        _morningBriefing = briefing;
+        _cloudGemini = cloud;
+        _loading = false;
+      });
+      ref
+          .read(advisorTierProvider.notifier)
+          .set(cloud ? AdvisorTier.cloud : AdvisorTier.lexi);
+    } catch (error, stackTrace) {
+      reportNonFatalError('Failed to load settings', error, stackTrace);
+      if (!mounted) return;
+      setState(() => _loading = false);
+      _showError('Settings could not be loaded.');
+    }
   }
 
   Future<void> _saveName(String value) async {
-    await ref.read(settingsServiceProvider).setDisplayName(value);
-    // Invalidate greeting provider so TodayScreen rebuilds.
-    ref.invalidate(displayNameProvider);
+    try {
+      await ref.read(settingsServiceProvider).setDisplayName(value);
+      ref.invalidate(displayNameProvider);
+    } catch (error, stackTrace) {
+      reportNonFatalError('Failed to save display name', error, stackTrace);
+      if (mounted) _showError('Your name could not be saved.');
+    }
   }
 
   Future<void> _toggleMorningBriefing(bool value) async {
+    final previous = _morningBriefing;
     setState(() => _morningBriefing = value);
-    await ref.read(settingsServiceProvider).setMorningBriefingEnabled(value);
-    // Schedule or cancel the exact alarm to match the toggle.
-    if (value) {
-      await AlarmScheduler.scheduleMorning();
-    } else {
-      await AlarmScheduler.cancelMorning();
+    try {
+      final settings = ref.read(settingsServiceProvider);
+      await settings.setMorningBriefingEnabled(value);
+      if (value) {
+        await AlarmScheduler.scheduleMorning();
+      } else {
+        await AlarmScheduler.cancelMorning();
+      }
+    } catch (error, stackTrace) {
+      reportNonFatalError(
+        'Failed to update morning briefing setting',
+        error,
+        stackTrace,
+      );
+      try {
+        await ref
+            .read(settingsServiceProvider)
+            .setMorningBriefingEnabled(previous);
+      } catch (rollbackError, rollbackStackTrace) {
+        reportNonFatalError(
+          'Failed to restore morning briefing setting',
+          rollbackError,
+          rollbackStackTrace,
+        );
+      }
+      if (!mounted) return;
+      setState(() => _morningBriefing = previous);
+      _showError('Morning briefing could not be updated.');
     }
   }
 
@@ -78,12 +112,29 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final confirmed = await _confirmCloudGemini();
       if (!confirmed) return;
     }
+    final previous = _cloudGemini;
     setState(() => _cloudGemini = value);
-    await ref.read(settingsServiceProvider).setCloudGeminiEnabled(value);
-    // Immediately swap the live advisor so TodayController picks it up
-    // without requiring an app restart.
-    ref.read(advisorTierProvider.notifier).set(
-        value ? AdvisorTier.cloud : AdvisorTier.lexi);
+    try {
+      await ref.read(settingsServiceProvider).setCloudGeminiEnabled(value);
+      ref
+          .read(advisorTierProvider.notifier)
+          .set(value ? AdvisorTier.cloud : AdvisorTier.lexi);
+    } catch (error, stackTrace) {
+      reportNonFatalError(
+        'Failed to update Cloud Gemini setting',
+        error,
+        stackTrace,
+      );
+      if (!mounted) return;
+      setState(() => _cloudGemini = previous);
+      _showError('Cloud Gemini could not be updated.');
+    }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 
   Future<bool> _confirmCloudGemini() async {
@@ -106,8 +157,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Enable',
-                style: TextStyle(color: AppColors.accent)),
+            child:
+                const Text('Enable', style: TextStyle(color: AppColors.accent)),
           ),
         ],
       ),
@@ -152,14 +203,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const _SectionLabel('Integrations'),
                 const SizedBox(height: 8),
                 ListTile(
-                  leading: const Icon(Icons.cloud_sync_outlined, color: AppColors.accent),
-                  title: const Text('Connected Services', style: AppTextStyles.bodyMedium),
-                  subtitle: const Text('Google Tasks, Calendar, and more', style: AppTextStyles.bodySmall),
-                  trailing: const Icon(Icons.chevron_right, size: 20, color: AppColors.textMuted),
+                  leading: const Icon(Icons.cloud_sync_outlined,
+                      color: AppColors.accent),
+                  title: const Text('Connected Services',
+                      style: AppTextStyles.bodyMedium),
+                  subtitle: const Text('Google Tasks, Calendar, and more',
+                      style: AppTextStyles.bodySmall),
+                  trailing: const Icon(Icons.chevron_right,
+                      size: 20, color: AppColors.textMuted),
                   tileColor: AppColors.surface,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                   onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ConnectedServicesScreen()),
+                    MaterialPageRoute(
+                        builder: (_) => const ConnectedServicesScreen()),
                   ),
                 ),
                 const SizedBox(height: 32),
@@ -230,7 +287,8 @@ class _NameField extends StatelessWidget {
       cursorColor: AppColors.accent,
       decoration: InputDecoration(
         hintText: 'Your first name (optional)',
-        hintStyle: AppTextStyles.bodyMedium.copyWith(color: AppColors.textMuted),
+        hintStyle:
+            AppTextStyles.bodyMedium.copyWith(color: AppColors.textMuted),
         enabledBorder: const UnderlineInputBorder(
           borderSide: BorderSide(color: AppColors.surfaceVariant),
         ),

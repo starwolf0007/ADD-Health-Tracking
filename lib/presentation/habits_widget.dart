@@ -12,8 +12,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:neuroflow/domain/habit.dart';
 import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/domain/habit.dart';
+import 'package:neuroflow/platform/error_reporter.dart';
 import 'package:neuroflow/presentation/theme.dart';
 
 class HabitsWidget extends ConsumerWidget {
@@ -25,7 +26,16 @@ class HabitsWidget extends ConsumerWidget {
 
     return habitsAsync.when(
       loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
+      error: (error, stackTrace) {
+        reportNonFatalError('Failed to load habits', error, stackTrace);
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: TextButton(
+            onPressed: () => ref.invalidate(activeHabitsProvider),
+            child: const Text('Habits unavailable — tap to retry'),
+          ),
+        );
+      },
       data: (habits) {
         if (habits.isEmpty) return const SizedBox.shrink();
         // Cap at 3 — ADHD principle: don't overwhelm.
@@ -80,7 +90,7 @@ class _HabitRow extends ConsumerWidget {
           children: [
             // Check circle — tap to toggle
             GestureDetector(
-              onTap: () => _toggle(ref),
+              onTap: () => _toggle(context, ref),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 width: 26,
@@ -89,8 +99,7 @@ class _HabitRow extends ConsumerWidget {
                   shape: BoxShape.circle,
                   color: checked ? AppColors.accent : Colors.transparent,
                   border: Border.all(
-                    color:
-                        checked ? AppColors.accent : AppColors.textMuted,
+                    color: checked ? AppColors.accent : AppColors.textMuted,
                     width: 1.5,
                   ),
                 ),
@@ -106,11 +115,9 @@ class _HabitRow extends ConsumerWidget {
               child: Text(
                 habit.name,
                 style: AppTextStyles.bodyMedium.copyWith(
-                  color: checked
-                      ? AppColors.textSecondary
-                      : AppColors.textPrimary,
-                  decoration:
-                      checked ? TextDecoration.lineThrough : null,
+                  color:
+                      checked ? AppColors.textSecondary : AppColors.textPrimary,
+                  decoration: checked ? TextDecoration.lineThrough : null,
                   decorationColor: AppColors.textSecondary,
                 ),
                 maxLines: 1,
@@ -119,20 +126,28 @@ class _HabitRow extends ConsumerWidget {
             ),
             const SizedBox(width: 8),
             // Streak
-            if (streak > 0)
-              _StreakBadge(streak: streak),
+            if (streak > 0) _StreakBadge(streak: streak),
           ],
         ),
       ),
     );
   }
 
-  Future<void> _toggle(WidgetRef ref) async {
-    final repo = ref.read(habitRepositoryProvider);
-    if (habit.isCheckedToday) {
-      await repo.uncheckToday(habit.id);
-    } else {
-      await repo.checkIn(habit.id);
+  Future<void> _toggle(BuildContext context, WidgetRef ref) async {
+    try {
+      final repo = ref.read(habitRepositoryProvider);
+      if (habit.isCheckedToday) {
+        await repo.uncheckToday(habit.id);
+      } else {
+        await repo.checkIn(habit.id);
+      }
+    } catch (error, stackTrace) {
+      reportNonFatalError(
+          'Failed to update habit ${habit.id}', error, stackTrace);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Habit could not be updated.')),
+      );
     }
   }
 }

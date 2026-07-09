@@ -17,6 +17,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/platform/error_reporter.dart';
 
 const _kLastResetKey = 'neuroflow_last_routine_reset';
 
@@ -39,8 +40,9 @@ Future<void> resetRoutinesIfNewDay(ProviderContainer container) async {
 
     // Record today so we don't reset again until tomorrow.
     await storage.write(key: _kLastResetKey, value: today);
-  } catch (_) {
-    // Non-fatal — worst case the user sees yesterday's step state.
+  } catch (error, stackTrace) {
+    reportNonFatalError(
+        'Failed to reset routines for a new day', error, stackTrace);
   }
 }
 

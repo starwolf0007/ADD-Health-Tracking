@@ -19,6 +19,7 @@
 import 'package:flutter/services.dart';
 
 import 'package:neuroflow/app/providers.dart'; // TodayState
+import 'package:neuroflow/platform/error_reporter.dart';
 
 const _kChannel = 'neuroflow/wear';
 const _kMethodPush = 'pushPrimaryTask';
@@ -38,14 +39,15 @@ class WearSyncService {
         'quickWinCount': state.quickWins.length,
         // pendingCount derived on phone side from task repo; passed via state
         // TODO(wear/phase1): pass pendingCount through TodayState or fetch here
-        'pendingCount': state.quickWins.length + (state.primaryTask != null ? 1 : 0),
+        'pendingCount':
+            state.quickWins.length + (state.primaryTask != null ? 1 : 0),
         'pushedAt': DateTime.now().millisecondsSinceEpoch,
         'hasPrimaryTask': state.primaryTask != null,
       });
-    } on PlatformException catch (_) {
-      // Watch not paired, Data Layer not available, etc. Non-fatal.
-    } on MissingPluginException catch (_) {
-      // Running on simulator or before native channel is wired. Non-fatal.
+    } on PlatformException catch (error, stackTrace) {
+      reportNonFatalError('Failed to push state to Wear OS', error, stackTrace);
+    } on MissingPluginException {
+      // Running without the optional Wear OS bridge.
     }
   }
 }

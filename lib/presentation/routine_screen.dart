@@ -8,11 +8,14 @@
 //   • Completing the last step triggers a brief celebration then returns to Today.
 //   • "Skip step" is available without judgement — sometimes a step just won't happen.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/domain/routine.dart';
+import 'package:neuroflow/platform/error_reporter.dart';
 import 'package:neuroflow/presentation/theme.dart';
 
 // ---------------------------------------------------------------------------
@@ -50,8 +53,8 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
       vsync: this,
       duration: const Duration(milliseconds: 400),
     );
-    _progressAnim = Tween<double>(begin: 0, end: _completedFraction)
-        .animate(CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
+    _progressAnim = Tween<double>(begin: 0, end: _completedFraction).animate(
+        CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
     _progressController.forward();
   }
 
@@ -72,20 +75,27 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
     return pending.isEmpty ? null : pending.first;
   }
 
-  void _completeStep(String stepId) {
-    RoutineStep? updated;
-    setState(() {
-      final idx = _steps.indexWhere((s) => s.id == stepId);
-      if (idx != -1) {
-        updated = _steps[idx].copyWith(isComplete: true);
-        _steps[idx] = updated!;
-      }
-    });
+  Future<void> _completeStep(String stepId) async {
+    final idx = _steps.indexWhere((step) => step.id == stepId);
+    if (idx == -1) return;
+    final previous = _steps[idx];
+    final updated = previous.copyWith(isComplete: true);
+
+    setState(() => _steps[idx] = updated);
     _animateProgress();
 
-    // Persist to DB — fire-and-forget, UI already updated optimistically.
-    if (updated != null) {
-      ref.read(routineRepositoryProvider).updateStep(updated!);
+    try {
+      await ref.read(routineRepositoryProvider).updateStep(updated);
+    } catch (error, stackTrace) {
+      reportNonFatalError(
+          'Failed to complete routine step $stepId', error, stackTrace);
+      if (!mounted) return;
+      setState(() => _steps[idx] = previous);
+      _animateProgress();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Routine step could not be saved.')),
+      );
+      return;
     }
 
     if (_completedFraction >= 1.0) {
@@ -93,9 +103,9 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
     }
   }
 
-  void _skipStep(String stepId) {
+  Future<void> _skipStep(String stepId) async {
     // Skip = mark complete without ceremony. No judgement.
-    _completeStep(stepId);
+    await _completeStep(stepId);
   }
 
   void _animateProgress() {
@@ -103,7 +113,8 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
     _progressAnim = Tween<double>(
       begin: _progressAnim.value,
       end: target,
-    ).animate(CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
+    ).animate(
+        CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
     _progressController
       ..reset()
       ..forward();
@@ -111,12 +122,17 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
 
   void _onAllDone() {
     setState(() => _showCelebration = true);
-    Future.delayed(const Duration(seconds: 2), widget.onFinished);
+    unawaited(Future.delayed(
+      const Duration(seconds: 2),
+      widget.onFinished,
+    ));
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_showCelebration) return _CelebrationView(routineName: widget.routine.name);
+    if (_showCelebration) {
+      return _CelebrationView(routineName: widget.routine.name);
+    }
 
     final active = _activeStep;
 
@@ -154,12 +170,10 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
           Expanded(
             child: active == null
                 ? const Center(
-                    child: Text('All done!',
-                        style: AppTextStyles.titleMedium))
+                    child: Text('All done!', style: AppTextStyles.titleMedium))
                 : _StepView(
                     step: active,
-                    stepNumber:
-                        _steps.where((s) => s.isComplete).length + 1,
+                    stepNumber: _steps.where((s) => s.isComplete).length + 1,
                     total: _steps.length,
                     onComplete: () => _completeStep(active.id),
                     onSkip: () => _skipStep(active.id),
@@ -168,9 +182,7 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
           // Upcoming steps — de-emphasized list
           if (_steps.where((s) => !s.isComplete).length > 1)
             _UpNextList(
-              steps: _steps
-                  .where((s) => !s.isComplete)
-                  .toList()
+              steps: _steps.where((s) => !s.isComplete).toList()
                 ..sort((a, b) => a.position.compareTo(b.position))
                 ..removeAt(0), // active step is shown above
             ),
@@ -240,8 +252,9 @@ class _StepView extends StatelessWidget {
           ),
           if (step.notes != null && step.notes!.isNotEmpty) ...[
             const SizedBox(height: 12),
-            Text(step.notes!, style: AppTextStyles.bodyMedium
-                .copyWith(color: AppColors.textSecondary)),
+            Text(step.notes!,
+                style: AppTextStyles.bodyMedium
+                    .copyWith(color: AppColors.textSecondary)),
           ],
           if (step.durationMinutes != null) ...[
             const SizedBox(height: 16),
@@ -326,8 +339,8 @@ class _UpNextList extends StatelessWidget {
           if (steps.length > 3)
             Text(
               '+ ${steps.length - 3} more',
-              style: AppTextStyles.bodySmall
-                  .copyWith(color: AppColors.textMuted),
+              style:
+                  AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted),
             ),
         ],
       ),

@@ -15,6 +15,8 @@
 
 import 'package:flutter/services.dart';
 
+import 'package:neuroflow/platform/error_reporter.dart';
+
 class LexiBridge {
   static const _channel = MethodChannel('neuroflow/lexi');
 
@@ -24,9 +26,14 @@ class LexiBridge {
     try {
       final result = await _channel.invokeMethod<bool>('isAvailable');
       return result ?? false;
-    } on PlatformException catch (_) {
+    } on PlatformException catch (error, stackTrace) {
+      reportNonFatalError(
+        'Failed to query Lexi availability',
+        error,
+        stackTrace,
+      );
       return false;
-    } on MissingPluginException catch (_) {
+    } on MissingPluginException {
       return false;
     }
   }
@@ -37,7 +44,10 @@ class LexiBridge {
     try {
       final result = await _channel.invokeMethod<String>('ping');
       return result ?? 'unavailable';
-    } catch (_) {
+    } on MissingPluginException {
+      return 'unavailable';
+    } catch (error, stackTrace) {
+      reportNonFatalError('Failed to ping Lexi', error, stackTrace);
       return 'unavailable';
     }
   }

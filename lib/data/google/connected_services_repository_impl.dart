@@ -11,7 +11,12 @@ class ConnectedServicesRepositoryImpl implements ConnectedServicesRepository {
   Set<GoogleService> _cache = {};
 
   ConnectedServicesRepositoryImpl(this._storage) {
-    _load();
+    unawaited(_load().onError((error, stackTrace) {
+      _controller.addError(
+        error ?? StateError('Connected services failed to load'),
+        stackTrace,
+      );
+    }));
   }
 
   Future<void> _load() async {
@@ -37,7 +42,8 @@ class ConnectedServicesRepositoryImpl implements ConnectedServicesRepository {
 
   @override
   Future<void> setServiceEnabled(GoogleService service, bool enabled) async {
-    await _storage.write(key: '$_kPrefix${service.name}', value: enabled.toString());
+    await _storage.write(
+        key: '$_kPrefix${service.name}', value: enabled.toString());
     if (enabled) {
       _cache.add(service);
     } else {

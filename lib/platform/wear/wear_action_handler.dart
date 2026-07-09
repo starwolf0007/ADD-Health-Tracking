@@ -40,37 +40,38 @@ class WearActionHandler {
   }
 
   Future<dynamic> _handleCall(MethodCall call) async {
-    final taskId = call.arguments['taskId'] as String? ?? '';
-    if (taskId.isEmpty) return;
+    final arguments = call.arguments;
+    if (arguments is! Map<Object?, Object?>) {
+      throw ArgumentError.value(arguments, 'arguments', 'Expected a map');
+    }
+    final taskId = arguments['taskId'];
+    if (taskId is! String || taskId.isEmpty) {
+      throw ArgumentError.value(
+          taskId, 'taskId', 'Expected a non-empty string');
+    }
 
     switch (call.method) {
       case _kMethodComplete:
         await _onComplete(taskId);
-        break;
+        return;
       case _kMethodSnooze:
         await _onSnooze(taskId);
-        break;
+        return;
+      default:
+        throw MissingPluginException('Unknown Wear OS action: ${call.method}');
     }
   }
 
   Future<void> _onComplete(String taskId) async {
-    try {
-      await _container.read(taskRepositoryProvider).markComplete(taskId);
-      // TodayController watches the task stream and will rebuild automatically,
-      // then WearSyncService.pushPrimaryTask() will push the updated state.
-    } catch (_) {
-      // Non-fatal — task stays pending, user can complete from phone.
-    }
+    await _container.read(taskRepositoryProvider).markComplete(taskId);
+    // TodayController watches the task stream and will rebuild automatically,
+    // then WearSyncService.pushPrimaryTask() will push the updated state.
   }
 
   Future<void> _onSnooze(String taskId) async {
-    try {
-      // Add to the in-memory snooze set via TodayController.
-      // TodayController.snoozeForSession() holds a Set<String> of excluded ids.
-      final controller = _container.read(todayControllerProvider.notifier);
-      controller.snoozeForSession(taskId);
-    } catch (_) {
-      // Non-fatal.
-    }
+    // Add to the in-memory snooze set via TodayController.
+    // TodayController.snoozeForSession() holds a Set<String> of excluded ids.
+    final controller = _container.read(todayControllerProvider.notifier);
+    controller.snoozeForSession(taskId);
   }
 }

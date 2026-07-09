@@ -18,6 +18,7 @@ package dev.neuroflow
 
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import com.google.android.gms.wearable.DataMap
 import com.google.android.gms.wearable.MessageEvent
 import com.google.android.gms.wearable.PutDataMapRequest
@@ -34,6 +35,7 @@ private const val CHANNEL  = "neuroflow/wear"
 private const val PATH_PRIMARY  = "/neuroflow/primary"
 private const val PATH_COMPLETE = "/neuroflow/complete"
 private const val PATH_SNOOZE   = "/neuroflow/snooze"
+private const val TAG = "WearBridge"
 
 /**
  * Call this from MainActivity.configureFlutterEngine() to wire the channel.
@@ -58,10 +60,21 @@ object WearBridge {
         ch.setMethodCallHandler { call, result ->
             when (call.method) {
                 "pushPrimaryTask" -> {
-                    val args = call.arguments as? Map<*, *> ?: return@setMethodCallHandler result.success(null)
+                    val args = call.arguments as? Map<*, *> ?: return@setMethodCallHandler result.error(
+                        "INVALID_ARGUMENTS",
+                        "pushPrimaryTask requires a map",
+                        null,
+                    )
                     scope.launch {
-                        pushToWatch(context, args)
-                        mainHandler.post { result.success(null) }
+                        try {
+                            pushToWatch(context, args)
+                            mainHandler.post { result.success(null) }
+                        } catch (error: Exception) {
+                            Log.w(TAG, "Failed to push primary task to Wear OS", error)
+                            mainHandler.post {
+                                result.error("WEAR_PUSH_FAILED", error.message, null)
+                            }
+                        }
                     }
                 }
                 else -> result.notImplemented()
@@ -70,20 +83,16 @@ object WearBridge {
     }
 
     private suspend fun pushToWatch(context: android.content.Context, args: Map<*, *>) {
-        try {
-            val request = PutDataMapRequest.create(PATH_PRIMARY).apply {
-                dataMap.putString("taskId",       args["taskId"]       as? String ?: "")
-                dataMap.putString("taskTitle",    args["taskTitle"]    as? String ?: "")
-                dataMap.putInt("quickWinCount",   (args["quickWinCount"] as? Int) ?: 0)
-                dataMap.putInt("pendingCount",    (args["pendingCount"]  as? Int) ?: 0)
-                dataMap.putBoolean("hasPrimaryTask", (args["hasPrimaryTask"] as? Boolean) ?: false)
-                dataMap.putLong("pushedAt",       (args["pushedAt"]    as? Long) ?: System.currentTimeMillis())
-            }.asPutDataRequest().setUrgent() // urgent = low-latency delivery
+        val request = PutDataMapRequest.create(PATH_PRIMARY).apply {
+            dataMap.putString("taskId",       args["taskId"]       as? String ?: "")
+            dataMap.putString("taskTitle",    args["taskTitle"]    as? String ?: "")
+            dataMap.putInt("quickWinCount",   (args["quickWinCount"] as? Int) ?: 0)
+            dataMap.putInt("pendingCount",    (args["pendingCount"]  as? Int) ?: 0)
+            dataMap.putBoolean("hasPrimaryTask", (args["hasPrimaryTask"] as? Boolean) ?: false)
+            dataMap.putLong("pushedAt",       (args["pushedAt"]    as? Long) ?: System.currentTimeMillis())
+        }.asPutDataRequest().setUrgent() // urgent = low-latency delivery
 
-            Wearable.getDataClient(context).putDataItem(request).await()
-        } catch (_: Exception) {
-            // Watch not paired or Play Services unavailable. Non-fatal.
-        }
+        Wearable.getDataClient(context).putDataItem(request).await()
     }
 
     /** Called by WearPhoneMessageReceiver when a watch message arrives. */
@@ -94,7 +103,21 @@ object WearBridge {
             else          -> return
         }
         mainHandler.post {
-            channel?.invokeMethod(method, mapOf("taskId" to taskId))
+            channel?.invokeMethod(
+                method,
+                mapOf("taskId" to taskId),
+                object : MethodChannel.Result {
+                    override fun success(result: Any?) = Unit
+
+                    override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+                        Log.w(TAG, "Flutter rejected watch action $method: $errorCode $errorMessage")
+                    }
+
+                    override fun notImplemented() {
+                        Log.w(TAG, "Flutter did not implement watch action $method")
+                    }
+                },
+            )
         }
     }
 }
@@ -121,6 +144,8 @@ class WearPhoneMessageReceiver : WearableListenerService() {
             val json    = JSONObject(String(event.data))
             val taskId  = json.optString("taskId", "")
             WearBridge.onWatchMessage(event.path, taskId)
-        } catch (_: Exception) { /* malformed payload — ignore */ }
+        } catch (error: Exception) {
+            Log.w("WearPhoneMessageReceiver", "Ignoring malformed watch payload", error)
+        }
     }
 }

@@ -2,8 +2,12 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/domain/google/connected_services_repository.dart';
+import 'package:neuroflow/domain/google/google_account.dart';
+import 'package:neuroflow/platform/error_reporter.dart';
+import 'package:neuroflow/platform/google/google_service_manager.dart';
 import 'package:neuroflow/presentation/theme.dart';
 
 class ConnectedServicesScreen extends ConsumerWidget {
@@ -22,7 +26,8 @@ class ConnectedServicesScreen extends ConsumerWidget {
           icon: const Icon(Icons.arrow_back, color: AppColors.textSecondary),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: const Text('Connected Services', style: AppTextStyles.titleMedium),
+        title:
+            const Text('Connected Services', style: AppTextStyles.titleMedium),
       ),
       body: accountAsync.when(
         data: (account) => ListView(
@@ -84,14 +89,15 @@ class ConnectedServicesScreen extends ConsumerWidget {
           ],
         ),
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('Error: $e')),
+        error: (error, stackTrace) =>
+            const Center(child: Text('Google account status is unavailable.')),
       ),
     );
   }
 }
 
 class _GoogleAccountTile extends ConsumerWidget {
-  final dynamic account; // GoogleAccount?
+  final GoogleAccount? account;
 
   const _GoogleAccountTile({required this.account});
 
@@ -115,7 +121,8 @@ class _GoogleAccountTile extends ConsumerWidget {
                     ? NetworkImage(account!.photoUrl!)
                     : null,
                 child: account == null
-                    ? const Icon(Icons.person_outline, color: AppColors.textMuted)
+                    ? const Icon(Icons.person_outline,
+                        color: AppColors.textMuted)
                     : null,
               ),
               const SizedBox(width: AppSpace.md),
@@ -124,13 +131,17 @@ class _GoogleAccountTile extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      account?.displayName ?? (account == null ? 'Not Connected' : 'Google Account'),
+                      account?.displayName ??
+                          (account == null
+                              ? 'Not Connected'
+                              : 'Google Account'),
                       style: AppTextStyles.titleMedium,
                     ),
                     if (account != null)
                       Text(
                         account!.email,
-                        style: AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted),
+                        style: AppTextStyles.bodySmall
+                            .copyWith(color: AppColors.textMuted),
                       ),
                   ],
                 ),
@@ -140,7 +151,13 @@ class _GoogleAccountTile extends ConsumerWidget {
           const SizedBox(height: AppSpace.lg),
           if (account == null)
             ElevatedButton(
-              onPressed: () => manager.signIn(),
+              onPressed: () => _runAction(
+                context,
+                () async {
+                  await manager.signIn();
+                },
+                'Google sign-in failed.',
+              ),
               child: const Text('Connect Google Account'),
             )
           else
@@ -148,14 +165,19 @@ class _GoogleAccountTile extends ConsumerWidget {
               children: [
                 Expanded(
                   child: TextButton(
-                    onPressed: () => manager.switchAccount(),
+                    onPressed: () => _runAction(
+                      context,
+                      manager.switchAccount,
+                      'Google account switching failed.',
+                    ),
                     child: const Text('Switch Account'),
                   ),
                 ),
                 Expanded(
                   child: TextButton(
                     onPressed: () => _confirmSignOut(context, manager),
-                    child: const Text('Sign Out', style: TextStyle(color: Colors.redAccent)),
+                    child: const Text('Sign Out',
+                        style: TextStyle(color: Colors.redAccent)),
                   ),
                 ),
               ],
@@ -165,21 +187,47 @@ class _GoogleAccountTile extends ConsumerWidget {
     );
   }
 
-  void _confirmSignOut(BuildContext context, dynamic manager) {
-    showDialog(
+  Future<void> _runAction(
+    BuildContext context,
+    Future<void> Function() action,
+    String errorMessage,
+  ) async {
+    try {
+      await action();
+    } catch (error, stackTrace) {
+      reportNonFatalError(errorMessage, error, stackTrace);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(errorMessage)),
+      );
+    }
+  }
+
+  void _confirmSignOut(
+    BuildContext context,
+    GoogleServiceManager manager,
+  ) {
+    showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceRaised,
         title: const Text('Disconnect Google?'),
-        content: const Text('This will stop all cloud synchronization. Your local data will remain safe.'),
+        content: const Text(
+            'This will stop all cloud synchronization. Your local data will remain safe.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           TextButton(
-            onPressed: () {
-              manager.signOut();
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () async {
               Navigator.pop(ctx);
+              await _runAction(
+                context,
+                manager.signOut,
+                'Google sign-out failed.',
+              );
             },
-            child: const Text('Disconnect', style: TextStyle(color: Colors.redAccent)),
+            child: const Text('Disconnect',
+                style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -222,10 +270,14 @@ class _ServiceTile extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.only(bottom: AppSpace.sm),
         child: ListTile(
-          leading: Icon(icon, color: isAvailable ? AppColors.accent : AppColors.textMuted),
+          leading: Icon(icon,
+              color: isAvailable ? AppColors.accent : AppColors.textMuted),
           title: Text(title, style: AppTextStyles.bodyMedium),
-          subtitle: Text(status, style: AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppSpace.radiusInput)),
+          subtitle: Text(status,
+              style:
+                  AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppSpace.radiusInput)),
           tileColor: AppColors.surface,
           trailing: const Switch(
             value: false,

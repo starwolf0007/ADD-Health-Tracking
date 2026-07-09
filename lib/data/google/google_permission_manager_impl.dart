@@ -17,11 +17,7 @@ class GooglePermissionManagerImpl implements GooglePermissionManager {
 
   @override
   Future<bool> requestScopes(List<String> scopes) async {
-    try {
-      await GoogleSignIn.instance.authorizationClient.authorizeScopes(scopes);
-      return true;
-    } catch (_) {
-      return false;
-    }
+    await GoogleSignIn.instance.authorizationClient.authorizeScopes(scopes);
+    return true;
   }
 }

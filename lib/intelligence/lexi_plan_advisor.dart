@@ -22,6 +22,7 @@ import 'package:flutter/services.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/intelligence/lexi_config.dart';
 import 'package:neuroflow/executive/planner.dart';
+import 'package:neuroflow/platform/error_reporter.dart';
 
 class LexiPlanAdvisor implements PlanAdvisor {
   static const _channel = MethodChannel('neuroflow/lexi');
@@ -62,8 +63,8 @@ class LexiPlanAdvisor implements PlanAdvisor {
         quickWins: plan.quickWins,
         reason: reason.trim(),
       );
-    } catch (_) {
-      // Silent fallback — never surface LLM errors to the user.
+    } catch (error, stackTrace) {
+      reportNonFatalError('Lexi plan refinement failed', error, stackTrace);
       return plan;
     }
   }
@@ -81,7 +82,12 @@ class LexiPlanAdvisor implements PlanAdvisor {
     } on MissingPluginException {
       // Platform channel not registered yet — SDK not integrated.
       return false;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      reportNonFatalError(
+        'Failed to check Gemini Nano availability',
+        error,
+        stackTrace,
+      );
       return false;
     }
   }
@@ -100,7 +106,8 @@ class LexiPlanAdvisor implements PlanAdvisor {
       return result;
     } on MissingPluginException {
       return null;
-    } catch (_) {
+    } catch (error, stackTrace) {
+      reportNonFatalError('Gemini Nano inference failed', error, stackTrace);
       return null;
     }
   }

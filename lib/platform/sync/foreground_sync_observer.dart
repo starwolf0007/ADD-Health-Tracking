@@ -14,8 +14,8 @@
 //
 // Architecture notes:
 //   • Fully auth-gated: flush() is a no-op if no Google Tasks token is stored.
-//   • Errors are swallowed silently — a background sync failure should never
-//     surface as UI noise.
+//   • Errors are recorded for diagnostics without surfacing background sync
+//     failures as UI noise.
 //   • Works alongside WorkManager: WorkManager handles periodic catch-up;
 //     this handles the "user just opened the app" moment.
 //
@@ -25,6 +25,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/platform/error_reporter.dart';
 
 class ForegroundSyncObserver extends WidgetsBindingObserver {
   final ProviderContainer _container;
@@ -60,8 +61,8 @@ class ForegroundSyncObserver extends WidgetsBindingObserver {
     Future.microtask(() async {
       try {
         await _container.read(googleTasksSyncServiceProvider).flush();
-      } catch (_) {
-        // Silently swallow — background sync failures are never user-visible.
+      } catch (error, stackTrace) {
+        reportNonFatalError('Foreground sync failed', error, stackTrace);
       }
     });
   }

@@ -7,15 +7,28 @@ class SyncProgress {
   final int totalItems;
   final int processedItems;
   final String? currentItemLabel;
+  final String? errorMessage;
 
   const SyncProgress({
     required this.phase,
     this.totalItems = 0,
     this.processedItems = 0,
     this.currentItemLabel,
+    this.errorMessage,
   });
 
   double get percent => totalItems == 0 ? 0 : processedItems / totalItems;
+}
+
+class SyncEngineException implements Exception {
+  final int failedOperationCount;
+  final Object cause;
+
+  const SyncEngineException(this.failedOperationCount, this.cause);
+
+  @override
+  String toString() =>
+      'Sync failed for $failedOperationCount operation(s): $cause';
 }
 
 abstract class SyncEngine {
