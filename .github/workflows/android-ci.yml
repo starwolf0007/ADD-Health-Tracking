@@ -7,7 +7,7 @@
 #   3. flutter test
 #   4. flutter build apk --release (push-only, produces artifact)
 #
-# Requires Flutter >= 3.22.0 / Dart >= 3.4.0 (matches pubspec constraints).
+# Requires Flutter >= 3.44.0 / Dart >= 3.12.0 (matches pubspec.lock resolved SDKs).
 
 name: Android CI
 
@@ -22,6 +22,12 @@ jobs:
     name: Build & Test (Android)
     runs-on: ubuntu-latest
 
+    # google-services.json is not committed (contains the Firebase API key).
+    # Add it as a repo secret named GOOGLE_SERVICES_JSON to enable the release
+    # APK build; without it the apk step is skipped so main stays green.
+    env:
+      GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,7 +41,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0'
+          flutter-version: '3.44.6'
           channel: stable
           cache: true
 
@@ -51,12 +57,18 @@ jobs:
       - name: Run Flutter tests
         run: flutter test
 
+      - name: Restore google-services.json
+        if: github.event_name == 'push' && env.GOOGLE_SERVICES_JSON != ''
+        run: |
+          mkdir -p android/app
+          printf '%s' "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+
       - name: Build release APK
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && env.GOOGLE_SERVICES_JSON != ''
         run: flutter build apk --release
 
       - name: Upload APK artifact
-        if: github.event_name == 'push'
+        if: github.event_name == 'push' && env.GOOGLE_SERVICES_JSON != ''
         uses: actions/upload-artifact@v4
         with:
           name: neuroflow-release-apk
