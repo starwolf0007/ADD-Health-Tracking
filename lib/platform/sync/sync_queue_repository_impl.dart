@@ -4,6 +4,7 @@
 
 import 'package:drift/drift.dart';
 
+import 'package:neuroflow/domain/enum_codec.dart';
 import 'package:neuroflow/data/database.dart';
 import 'package:neuroflow/platform/sync/sync_operation.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
@@ -20,7 +21,8 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
   SyncOperation _rowToOp(SyncQueueData row) {
     return SyncOperation(
       id: row.id,
-      type: _typeFromString(row.operation),
+      type: enumFromName(SyncOperationType.values, row.operation,
+          fallback: SyncOperationType.update),
       taskId: row.taskId,
       taskTitle: row.taskTitle,
       taskNotes: row.taskNotes,
@@ -33,7 +35,7 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
   SyncQueueCompanion _opToCompanion(SyncOperation op) {
     return SyncQueueCompanion(
       id: Value(op.id),
-      operation: Value(_typeToString(op.type)),
+      operation: Value(op.type.name),
       taskId: Value(op.taskId),
       taskTitle: Value(op.taskTitle),
       taskNotes: Value(op.taskNotes),
@@ -69,36 +71,4 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
 
   @override
   Future<void> clearCompleted() => _db.clearDoneSyncOps();
-
-  // ------------------------------------------------------------------
-  // String converters
-  // ------------------------------------------------------------------
-
-  SyncOperationType _typeFromString(String s) {
-    switch (s) {
-      case 'create':
-        return SyncOperationType.create;
-      case 'update':
-        return SyncOperationType.update;
-      case 'complete':
-        return SyncOperationType.complete;
-      case 'delete':
-        return SyncOperationType.delete;
-      default:
-        return SyncOperationType.update;
-    }
-  }
-
-  String _typeToString(SyncOperationType t) {
-    switch (t) {
-      case SyncOperationType.create:
-        return 'create';
-      case SyncOperationType.update:
-        return 'update';
-      case SyncOperationType.complete:
-        return 'complete';
-      case SyncOperationType.delete:
-        return 'delete';
-    }
-  }
 }

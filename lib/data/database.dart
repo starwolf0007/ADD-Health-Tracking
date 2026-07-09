@@ -16,6 +16,8 @@ import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'package:neuroflow/domain/date_utils.dart';
+
 part 'database.g.dart';
 
 // ---------------------------------------------------------------------------
@@ -165,10 +167,7 @@ class AppDatabase extends _$AppDatabase {
         },
       );
 
-  DateTime get _startOfToday {
-    final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day);
-  }
+  DateTime get _startOfToday => today();
 
   // ---- Tasks --------------------------------------------------------------
 

@@ -6,6 +6,7 @@
 
 import 'package:drift/drift.dart';
 
+import 'package:neuroflow/domain/enum_codec.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/platform/sync/sync_operation.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
@@ -30,8 +31,10 @@ class DriftTaskRepository implements TaskRepository {
       id: row.id,
       title: row.title,
       notes: row.notes,
-      energy: _energyFromString(row.energy),
-      status: _statusFromString(row.status),
+      energy: enumFromName(EnergyLevel.values, row.energy,
+          fallback: EnergyLevel.medium),
+      status: enumFromName(TaskStatus.values, row.status,
+          fallback: TaskStatus.pending),
       createdAt: row.createdAt,
       dueDate: row.dueDate,
       isQuickWin: row.isQuickWin,
@@ -43,8 +46,8 @@ class DriftTaskRepository implements TaskRepository {
       id: Value(task.id),
       title: Value(task.title),
       notes: Value(task.notes),
-      energy: Value(_energyToString(task.energy)),
-      status: Value(_statusToString(task.status)),
+      energy: Value(task.energy.name),
+      status: Value(task.status.name),
       createdAt: Value(task.createdAt),
       dueDate: Value(task.dueDate),
       isQuickWin: Value(task.isQuickWin),
@@ -137,61 +140,5 @@ class DriftTaskRepository implements TaskRepository {
           ..where((t) => t.id.equals(id)))
         .getSingleOrNull();
     return row?.googleTaskId;
-  }
-
-  // ------------------------------------------------------------------
-  // String converters
-  // ------------------------------------------------------------------
-
-  EnergyLevel _energyFromString(String s) {
-    switch (s) {
-      case 'low':
-        return EnergyLevel.low;
-      case 'high':
-        return EnergyLevel.high;
-      default:
-        return EnergyLevel.medium;
-    }
-  }
-
-  String _energyToString(EnergyLevel e) {
-    switch (e) {
-      case EnergyLevel.low:
-        return 'low';
-      case EnergyLevel.high:
-        return 'high';
-      case EnergyLevel.medium:
-        return 'medium';
-    }
-  }
-
-  TaskStatus _statusFromString(String s) {
-    switch (s) {
-      case 'completed':
-        return TaskStatus.completed;
-      case 'skipped':
-        return TaskStatus.skipped;
-      case 'paused':
-        return TaskStatus.paused;
-      case 'blocked':
-        return TaskStatus.blocked;
-      default:
-        return TaskStatus.pending;
-    }
-  }
-
-  String _statusToString(TaskStatus s) {
-    switch (s) {
-      case TaskStatus.completed:
-        return 'completed';
-      case TaskStatus.skipped:
-        return 'skipped';
-      case TaskStatus.paused:
-        return 'paused';
-      case TaskStatus.blocked:
-        return 'blocked';
-      case TaskStatus.pending:
-        return 'pending';
-    }
   }
 }

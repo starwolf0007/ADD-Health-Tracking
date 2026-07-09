@@ -4,6 +4,7 @@
 
 import 'package:drift/drift.dart';
 
+import 'package:neuroflow/domain/enum_codec.dart';
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/data/database.dart';
 import 'package:neuroflow/data/routine_repository.dart';
@@ -21,7 +22,8 @@ class DriftRoutineRepository implements RoutineRepository {
     return Routine(
       id: row.id,
       name: row.name,
-      anchor: _anchorFromString(row.anchor),
+      anchor: enumFromName(RoutineAnchor.values, row.anchor,
+          fallback: RoutineAnchor.custom),
       scheduleHour: row.scheduleHour,
       scheduleMinute: row.scheduleMinute,
       isActive: row.isActive,
@@ -47,7 +49,7 @@ class DriftRoutineRepository implements RoutineRepository {
     return RoutinesCompanion(
       id: Value(r.id),
       name: Value(r.name),
-      anchor: Value(_anchorToString(r.anchor)),
+      anchor: Value(r.anchor.name),
       scheduleHour: Value(r.scheduleHour),
       scheduleMinute: Value(r.scheduleMinute),
       isActive: Value(r.isActive),
@@ -90,7 +92,8 @@ class DriftRoutineRepository implements RoutineRepository {
     final allRows = await _db.watchActiveRoutines().first;
     final result = <Routine>[];
     for (final row in allRows) {
-      final anchor = _anchorFromString(row.anchor);
+      final anchor = enumFromName(RoutineAnchor.values, row.anchor,
+          fallback: RoutineAnchor.custom);
       if (_isDueNow(anchor, row.scheduleHour, row.scheduleMinute, now)) {
         final steps = await _db.fetchStepsForRoutine(row.id);
         final routine = _rowsToRoutine(row, steps);
@@ -145,32 +148,6 @@ class DriftRoutineRepository implements RoutineRepository {
       case RoutineAnchor.custom:
         if (hour == null || minute == null) return false;
         return now.hour == hour && (now.minute - minute).abs() <= 30;
-    }
-  }
-
-  RoutineAnchor _anchorFromString(String s) {
-    switch (s) {
-      case 'morning':
-        return RoutineAnchor.morning;
-      case 'midday':
-        return RoutineAnchor.midday;
-      case 'evening':
-        return RoutineAnchor.evening;
-      default:
-        return RoutineAnchor.custom;
-    }
-  }
-
-  String _anchorToString(RoutineAnchor a) {
-    switch (a) {
-      case RoutineAnchor.morning:
-        return 'morning';
-      case RoutineAnchor.midday:
-        return 'midday';
-      case RoutineAnchor.evening:
-        return 'evening';
-      case RoutineAnchor.custom:
-        return 'custom';
     }
   }
 }

@@ -10,6 +10,8 @@
 
 import 'package:uuid/uuid.dart';
 
+import 'package:neuroflow/domain/date_utils.dart';
+
 // ---------------------------------------------------------------------------
 // Frequency
 // ---------------------------------------------------------------------------
@@ -44,11 +46,10 @@ class HabitCheckIn {
     required bool completed,
   }) {
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
     return HabitCheckIn(
       id: const Uuid().v4(),
       habitId: habitId,
-      date: today,
+      date: dateOnly(now),
       completed: completed,
       createdAt: now,
     );
@@ -118,8 +119,9 @@ class Habit {
 
   /// Whether today's check-in is already marked.
   bool get isCheckedToday {
-    final today = _today();
-    return recentCheckIns.any((c) => _sameDay(c.date, today) && c.completed);
+    final currentDay = today();
+    return recentCheckIns
+        .any((c) => isSameDay(c.date, currentDay) && c.completed);
   }
 
   /// Current streak — consecutive applicable days completed, counting back from today.
@@ -130,10 +132,10 @@ class Habit {
       ..sort((a, b) => b.date.compareTo(a.date));
 
     int streak = 0;
-    DateTime cursor = _today();
+    DateTime cursor = today();
 
     for (final checkIn in sorted) {
-      if (!_sameDay(checkIn.date, cursor)) break;
+      if (!isSameDay(checkIn.date, cursor)) break;
       if (!checkIn.completed) break;
       streak++;
       cursor = cursor.subtract(const Duration(days: 1));
@@ -174,12 +176,4 @@ class Habit {
         return date.weekday == DateTime.saturday || date.weekday == DateTime.sunday;
     }
   }
-
-  static DateTime _today() {
-    final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day);
-  }
-
-  static bool _sameDay(DateTime a, DateTime b) =>
-      a.year == b.year && a.month == b.month && a.day == b.day;
 }

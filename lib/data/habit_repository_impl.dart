@@ -5,6 +5,8 @@
 
 import 'package:drift/drift.dart';
 
+import 'package:neuroflow/domain/date_utils.dart';
+import 'package:neuroflow/domain/enum_codec.dart';
 import 'package:neuroflow/domain/habit.dart';
 import 'package:neuroflow/data/database.dart';
 import 'package:neuroflow/data/habit_repository.dart';
@@ -23,7 +25,8 @@ class DriftHabitRepository implements HabitRepository {
       id: row.id,
       name: row.name,
       notes: row.notes,
-      frequency: _freqFromString(row.frequency),
+      frequency: enumFromName(HabitFrequency.values, row.frequency,
+          fallback: HabitFrequency.daily),
       isActive: row.isActive,
       createdAt: row.createdAt,
       recentCheckIns: checkInRows.map(_checkInRowToDomain).toList(),
@@ -45,7 +48,7 @@ class DriftHabitRepository implements HabitRepository {
       id: Value(h.id),
       name: Value(h.name),
       notes: Value(h.notes),
-      frequency: Value(_freqToString(h.frequency)),
+      frequency: Value(h.frequency.name),
       isActive: Value(h.isActive),
       createdAt: Value(h.createdAt),
     );
@@ -70,11 +73,11 @@ class DriftHabitRepository implements HabitRepository {
   @override
   Future<void> checkIn(String habitId, {bool completed = true}) async {
     final now = DateTime.now();
-    final today = DateTime(now.year, now.month, now.day);
+    final todayDate = dateOnly(now);
     await _db.upsertCheckIn(HabitCheckInsCompanion(
-      id: Value('${habitId}_${today.toIso8601String()}'),
+      id: Value('${habitId}_${todayDate.toIso8601String()}'),
       habitId: Value(habitId),
-      date: Value(today),
+      date: Value(todayDate),
       completed: Value(completed),
       createdAt: Value(now),
     ));
@@ -98,31 +101,5 @@ class DriftHabitRepository implements HabitRepository {
   @override
   Future<void> delete(String habitId) async {
     await _db.deleteHabit(habitId);
-  }
-
-  // ------------------------------------------------------------------
-  // String converters
-  // ------------------------------------------------------------------
-
-  HabitFrequency _freqFromString(String s) {
-    switch (s) {
-      case 'weekdays':
-        return HabitFrequency.weekdays;
-      case 'weekends':
-        return HabitFrequency.weekends;
-      default:
-        return HabitFrequency.daily;
-    }
-  }
-
-  String _freqToString(HabitFrequency f) {
-    switch (f) {
-      case HabitFrequency.weekdays:
-        return 'weekdays';
-      case HabitFrequency.weekends:
-        return 'weekends';
-      case HabitFrequency.daily:
-        return 'daily';
-    }
   }
 }
