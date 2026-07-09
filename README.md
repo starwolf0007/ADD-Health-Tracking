@@ -3,7 +3,14 @@
 Calm-functional ADHD execution app. Native Flutter. Replaces NeuroList + RoutineFlow.
 
 **Source of truth:** [`docs/NeuroFlow-Unified-Spec-v1.4.md`](docs/NeuroFlow-Unified-Spec-v1.4.md) — design principles, locked design tokens, Quick Wins/Focus mechanics, AI tiering.
-**Build log:** [`docs/NeuroFlow-Build-Notes-v0.2.md`](docs/NeuroFlow-Build-Notes-v0.2.md) — stack decisions, §10 resolutions, open reviewer questions.
+**Build log:** [`docs/NeuroFlow-Build-Notes-v0.3.md`](docs/NeuroFlow-Build-Notes-v0.3.md) — stack decisions, §10 resolutions, open reviewer questions.
+
+## Docs map
+
+- `docs/` — living specs and references (build path, design system, connected services, decisions log)
+- `docs/google/` — Google integration architecture, setup, and auth docs
+- `docs/archive/` — point-in-time handoff notes, session memos, and status snapshots, kept for history but not current guidance
+- `CLAUDE.md` — project rules read automatically by Claude Code
 
 ## Architecture (four layers, spec §3)
 
