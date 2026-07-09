@@ -12,6 +12,9 @@ build/
 lib/data/database.g.dart
 
 # Android
+# Firebase / Google config — contains project API keys and OAuth client IDs.
+# Keep out of version control; use google-services.json.example as a template.
+**/google-services.json
 **/android/**/gradle-wrapper.jar
 **/android/.gradle
 **/android/captures/
