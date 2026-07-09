@@ -7,7 +7,8 @@
 #   3. flutter test
 #   4. flutter build apk --release (push-only, produces artifact)
 #
-# Requires Flutter >= 3.22.0 / Dart >= 3.4.0 (matches pubspec constraints).
+# Uses the latest stable Flutter. flutter_lints ^6.0.0 requires Dart >= 3.8.0
+# (Flutter >= 3.32), so the toolchain must not be pinned below that.
 
 name: Android CI
 
@@ -35,7 +36,6 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.22.0'
           channel: stable
           cache: true
 
