@@ -1,0 +1,58 @@
+# .github/workflows/repo-hygiene.yml
+#
+# Keeps the repo organized automatically. Runs on every push and PR to
+# main. Doesn't touch code — just fails fast with a clear message if
+# clutter starts piling up again, instead of letting it silently
+# accumulate the way it did before (see docs/archive/RECONCILIATION.md).
+
+name: Repo Hygiene
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-root-clutter:
+    name: Check root stays clean
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: No stray markdown files at repo root
+        run: |
+          allowed="README.md CLAUDE.md"
+          stray=""
+          for f in *.md; do
+            [ -e "$f" ] || continue
+            if ! echo "$allowed" | grep -qw "$f"; then
+              stray="$stray $f"
+            fi
+          done
+          if [ -n "$stray" ]; then
+            echo "::error::New root-level .md file(s) found:$stray"
+            echo "Put living docs in docs/, point-in-time notes in docs/archive/. See README.md's Docs map."
+            exit 1
+          fi
+
+      - name: No git bundles or log files committed
+        run: |
+          found=$(git ls-files | grep -E '\.bundle$|green_gate_log\.txt$' || true)
+          if [ -n "$found" ]; then
+            echo "::error::Build artifacts tracked in git:"
+            echo "$found"
+            exit 1
+          fi
+
+      - name: No duplicate project tree nested under android/
+        run: |
+          # Regression guard for the flutterfire-configure-in-wrong-dir bug
+          # (see the "fix: remove stray duplicate project tree" commit).
+          for bad in android/android android/wear android/docs android/test android/pubspec.yaml; do
+            if [ -e "$bad" ]; then
+              echo "::error::$bad exists -- this pattern previously came from running a Flutter/FlutterFire command from inside android/ instead of the repo root."
+              exit 1
+            fi
+          done
