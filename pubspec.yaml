@@ -23,7 +23,7 @@ dependencies:
   # Notifications & background
   flutter_local_notifications: ^17.1.2
   timezone: ^0.9.3
-  workmanager: ^0.5.2
+  workmanager: 0.5.2
 
   # Google Tasks sync
   google_sign_in: ^6.2.1

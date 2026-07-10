@@ -204,6 +204,11 @@ class AppDatabase extends _$AppDatabase {
         TasksCompanion(
           status: const Value('complete'),
           completedAt: Value(DateTime.now()),
+          // Completing a task ends its living-state arc — clear any stale
+          // Re-Entry metadata so a later reopen never shows an old pause hint.
+          pausedAt: const Value(null),
+          pausedStep: const Value(null),
+          pausedNote: const Value(null),
         ),
       );
 

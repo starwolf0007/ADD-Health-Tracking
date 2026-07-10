@@ -190,18 +190,49 @@ class Task {
   bool get isPending => state == TaskState.notStarted;
 
   /// Transition helper that keeps pause/complete metadata consistent.
+  ///
+  /// NOTE: [Paused]/[Blocked] and [Complete] use the explicit [Task]
+  /// constructor rather than [copyWith]. `copyWith`'s `??` fallback means a
+  /// deliberately-null [step]/[note] would silently keep the *previous*
+  /// pause metadata instead of clearing it (e.g. re-pausing without a new
+  /// note would leave the old note stuck forever), and completing a task
+  /// would leave stale `pausedAt`/`pausedStep`/`pausedNote` behind. Building
+  /// [Task] directly makes every field explicit so nothing stale survives.
   Task transitionTo(TaskState next, {String? step, String? note}) {
     switch (next) {
       case TaskState.paused:
       case TaskState.blocked:
-        return copyWith(
+        return Task(
+          id: id,
+          title: title,
+          notes: notes,
+          energy: energy,
           state: next,
+          createdAt: createdAt,
+          dueDate: dueDate,
+          isQuickWin: isQuickWin,
+          estimatedMinutes: estimatedMinutes,
+          completedAt: completedAt,
           pausedAt: DateTime.now(),
           pausedStep: step,
           pausedNote: note,
         );
       case TaskState.complete:
-        return copyWith(state: next, completedAt: DateTime.now());
+        return Task(
+          id: id,
+          title: title,
+          notes: notes,
+          energy: energy,
+          state: next,
+          createdAt: createdAt,
+          dueDate: dueDate,
+          isQuickWin: isQuickWin,
+          estimatedMinutes: estimatedMinutes,
+          completedAt: DateTime.now(),
+          pausedAt: null,
+          pausedStep: null,
+          pausedNote: null,
+        );
       default:
         return copyWith(state: next);
     }
