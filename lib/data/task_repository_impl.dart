@@ -34,6 +34,8 @@ class DriftTaskRepository implements TaskRepository {
       status: _statusFromString(row.status),
       createdAt: row.createdAt,
       dueDate: row.dueDate,
+      completedAt: row.completedAt,
+      estimatedMinutes: row.estimatedMinutes,
       isQuickWin: row.isQuickWin,
     );
   }
@@ -47,6 +49,8 @@ class DriftTaskRepository implements TaskRepository {
       status: Value(_statusToString(task.status)),
       createdAt: Value(task.createdAt),
       dueDate: Value(task.dueDate),
+      completedAt: Value(task.completedAt),
+      estimatedMinutes: Value(task.estimatedMinutes),
       isQuickWin: Value(task.isQuickWin),
     );
   }
@@ -61,6 +65,10 @@ class DriftTaskRepository implements TaskRepository {
           (rows) => rows.map(_rowToTask).toList(),
         );
   }
+
+  @override
+  Stream<List<Task>> watchTodayTimeline() =>
+      _db.watchTodayTimeline().map((rows) => rows.map(_rowToTask).toList());
 
   @override
   Stream<int> watchCompletedTodayCount() {
@@ -103,6 +111,11 @@ class DriftTaskRepository implements TaskRepository {
   }
 
   @override
+  Future<void> updateStatus(String id, TaskStatus status) async {
+    await _db.updateTaskStatus(id, _statusToString(status));
+  }
+
+  @override
   Future<void> delete(String id) async {
     final googleTaskId = await _getGoogleTaskId(id);
     await _db.deleteTask(id);
@@ -126,15 +139,13 @@ class DriftTaskRepository implements TaskRepository {
   // ------------------------------------------------------------------
 
   Future<bool> _isNewTask(String id) async {
-    final row = await (_db.select(_db.tasks)
-          ..where((t) => t.id.equals(id)))
+    final row = await (_db.select(_db.tasks)..where((t) => t.id.equals(id)))
         .getSingleOrNull();
     return row == null;
   }
 
   Future<String?> _getGoogleTaskId(String id) async {
-    final row = await (_db.select(_db.tasks)
-          ..where((t) => t.id.equals(id)))
+    final row = await (_db.select(_db.tasks)..where((t) => t.id.equals(id)))
         .getSingleOrNull();
     return row?.googleTaskId;
   }
@@ -169,6 +180,8 @@ class DriftTaskRepository implements TaskRepository {
     switch (s) {
       case 'completed':
         return TaskStatus.completed;
+      case 'inProgress':
+        return TaskStatus.inProgress;
       case 'skipped':
         return TaskStatus.skipped;
       case 'paused':
@@ -184,6 +197,8 @@ class DriftTaskRepository implements TaskRepository {
     switch (s) {
       case TaskStatus.completed:
         return 'completed';
+      case TaskStatus.inProgress:
+        return 'inProgress';
       case TaskStatus.skipped:
         return 'skipped';
       case TaskStatus.paused:

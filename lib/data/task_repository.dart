@@ -8,12 +8,14 @@ import 'package:neuroflow/domain/task.dart';
 abstract class TaskRepository {
   /// All pending tasks, ordered by energy ascending (low first).
   Stream<List<Task>> watchPending();
+  Stream<List<Task>> watchTodayTimeline();
 
   /// Count of tasks completed today — used by the heartbeat line.
   Stream<int> watchCompletedTodayCount();
 
   Future<void> save(Task task);
   Future<void> markComplete(String id);
+  Future<void> updateStatus(String id, TaskStatus status);
   Future<void> delete(String id);
   Future<Task?> getById(String id);
 }

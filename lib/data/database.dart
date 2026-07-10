@@ -122,7 +122,8 @@ class MoodLogs extends Table {
 @DataClassName('SyncQueueData')
 class SyncQueue extends Table {
   TextColumn get id => text()();
-  TextColumn get operation => text()(); // 'create' | 'update' | 'complete' | 'delete'
+  TextColumn get operation =>
+      text()(); // 'create' | 'update' | 'complete' | 'delete'
   TextColumn get taskId => text()();
   TextColumn get taskTitle => text().nullable()();
   TextColumn get taskNotes => text().nullable()();
@@ -188,10 +189,35 @@ class AppDatabase extends _$AppDatabase {
 
   Stream<List<TaskRow>> watchPendingByEnergyAsc() {
     return (select(tasks)
-          ..where((t) => t.status.equals('pending'))
+          ..where((t) =>
+              t.status.isIn(['pending', 'inProgress', 'paused', 'blocked']))
           ..orderBy([(t) => OrderingTerm.asc(t.energy)]))
         .watch();
   }
+
+  Stream<List<TaskRow>> watchTodayTimeline() {
+    final tomorrow = _startOfToday.add(const Duration(days: 1));
+    return (select(tasks)
+          ..where((t) =>
+              t.status.isNotIn(['skipped']) &
+              (t.status.isNotIn(['completed']) |
+                  (t.completedAt.isBiggerOrEqualValue(_startOfToday) &
+                      t.completedAt.isSmallerThanValue(tomorrow))))
+          ..orderBy([
+            (t) => OrderingTerm.asc(t.dueDate),
+            (t) => OrderingTerm.asc(t.createdAt),
+          ]))
+        .watch();
+  }
+
+  Future<void> updateTaskStatus(String id, String status) =>
+      (update(tasks)..where((t) => t.id.equals(id))).write(
+        TasksCompanion(
+          status: Value(status),
+          completedAt:
+              status == 'completed' ? Value(DateTime.now()) : const Value(null),
+        ),
+      );
 
   Stream<int> watchCompletedTodayCount() {
     final query = select(tasks)
@@ -230,11 +256,10 @@ class AppDatabase extends _$AppDatabase {
   Future<void> upsertCheckIn(HabitCheckInsCompanion entry) =>
       into(habitCheckIns).insertOnConflictUpdate(entry);
 
-  Future<void> deleteCheckInForToday(String habitId) =>
-      (delete(habitCheckIns)
-            ..where((c) =>
-                c.habitId.equals(habitId) & c.date.equals(_startOfToday)))
-          .go();
+  Future<void> deleteCheckInForToday(String habitId) => (delete(habitCheckIns)
+        ..where(
+            (c) => c.habitId.equals(habitId) & c.date.equals(_startOfToday)))
+      .go();
 
   // ---- Routines -------------------------------------------------------------
 
@@ -310,8 +335,7 @@ class AppDatabase extends _$AppDatabase {
           .write(const SyncQueueCompanion(status: Value('done')));
 
   Future<void> incrementSyncRetry(String opId) async {
-    final op = await (select(syncQueue)
-          ..where((s) => s.id.equals(opId)))
+    final op = await (select(syncQueue)..where((s) => s.id.equals(opId)))
         .getSingleOrNull();
     if (op == null) return;
     final newCount = op.retryCount + 1;

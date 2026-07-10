@@ -36,6 +36,7 @@ import 'package:neuroflow/platform/sync/google_tasks_sync_service.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository_impl.dart';
 import 'package:neuroflow/platform/wear/wear_sync_service.dart';
+import 'package:neuroflow/presentation/today/today_timeline.dart';
 
 // ---------------------------------------------------------------------------
 // Platform layer
@@ -59,15 +60,18 @@ final googleAuthRepositoryProvider = Provider<GoogleAuthRepository>((ref) {
   return GoogleAuthRepositoryImpl();
 });
 
-final googleAccountRepositoryProvider = Provider<GoogleAccountRepository>((ref) {
+final googleAccountRepositoryProvider =
+    Provider<GoogleAccountRepository>((ref) {
   return GoogleAccountRepositoryImpl(const FlutterSecureStorage());
 });
 
-final googlePermissionManagerProvider = Provider<GooglePermissionManager>((ref) {
+final googlePermissionManagerProvider =
+    Provider<GooglePermissionManager>((ref) {
   return GooglePermissionManagerImpl();
 });
 
-final connectedServicesRepositoryProvider = Provider<ConnectedServicesRepository>((ref) {
+final connectedServicesRepositoryProvider =
+    Provider<ConnectedServicesRepository>((ref) {
   return ConnectedServicesRepositoryImpl(const FlutterSecureStorage());
 });
 
@@ -87,7 +91,8 @@ final googleAccountProvider = StreamProvider<GoogleAccount?>((ref) {
 });
 
 /// Stream of the global Google connection state.
-final googleConnectionStateProvider = StreamProvider<GoogleConnectionState>((ref) {
+final googleConnectionStateProvider =
+    StreamProvider<GoogleConnectionState>((ref) {
   return ref.watch(googleServiceManagerProvider).connectionState;
 });
 
@@ -158,8 +163,7 @@ class AdvisorTierNotifier extends Notifier<AdvisorTier> {
   void set(AdvisorTier tier) => state = tier;
 }
 
-final advisorTierProvider =
-    NotifierProvider<AdvisorTierNotifier, AdvisorTier>(
+final advisorTierProvider = NotifierProvider<AdvisorTierNotifier, AdvisorTier>(
   AdvisorTierNotifier.new,
 );
 
@@ -216,12 +220,13 @@ class TodayController extends AsyncNotifier<TodayState> {
 
   @override
   Future<TodayState> build() async {
-    final pending = await ref.watch(taskRepositoryProvider).watchPending().first;
+    final pending =
+        await ref.watch(taskRepositoryProvider).watchPending().first;
     final state = await _computeState(pending);
-    
+
     // Push to watch after state change
     await ref.read(wearSyncServiceProvider).pushPrimaryTask(state);
-    
+
     return state;
   }
 
@@ -270,6 +275,80 @@ final activeRoutinesProvider = StreamProvider<List<Routine>>((ref) {
 final dueRoutinesProvider = FutureProvider<List<Routine>>((ref) {
   return ref.watch(routineRepositoryProvider).fetchDueNow();
 });
+
+final todayCalendarSourceProvider = Provider<TodayCalendarSource>(
+  (ref) => const NoCalendarSource(),
+);
+
+final todayTimelineProvider = FutureProvider<TodayTimelineData>((ref) async {
+  final tasks =
+      await ref.watch(taskRepositoryProvider).watchTodayTimeline().first;
+  final routines =
+      await ref.watch(routineRepositoryProvider).watchActive().first;
+  final calendar = ref.watch(todayCalendarSourceProvider);
+  final now = DateTime.now();
+  final calendarItems = await calendar.load(now);
+  final recommended = ref.watch(todayControllerProvider).value?.primaryTask;
+  return TodayTimelineData(
+    items: const TodayTimelineBuilder().build(
+      day: now,
+      tasks: tasks,
+      routines: routines,
+      calendarItems: calendarItems,
+    ),
+    recommendedTask: recommended,
+    hasCalendarPermission: calendar.hasPermission,
+    lexiAvailable: ref.watch(advisorTierProvider) != AdvisorTier.none,
+  );
+});
+
+class TaskActionController {
+  final Ref ref;
+  const TaskActionController(this.ref);
+
+  Future<void> start(String id) => _set(id, TaskStatus.inProgress);
+  Future<void> resume(String id) => _set(id, TaskStatus.inProgress);
+  Future<void> pause(String id) => _set(id, TaskStatus.paused);
+
+  void notNow(String id) {
+    ref.read(todayControllerProvider.notifier).snoozeForSession(id);
+    ref.invalidate(todayTimelineProvider);
+  }
+
+  Future<void> _set(String id, TaskStatus status) async {
+    await ref.read(taskRepositoryProvider).updateStatus(id, status);
+    ref.invalidate(todayControllerProvider);
+    ref.invalidate(todayTimelineProvider);
+  }
+}
+
+final taskActionControllerProvider = Provider(TaskActionController.new);
+
+class ReentryNote {
+  final String lastCompletedStep;
+  final String exactNextAction;
+  final DateTime? returnTime;
+
+  const ReentryNote({
+    required this.lastCompletedStep,
+    required this.exactNextAction,
+    this.returnTime,
+  });
+}
+
+class ReentryNotesNotifier extends Notifier<Map<String, ReentryNote>> {
+  @override
+  Map<String, ReentryNote> build() => const {};
+
+  void save(String taskId, ReentryNote note) {
+    state = {...state, taskId: note};
+  }
+}
+
+final reentryNotesProvider =
+    NotifierProvider<ReentryNotesNotifier, Map<String, ReentryNote>>(
+  ReentryNotesNotifier.new,
+);
 
 final activeHabitsProvider = StreamProvider<List<Habit>>((ref) {
   return ref.watch(habitRepositoryProvider).watchActive();

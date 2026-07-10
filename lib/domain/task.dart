@@ -7,7 +7,7 @@ import 'package:uuid/uuid.dart';
 
 enum EnergyLevel { low, medium, high }
 
-enum TaskStatus { pending, completed, skipped, paused, blocked }
+enum TaskStatus { pending, inProgress, completed, skipped, paused, blocked }
 
 class Task {
   final String id;
@@ -17,6 +17,8 @@ class Task {
   final TaskStatus status;
   final DateTime createdAt;
   final DateTime? dueDate;
+  final DateTime? completedAt;
+  final int? estimatedMinutes;
   final bool isQuickWin; // §QW — eligible for auto-mode Quick Wins list
 
   const Task({
@@ -27,6 +29,8 @@ class Task {
     this.status = TaskStatus.pending,
     required this.createdAt,
     this.dueDate,
+    this.completedAt,
+    this.estimatedMinutes,
     this.isQuickWin = false,
   });
 
@@ -35,6 +39,8 @@ class Task {
     String? notes,
     EnergyLevel energy = EnergyLevel.medium,
     DateTime? dueDate,
+    DateTime? completedAt,
+    int? estimatedMinutes,
     bool isQuickWin = false,
   }) {
     return Task(
@@ -45,6 +51,8 @@ class Task {
       status: TaskStatus.pending,
       createdAt: DateTime.now(),
       dueDate: dueDate,
+      completedAt: completedAt,
+      estimatedMinutes: estimatedMinutes,
       isQuickWin: isQuickWin,
     );
   }
@@ -55,6 +63,8 @@ class Task {
     EnergyLevel? energy,
     TaskStatus? status,
     DateTime? dueDate,
+    DateTime? completedAt,
+    int? estimatedMinutes,
     bool? isQuickWin,
   }) {
     return Task(
@@ -65,6 +75,8 @@ class Task {
       status: status ?? this.status,
       createdAt: createdAt,
       dueDate: dueDate ?? this.dueDate,
+      completedAt: completedAt ?? this.completedAt,
+      estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
       isQuickWin: isQuickWin ?? this.isQuickWin,
     );
   }
