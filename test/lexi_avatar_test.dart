@@ -10,14 +10,17 @@ void main() {
       home: const Scaffold(
         body: LexiAvatar(
           visualState: LexiVisualState.idle,
-          assetPath: 'assets/lexi/public/lexi_placeholder_public.png',
-          semanticLabel: 'Public Lexi placeholder',
+          assetPath: 'assets/lexi/public/lexi-widget-reference.jpg',
+          semanticLabel: 'Public Lexi widget reference',
         ),
       ),
     ));
     await tester.pump();
 
-    expect(find.bySemanticsLabel('Public Lexi placeholder'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel('Public Lexi widget reference'),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
   });
 

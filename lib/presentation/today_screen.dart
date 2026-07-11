@@ -169,7 +169,7 @@ class _DaySummaryCard extends StatelessWidget {
             children: [
               const LexiAvatar(
                 visualState: LexiVisualState.idle,
-                assetPath: 'assets/lexi/public/lexi_placeholder_public.png',
+                assetPath: 'assets/lexi/public/lexi-widget-reference.jpg',
                 size: 48,
                 subtleIdleAnimation: true,
               ),
@@ -228,7 +228,7 @@ class _ActiveTaskCard extends ConsumerWidget {
             children: [
               LexiAvatar(
                 visualState: LexiVisualState.focus,
-                assetPath: 'assets/lexi/public/lexi_placeholder_public.png',
+                assetPath: 'assets/lexi/public/lexi-widget-reference.jpg',
                 size: 30,
               ),
               SizedBox(width: AppSpace.sm),
