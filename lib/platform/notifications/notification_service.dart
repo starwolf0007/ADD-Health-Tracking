@@ -6,6 +6,7 @@
 // in-app reminders. Exact alarms deferred to Phase 2 if user research
 // shows demand.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
@@ -139,6 +140,8 @@ class NotificationService {
           usesChronometer: true,
         ),
         iOS: const DarwinNotificationDetails(
+          // TODO(iOS): iOS has no notification chronometer equivalent. Add a
+          // live-activity implementation before claiming timer parity.
           presentSound: false,
         ),
       ),
@@ -146,6 +149,34 @@ class NotificationService {
   }
 
   Future<void> cancelActiveTaskTimer() => _plugin.cancel(_idActiveTask);
+
+  /// Returns false only when Android explicitly reports notifications disabled.
+  /// Null means this platform cannot report the setting.
+  Future<bool?> areNotificationsEnabled() async {
+    try {
+      return await _plugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.areNotificationsEnabled();
+    } catch (error, stackTrace) {
+      debugPrint('Unable to check NeuroFlow notification permission: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      return null;
+    }
+  }
+
+  Future<bool?> requestNotificationPermission() async {
+    try {
+      return await _plugin
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>()
+          ?.requestNotificationsPermission();
+    } catch (error, stackTrace) {
+      debugPrint('Unable to request NeuroFlow notification permission: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      return null;
+    }
+  }
 
   Future<void> cancelReminder(int id) async {
     await _plugin.cancel(id);

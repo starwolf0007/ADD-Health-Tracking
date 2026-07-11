@@ -67,28 +67,45 @@ class _RoutineScheduleSheet extends ConsumerStatefulWidget {
 
 class _RoutineScheduleSheetState extends ConsumerState<_RoutineScheduleSheet> {
   final _nameController = TextEditingController();
+  final _firstStepController = TextEditingController();
   TimeOfDay _time = const TimeOfDay(hour: 7, minute: 0);
   bool _saving = false;
 
   @override
   void dispose() {
     _nameController.dispose();
+    _firstStepController.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     final name = _nameController.text.trim();
-    if (name.isEmpty || _saving) return;
+    final firstStep = _firstStepController.text.trim();
+    if (_saving) return;
+    if (name.isEmpty || firstStep.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Add a routine name and its first step.')),
+      );
+      return;
+    }
     setState(() => _saving = true);
     try {
-      await ref.read(routineRepositoryProvider).save(
-            Routine.create(
-              name: name,
-              anchor: RoutineAnchor.custom,
-              scheduleHour: _time.hour,
-              scheduleMinute: _time.minute,
-            ),
-          );
+      final routine = Routine.create(
+        name: name,
+        anchor: RoutineAnchor.custom,
+        scheduleHour: _time.hour,
+        scheduleMinute: _time.minute,
+      );
+      final completeRoutine = routine.copyWith(
+        steps: [
+          RoutineStep.create(
+            routineId: routine.id,
+            position: 0,
+            title: firstStep,
+          ),
+        ],
+      );
+      await ref.read(routineRepositoryProvider).save(completeRoutine);
       ref.invalidate(activeRoutinesProvider);
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -130,6 +147,17 @@ class _RoutineScheduleSheetState extends ConsumerState<_RoutineScheduleSheet> {
             decoration: const InputDecoration(
               labelText: 'Routine name',
               hintText: 'Morning launch pad',
+            ),
+          ),
+          const SizedBox(height: AppSpace.md),
+          TextField(
+            controller: _firstStepController,
+            textCapitalization: TextCapitalization.sentences,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _save(),
+            decoration: const InputDecoration(
+              labelText: 'First step',
+              hintText: 'Put lunch pail by the door',
             ),
           ),
           const SizedBox(height: AppSpace.md),

@@ -4,6 +4,7 @@
 
 import 'dart:async' show unawaited;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -379,9 +380,12 @@ class TaskActionController {
       } else {
         await NotificationService().cancelActiveTaskTimer();
       }
-    } catch (_) {
+    } catch (error, stackTrace) {
       // Notification permission or OS notification failures must never
       // prevent the deterministic task state from updating locally.
+      // Keep a dogfooding trace instead of silently discarding the failure.
+      debugPrint('Could not update active task notification: $error');
+      debugPrintStack(stackTrace: stackTrace);
     }
   }
 }

@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -10,6 +12,7 @@ import 'package:neuroflow/presentation/theme.dart';
 import 'package:neuroflow/presentation/today/lexi_avatar.dart';
 import 'package:neuroflow/executive/today_timeline.dart';
 import 'package:neuroflow/presentation/widgets/capture_sheet.dart';
+import 'package:neuroflow/platform/notifications/notification_service.dart';
 
 class TodayScreen extends ConsumerStatefulWidget {
   final DateTime? now;
@@ -266,11 +269,14 @@ class _ActiveTaskCard extends ConsumerWidget {
                           } else {
                             await actions.start(task.id);
                           }
-                        } catch (error) {
+                          if (!context.mounted) return;
+                          unawaited(_showTimerPermissionHint(context));
+                        } on TaskActionFailure catch (error) {
                           if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Could not start task. Try again.'),
+                            SnackBar(
+                              content:
+                                  Text('Could not ${error.action}. Try again.'),
                             ),
                           );
                         }
@@ -377,11 +383,11 @@ class _ActiveTaskCard extends ConsumerWidget {
                     )
                   : null,
             );
-      } catch (_) {
+      } on TaskActionFailure catch (error) {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Could not save this task for later. Try again.'),
+          SnackBar(
+            content: Text('Could not ${error.action}. Try again.'),
           ),
         );
       }
@@ -406,6 +412,23 @@ class _ActiveTaskCard extends ConsumerWidget {
     );
     if (time == null) return null;
     return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  Future<void> _showTimerPermissionHint(BuildContext context) async {
+    final enabled = await NotificationService().areNotificationsEnabled();
+    if (enabled != false || !context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text(
+            'Allow notifications to see the task timer outside the app.'),
+        action: SnackBarAction(
+          label: 'Allow',
+          onPressed: () => unawaited(
+            NotificationService().requestNotificationPermission(),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -498,11 +521,11 @@ class _TimelineRow extends ConsumerWidget {
                   } else {
                     await actions.start(task.id);
                   }
-                } catch (_) {
+                } on TaskActionFailure catch (error) {
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Could not start task. Try again.'),
+                    SnackBar(
+                      content: Text('Could not ${error.action}. Try again.'),
                     ),
                   );
                 }
