@@ -39,6 +39,114 @@ class RoutinesListScreen extends ConsumerWidget {
           );
         },
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => _showRoutineScheduleSheet(context),
+        icon: const Icon(Icons.add),
+        label: const Text('Add routine'),
+      ),
+    );
+  }
+}
+
+Future<void> _showRoutineScheduleSheet(BuildContext context) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (_) => const _RoutineScheduleSheet(),
+  );
+}
+
+class _RoutineScheduleSheet extends ConsumerStatefulWidget {
+  const _RoutineScheduleSheet();
+
+  @override
+  ConsumerState<_RoutineScheduleSheet> createState() =>
+      _RoutineScheduleSheetState();
+}
+
+class _RoutineScheduleSheetState extends ConsumerState<_RoutineScheduleSheet> {
+  final _nameController = TextEditingController();
+  TimeOfDay _time = const TimeOfDay(hour: 7, minute: 0);
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final name = _nameController.text.trim();
+    if (name.isEmpty || _saving) return;
+    setState(() => _saving = true);
+    try {
+      await ref.read(routineRepositoryProvider).save(
+            Routine.create(
+              name: name,
+              anchor: RoutineAnchor.custom,
+              scheduleHour: _time.hour,
+              scheduleMinute: _time.minute,
+            ),
+          );
+      ref.invalidate(activeRoutinesProvider);
+      if (!mounted) return;
+      Navigator.of(context).pop();
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _saving = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not save routine. Try again.')),
+      );
+    }
+  }
+
+  Future<void> _pickTime() async {
+    final selected = await showTimePicker(context: context, initialTime: _time);
+    if (selected != null && mounted) setState(() => _time = selected);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(
+        AppSpace.xl,
+        AppSpace.lg,
+        AppSpace.xl,
+        MediaQuery.of(context).viewInsets.bottom + AppSpace.xl,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('New routine', style: AppTextStyles.titleMedium),
+          const SizedBox(height: AppSpace.lg),
+          TextField(
+            controller: _nameController,
+            autofocus: true,
+            textCapitalization: TextCapitalization.sentences,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _save(),
+            decoration: const InputDecoration(
+              labelText: 'Routine name',
+              hintText: 'Morning launch pad',
+            ),
+          ),
+          const SizedBox(height: AppSpace.md),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.schedule_outlined),
+            title: const Text('Specific time'),
+            subtitle: Text(_time.format(context)),
+            onTap: _pickTime,
+          ),
+          const SizedBox(height: AppSpace.md),
+          FilledButton(
+            onPressed: _saving ? null : _save,
+            child: Text(_saving ? 'Saving…' : 'Save routine'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -49,9 +157,12 @@ class _RoutineCard extends StatelessWidget {
 
   String get _timeLabel {
     switch (routine.anchor) {
-      case RoutineAnchor.morning: return 'Morning';
-      case RoutineAnchor.midday: return 'Midday';
-      case RoutineAnchor.evening: return 'Evening';
+      case RoutineAnchor.morning:
+        return 'Morning';
+      case RoutineAnchor.midday:
+        return 'Midday';
+      case RoutineAnchor.evening:
+        return 'Evening';
       case RoutineAnchor.custom:
         final h = routine.scheduleHour ?? 0;
         final m = routine.scheduleMinute ?? 0;
@@ -74,7 +185,7 @@ class _RoutineCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final done = routine.completedCount;
     final total = routine.steps.length;
-    
+
     return Material(
       color: AppColors.surface,
       borderRadius: BorderRadius.circular(AppSpace.radiusCard),
@@ -92,7 +203,9 @@ class _RoutineCard extends StatelessWidget {
                     Text(routine.name, style: AppTextStyles.titleMedium),
                     const SizedBox(height: AppSpace.xs),
                     Text(
-                      _daysLabel == null ? _timeLabel : '$_timeLabel · $_daysLabel',
+                      _daysLabel == null
+                          ? _timeLabel
+                          : '$_timeLabel · $_daysLabel',
                       style: AppTextStyles.bodySmall,
                     ),
                   ],
@@ -100,7 +213,8 @@ class _RoutineCard extends StatelessWidget {
               ),
               Text('$done/$total', style: AppTextStyles.monoSmall),
               const SizedBox(width: AppSpace.sm),
-              const Icon(Icons.chevron_right, size: 20, color: AppColors.textMuted),
+              const Icon(Icons.chevron_right,
+                  size: 20, color: AppColors.textMuted),
             ],
           ),
         ),

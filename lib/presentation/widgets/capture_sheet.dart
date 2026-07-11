@@ -1,5 +1,7 @@
 // lib/presentation/widgets/capture_sheet.dart
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -45,7 +47,34 @@ class _CaptureSheetBodyState extends ConsumerState<_CaptureSheetBody> {
       energy: _energy,
       isQuickWin: _quickWin || _energy == EnergyLevel.low,
     );
-    await ref.read(taskRepositoryProvider).save(task);
+    final repository = ref.read(taskRepositoryProvider);
+    try {
+      await repository.save(task).timeout(const Duration(seconds: 5));
+    } on TimeoutException {
+      // A queued mirror-sync write can be delayed even after the local task
+      // has committed. Confirm local persistence before treating it as a
+      // failure so Capture never remains stuck on "Adding…".
+      if (await repository.getById(task.id) == null) {
+        if (!mounted) return;
+        setState(() => _submitting = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not add task. Try again.')),
+        );
+        return;
+      }
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not add task. Try again.')),
+      );
+      return;
+    }
+
+    // The Today providers currently consume the first Drift emission rather
+    // than maintaining a live subscription, so refresh them after capture.
+    ref.invalidate(todayControllerProvider);
+    ref.invalidate(todayTimelineProvider);
 
     if (!mounted) return;
     Navigator.of(context).pop();

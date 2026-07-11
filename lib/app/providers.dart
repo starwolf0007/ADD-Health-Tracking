@@ -2,6 +2,8 @@
 //
 // THE composition root — the only file allowed to know every layer at once.
 
+import 'dart:async' show unawaited;
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -33,11 +35,12 @@ import 'package:neuroflow/platform/google/google_service_manager.dart';
 import 'package:neuroflow/platform/google/google_api_factory.dart';
 import 'package:neuroflow/platform/sync/google_sync_engine_impl.dart';
 import 'package:neuroflow/platform/settings_service.dart';
+import 'package:neuroflow/platform/notifications/notification_service.dart';
 import 'package:neuroflow/platform/sync/google_tasks_sync_service.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository_impl.dart';
 import 'package:neuroflow/platform/wear/wear_sync_service.dart';
-import 'package:neuroflow/presentation/today/today_timeline.dart';
+import 'package:neuroflow/executive/today_timeline.dart';
 
 // ---------------------------------------------------------------------------
 // Platform layer
@@ -303,6 +306,13 @@ final todayTimelineProvider = FutureProvider<TodayTimelineData>((ref) async {
   );
 });
 
+class TaskActionFailure implements Exception {
+  final String action;
+  final Object cause;
+
+  const TaskActionFailure(this.action, this.cause);
+}
+
 class TaskActionController {
   final Ref ref;
   const TaskActionController(this.ref);
@@ -312,19 +322,27 @@ class TaskActionController {
   Future<void> pause(String id) => _set(id, TaskStatus.paused);
 
   Future<void> saveForLater(String id, ReentryNote? note) async {
-    if (note != null && !note.isEmpty) {
-      await ref.read(taskRepositoryProvider).saveReentryNote(id, note);
-    } else {
-      await ref.read(taskRepositoryProvider).clearReentryNote(id);
+    try {
+      if (note != null && !note.isEmpty) {
+        await ref.read(taskRepositoryProvider).saveReentryNote(id, note);
+      } else {
+        await ref.read(taskRepositoryProvider).clearReentryNote(id);
+      }
+      await _set(id, TaskStatus.paused);
+      ref.invalidate(reentryNoteProvider(id));
+    } catch (error) {
+      throw TaskActionFailure('save this task for later', error);
     }
-    await _set(id, TaskStatus.paused);
-    ref.invalidate(reentryNoteProvider(id));
   }
 
   Future<void> clearReentry(String id) async {
-    await ref.read(taskRepositoryProvider).clearReentryNote(id);
-    ref.invalidate(reentryNoteProvider(id));
-    ref.invalidate(todayTimelineProvider);
+    try {
+      await ref.read(taskRepositoryProvider).clearReentryNote(id);
+      ref.invalidate(reentryNoteProvider(id));
+      ref.invalidate(todayTimelineProvider);
+    } catch (error) {
+      throw TaskActionFailure('clear the saved return point', error);
+    }
   }
 
   void notNow(String id) {
@@ -333,12 +351,38 @@ class TaskActionController {
   }
 
   Future<void> _set(String id, TaskStatus status) async {
-    await ref.read(taskRepositoryProvider).updateStatus(id, status);
-    // TodayController currently takes the first Drift stream emission instead
-    // of holding a live subscription. Status affects Executive selection, so a
-    // targeted rebuild is required until that controller becomes stream-based.
-    ref.invalidate(todayControllerProvider);
-    ref.invalidate(todayTimelineProvider);
+    try {
+      final task = await ref.read(taskRepositoryProvider).getById(id);
+      if (task == null) {
+        throw StateError('Task no longer exists');
+      }
+      await ref.read(taskRepositoryProvider).updateStatus(id, status);
+      unawaited(_updateActiveTaskNotification(task, status));
+      // TodayController currently takes the first Drift stream emission instead
+      // of holding a live subscription. Status affects Executive selection, so a
+      // targeted rebuild is required until that controller becomes stream-based.
+      ref.invalidate(todayControllerProvider);
+      ref.invalidate(todayTimelineProvider);
+    } catch (error) {
+      throw TaskActionFailure('update this task', error);
+    }
+  }
+
+  Future<void> _updateActiveTaskNotification(
+      Task task, TaskStatus status) async {
+    try {
+      if (status == TaskStatus.inProgress) {
+        await NotificationService().showActiveTaskTimer(
+          taskTitle: task.title,
+          startedAt: DateTime.now(),
+        );
+      } else {
+        await NotificationService().cancelActiveTaskTimer();
+      }
+    } catch (_) {
+      // Notification permission or OS notification failures must never
+      // prevent the deterministic task state from updating locally.
+    }
   }
 }
 

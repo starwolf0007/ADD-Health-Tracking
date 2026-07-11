@@ -34,6 +34,7 @@ class Tasks extends Table {
   BoolColumn get isQuickWin => boolean().withDefault(const Constant(false))();
   IntColumn get estimatedMinutes => integer().nullable()();
   DateTimeColumn get completedAt => dateTime().nullable()();
+  DateTimeColumn get activeStartedAt => dateTime().nullable()();
   TextColumn get googleTaskId => text().nullable()();
   TextColumn get reentryLastCompletedStep => text().nullable()();
   TextColumn get reentryNextAction => text().nullable()();
@@ -160,7 +161,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -174,6 +175,9 @@ class AppDatabase extends _$AppDatabase {
             await m.addColumn(tasks, tasks.reentryNextAction);
             await m.addColumn(tasks, tasks.reentryReturnAt);
             await m.addColumn(tasks, tasks.reentryUpdatedAt);
+          }
+          if (from < 4) {
+            await m.addColumn(tasks, tasks.activeStartedAt);
           }
         },
       );
@@ -228,6 +232,9 @@ class AppDatabase extends _$AppDatabase {
           status: Value(status),
           completedAt:
               status == 'completed' ? Value(DateTime.now()) : const Value(null),
+          activeStartedAt: status == 'inProgress'
+              ? Value(DateTime.now())
+              : const Value(null),
         ),
       );
 

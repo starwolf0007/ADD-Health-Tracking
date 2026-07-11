@@ -8,7 +8,7 @@ import 'package:neuroflow/presentation/lexi_conversation_screen.dart';
 import 'package:neuroflow/presentation/settings_screen.dart';
 import 'package:neuroflow/presentation/theme.dart';
 import 'package:neuroflow/presentation/today/lexi_avatar.dart';
-import 'package:neuroflow/presentation/today/today_timeline.dart';
+import 'package:neuroflow/executive/today_timeline.dart';
 import 'package:neuroflow/presentation/widgets/capture_sheet.dart';
 
 class TodayScreen extends ConsumerStatefulWidget {
@@ -243,6 +243,10 @@ class _ActiveTaskCard extends ConsumerWidget {
           ),
           const SizedBox(height: AppSpace.md),
           Text(task.title, style: AppTextStyles.titleMedium),
+          if (isActive && task.activeStartedAt != null) ...[
+            const SizedBox(height: AppSpace.sm),
+            _ActiveTaskTimer(startedAt: task.activeStartedAt!),
+          ],
           if (task.notes?.isNotEmpty ?? false) ...[
             const SizedBox(height: AppSpace.xs),
             Text(task.notes!, style: AppTextStyles.bodySmall),
@@ -253,14 +257,30 @@ class _ActiveTaskCard extends ConsumerWidget {
             runSpacing: AppSpace.sm,
             children: [
               FilledButton.icon(
-                onPressed: () =>
-                    isPaused ? actions.resume(task.id) : actions.start(task.id),
+                onPressed: isActive
+                    ? null
+                    : () async {
+                        try {
+                          if (isPaused) {
+                            await actions.resume(task.id);
+                          } else {
+                            await actions.start(task.id);
+                          }
+                        } catch (error) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Could not start task. Try again.'),
+                            ),
+                          );
+                        }
+                      },
                 icon: Icon(
                     isPaused ? Icons.play_arrow_rounded : Icons.flag_outlined),
                 label: Text(isPaused
                     ? 'Resume'
                     : isActive
-                        ? 'Continue'
+                        ? 'Running'
                         : 'Start'),
               ),
               OutlinedButton(
@@ -345,17 +365,26 @@ class _ActiveTaskCard extends ConsumerWidget {
       final nextAction = next.text.trim();
       final hasNote =
           lastStep.isNotEmpty || nextAction.isNotEmpty || returnAt != null;
-      await ref.read(taskActionControllerProvider).saveForLater(
-            task.id,
-            hasNote
-                ? ReentryNote(
-                    lastCompletedStep: lastStep.isEmpty ? null : lastStep,
-                    nextAction: nextAction.isEmpty ? null : nextAction,
-                    returnAt: returnAt,
-                    updatedAt: DateTime.now(),
-                  )
-                : null,
-          );
+      try {
+        await ref.read(taskActionControllerProvider).saveForLater(
+              task.id,
+              hasNote
+                  ? ReentryNote(
+                      lastCompletedStep: lastStep.isEmpty ? null : lastStep,
+                      nextAction: nextAction.isEmpty ? null : nextAction,
+                      returnAt: returnAt,
+                      updatedAt: DateTime.now(),
+                    )
+                  : null,
+            );
+      } catch (_) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Could not save this task for later. Try again.'),
+          ),
+        );
+      }
     } finally {
       last.dispose();
       next.dispose();
@@ -380,13 +409,57 @@ class _ActiveTaskCard extends ConsumerWidget {
   }
 }
 
-class _TimelineRow extends StatelessWidget {
+class _ActiveTaskTimer extends StatelessWidget {
+  final DateTime startedAt;
+
+  const _ActiveTaskTimer({required this.startedAt});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: Stream<int>.periodic(const Duration(seconds: 1), (tick) => tick),
+      builder: (context, _) {
+        final elapsed = DateTime.now().difference(startedAt);
+        final safeElapsed = elapsed.isNegative ? Duration.zero : elapsed;
+        final hours = safeElapsed.inHours;
+        final minutes = safeElapsed.inMinutes.remainder(60);
+        final seconds = safeElapsed.inSeconds.remainder(60);
+        final value = hours > 0
+            ? '${hours.toString().padLeft(2, '0')}:'
+                '${minutes.toString().padLeft(2, '0')}:'
+                '${seconds.toString().padLeft(2, '0')}'
+            : '${minutes.toString().padLeft(2, '0')}:'
+                '${seconds.toString().padLeft(2, '0')}';
+        return Semantics(
+          liveRegion: true,
+          label: 'Task running for $value',
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.timer_outlined,
+                  size: 18, color: AppColors.accent),
+              const SizedBox(width: AppSpace.xs),
+              Text(value,
+                  key: const ValueKey('active-task-timer'),
+                  style: AppTextStyles.label.copyWith(
+                    color: AppColors.accent,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  )),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TimelineRow extends ConsumerWidget {
   final TimelineItem item;
   final DateTime now;
   const _TimelineRow({required this.item, required this.now});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final phase = item.phaseAt(now);
     final dimmed = phase == TimelinePhase.past;
     final icon = switch (item.type) {
@@ -408,74 +481,100 @@ class _TimelineRow extends StatelessWidget {
     final typeLabel = _timelineTypeLabel(item.type);
     return Semantics(
       container: true,
+      button: item.task != null && !item.isCompleted,
       label: '$typeLabel, ${item.title}, ${_phaseLabel(phase)}'
           '${item.isPaused ? ', paused' : ''}',
-      child: Opacity(
-        opacity: dimmed ? .55 : 1,
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: item.isCompleted ? 4 : 7),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 54,
-                child: Text(_time(item.start), style: AppTextStyles.monoSmall),
-              ),
-              Column(
-                children: [
-                  Container(width: 2, height: 8, color: AppColors.divider),
-                  _TimelineMarker(
-                    type: item.type,
-                    icon: item.isCompleted ? Icons.check_rounded : icon,
-                    color: color,
-                    completed: item.isCompleted,
-                  ),
-                  Container(
-                      width: 2,
-                      height: item.isCompleted ? 20 : 46,
-                      color: AppColors.divider),
-                ],
-              ),
-              const SizedBox(width: AppSpace.md),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 7),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(item.title,
-                                style: item.isCompleted
-                                    ? AppTextStyles.bodySmall
-                                    : AppTextStyles.bodyMedium,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis),
-                          ),
-                          if (item.isPaused)
-                            Text('Paused',
-                                style: AppTextStyles.label
-                                    .copyWith(color: AppColors.warning)),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        typeLabel.toUpperCase(),
-                        style: AppTextStyles.label.copyWith(
-                          color: AppColors.textSecondary,
-                          fontSize: 9,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppSpace.radiusInput),
+        onTap: item.task == null || item.isCompleted
+            ? null
+            : () async {
+                final task = item.task!;
+                if (task.status == TaskStatus.inProgress) return;
+                try {
+                  final actions = ref.read(taskActionControllerProvider);
+                  if (task.status == TaskStatus.paused) {
+                    await actions.resume(task.id);
+                  } else {
+                    await actions.start(task.id);
+                  }
+                } catch (_) {
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Could not start task. Try again.'),
+                    ),
+                  );
+                }
+              },
+        child: Opacity(
+          opacity: dimmed ? .55 : 1,
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: item.isCompleted ? 4 : 7),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 54,
+                  child:
+                      Text(_time(item.start), style: AppTextStyles.monoSmall),
+                ),
+                Column(
+                  children: [
+                    Container(width: 2, height: 8, color: AppColors.divider),
+                    _TimelineMarker(
+                      type: item.type,
+                      icon: item.isCompleted ? Icons.check_rounded : icon,
+                      color: color,
+                      completed: item.isCompleted,
+                    ),
+                    Container(
+                        width: 2,
+                        height: item.isCompleted ? 20 : 46,
+                        color: AppColors.divider),
+                  ],
+                ),
+                const SizedBox(width: AppSpace.md),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 7),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(item.title,
+                                  style: item.isCompleted
+                                      ? AppTextStyles.bodySmall
+                                      : AppTextStyles.bodyMedium,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis),
+                            ),
+                            if (item.isPaused)
+                              Text('Paused',
+                                  style: AppTextStyles.label
+                                      .copyWith(color: AppColors.warning)),
+                          ],
                         ),
-                      ),
-                      if (!item.isCompleted &&
-                          item.subtitle?.isNotEmpty == true)
-                        Text(item.subtitle!,
-                            style: AppTextStyles.bodySmall, maxLines: 2),
-                    ],
+                        const SizedBox(height: 2),
+                        Text(
+                          typeLabel.toUpperCase(),
+                          style: AppTextStyles.label.copyWith(
+                            color: AppColors.textSecondary,
+                            fontSize: 9,
+                          ),
+                        ),
+                        if (!item.isCompleted &&
+                            item.subtitle?.isNotEmpty == true)
+                          Text(item.subtitle!,
+                              style: AppTextStyles.bodySmall, maxLines: 2),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

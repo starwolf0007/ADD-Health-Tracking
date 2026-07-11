@@ -20,9 +20,12 @@ class NotificationService {
 
   static const _channelId = 'neuroflow_reminders';
   static const _channelName = 'NeuroFlow Reminders';
+  static const _activeTaskChannelId = 'neuroflow_active_task';
+  static const _activeTaskChannelName = 'Active task timer';
 
   // Stable notification IDs — never reuse across categories.
   static const _idMorningBriefing = 1001;
+  static const _idActiveTask = 1002;
 
   Future<void> init() async {
     tz.initializeTimeZones();
@@ -108,6 +111,41 @@ class NotificationService {
       ),
     );
   }
+
+  /// Shows a quiet, ongoing notification with Android's native chronometer.
+  /// Android updates the elapsed time itself; no Dart timer or foreground
+  /// service is required while the app is alive.
+  Future<void> showActiveTaskTimer({
+    required String taskTitle,
+    required DateTime startedAt,
+  }) {
+    return _plugin.show(
+      _idActiveTask,
+      'Working on $taskTitle',
+      'Tap to return when you are ready.',
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _activeTaskChannelId,
+          _activeTaskChannelName,
+          channelDescription: 'Shows the elapsed time for a running task.',
+          importance: Importance.low,
+          priority: Priority.low,
+          ongoing: true,
+          autoCancel: false,
+          silent: true,
+          onlyAlertOnce: true,
+          showWhen: true,
+          when: startedAt.millisecondsSinceEpoch,
+          usesChronometer: true,
+        ),
+        iOS: const DarwinNotificationDetails(
+          presentSound: false,
+        ),
+      ),
+    );
+  }
+
+  Future<void> cancelActiveTaskTimer() => _plugin.cancel(_idActiveTask);
 
   Future<void> cancelReminder(int id) async {
     await _plugin.cancel(id);

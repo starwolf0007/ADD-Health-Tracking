@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/domain/task.dart';
-import 'package:neuroflow/presentation/today/today_timeline.dart';
+import 'package:neuroflow/executive/today_timeline.dart';
 
 void main() {
   final day = DateTime(2026, 7, 10);
@@ -104,5 +104,23 @@ void main() {
 
     expect(const DaySummary().build(data),
         'You have one anchor and 2 flexible blocks left.');
+  });
+
+  test('summary omits item types with no remaining work', () {
+    final data = TodayTimelineData(
+      items: [
+        TimelineItem(
+          id: 'flex',
+          type: TimelineItemType.flexibleBlock,
+          title: 'Email',
+          start: DateTime(2026, 7, 10, 13),
+        ),
+      ],
+      recommendedTask: null,
+      hasCalendarPermission: false,
+      lexiAvailable: false,
+    );
+
+    expect(const DaySummary().build(data), 'You have one flexible block left.');
   });
 }

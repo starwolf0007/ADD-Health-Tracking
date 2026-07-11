@@ -6,7 +6,7 @@ import 'package:neuroflow/data/task_repository.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/presentation/theme.dart';
-import 'package:neuroflow/presentation/today/today_timeline.dart';
+import 'package:neuroflow/executive/today_timeline.dart';
 import 'package:neuroflow/presentation/today_screen.dart';
 
 void main() {
@@ -121,6 +121,22 @@ void main() {
 
     expect(repository.task.status, TaskStatus.pending);
     expect(repository.task.reentryNote, isNull);
+  });
+
+  testWidgets('starting a task shows a visible running timer', (tester) async {
+    final repository = _FakeTaskRepository(_task());
+    await tester.pumpWidget(_interactiveApp(repository, DateTime.now()));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final startButton = find.widgetWithText(FilledButton, 'Start');
+    await tester.ensureVisible(startButton);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(startButton);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(repository.task.status, TaskStatus.inProgress);
+    expect(find.byKey(const ValueKey('active-task-timer')), findsOneWidget);
+    expect(find.text('Running'), findsOneWidget);
   });
 
   testWidgets('timeline item semantics announce type and phase',
@@ -324,8 +340,21 @@ class _FakeTaskRepository implements TaskRepository {
       task = task.copyWith(status: TaskStatus.completed);
 
   @override
-  Future<void> updateStatus(String id, TaskStatus status) async =>
-      task = task.copyWith(status: status);
+  Future<void> updateStatus(String id, TaskStatus status) async => task = Task(
+        id: task.id,
+        title: task.title,
+        notes: task.notes,
+        energy: task.energy,
+        status: status,
+        createdAt: task.createdAt,
+        dueDate: task.dueDate,
+        completedAt: task.completedAt,
+        activeStartedAt:
+            status == TaskStatus.inProgress ? DateTime.now() : null,
+        estimatedMinutes: task.estimatedMinutes,
+        reentryNote: task.reentryNote,
+        isQuickWin: task.isQuickWin,
+      );
 
   @override
   Future<void> saveReentryNote(String id, ReentryNote note) async {

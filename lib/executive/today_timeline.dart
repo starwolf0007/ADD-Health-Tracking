@@ -195,6 +195,12 @@ class DaySummary {
           ? 'Your day is open. Add one gentle next step when you are ready.'
           : 'Your planned anchors and flexible blocks are clear.';
     }
+    if (anchors == 0) {
+      return 'You have ${_count(flexible, 'flexible block')} left.';
+    }
+    if (flexible == 0) {
+      return 'You have ${_count(anchors, 'anchor')} left.';
+    }
     return 'You have ${_count(anchors, 'anchor')} and '
         '${_count(flexible, 'flexible block')} left.';
   }

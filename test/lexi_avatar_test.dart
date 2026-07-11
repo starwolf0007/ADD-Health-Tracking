@@ -39,4 +39,25 @@ void main() {
     expect(find.byIcon(Icons.center_focus_strong_rounded), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('static avatar renders at its intended scale', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+      theme: AppTheme.dark(),
+      home: const Scaffold(
+        body: LexiAvatar(
+          visualState: LexiVisualState.focus,
+          assetPath: 'assets/lexi/public/missing.png',
+        ),
+      ),
+    ));
+    await tester.pump();
+
+    final transition = tester.widget<ScaleTransition>(
+      find.descendant(
+        of: find.byType(LexiAvatar),
+        matching: find.byType(ScaleTransition),
+      ),
+    );
+    expect(transition.scale.value, 1);
+  });
 }

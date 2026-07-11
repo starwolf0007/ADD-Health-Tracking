@@ -37,6 +37,7 @@ class DriftTaskRepository implements TaskRepository {
       createdAt: row.createdAt,
       dueDate: row.dueDate,
       completedAt: row.completedAt,
+      activeStartedAt: row.activeStartedAt,
       estimatedMinutes: row.estimatedMinutes,
       reentryNote: hasReentry
           ? ReentryNote(
@@ -60,6 +61,7 @@ class DriftTaskRepository implements TaskRepository {
       createdAt: Value(task.createdAt),
       dueDate: Value(task.dueDate),
       completedAt: Value(task.completedAt),
+      activeStartedAt: Value(task.activeStartedAt),
       estimatedMinutes: Value(task.estimatedMinutes),
       reentryLastCompletedStep: Value(task.reentryNote?.lastCompletedStep),
       reentryNextAction: Value(task.reentryNote?.nextAction),
