@@ -94,7 +94,7 @@ class DriftRoutineRepository implements RoutineRepository {
       if (_isDueNow(anchor, row.scheduleHour, row.scheduleMinute, now)) {
         final steps = await _db.fetchStepsForRoutine(row.id);
         final routine = _rowsToRoutine(row, steps);
-        
+
         // Weekday rule: skip if it doesn't fire today.
         if (!routine.firesOn(now)) continue;
 
@@ -107,12 +107,12 @@ class DriftRoutineRepository implements RoutineRepository {
   }
 
   @override
-  Future<void> save(Routine routine) async {
-    await _db.upsertRoutine(_routineToCompanion(routine));
-    for (final step in routine.steps) {
-      await _db.upsertStep(_stepToCompanion(step));
-    }
-  }
+  Future<void> save(Routine routine) => _db.transaction(() async {
+        await _db.upsertRoutine(_routineToCompanion(routine));
+        for (final step in routine.steps) {
+          await _db.upsertStep(_stepToCompanion(step));
+        }
+      });
 
   @override
   Future<void> updateStep(RoutineStep step) async {

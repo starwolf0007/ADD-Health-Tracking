@@ -67,24 +67,25 @@ class _RoutineScheduleSheet extends ConsumerStatefulWidget {
 
 class _RoutineScheduleSheetState extends ConsumerState<_RoutineScheduleSheet> {
   final _nameController = TextEditingController();
-  final _firstStepController = TextEditingController();
+  final _stepController = TextEditingController();
+  final List<String> _steps = [];
   TimeOfDay _time = const TimeOfDay(hour: 7, minute: 0);
   bool _saving = false;
 
   @override
   void dispose() {
     _nameController.dispose();
-    _firstStepController.dispose();
+    _stepController.dispose();
     super.dispose();
   }
 
   Future<void> _save() async {
     final name = _nameController.text.trim();
-    final firstStep = _firstStepController.text.trim();
     if (_saving) return;
-    if (name.isEmpty || firstStep.isEmpty) {
+    if (name.isEmpty || _steps.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Add a routine name and its first step.')),
+        const SnackBar(
+            content: Text('Add a routine name and at least one step.')),
       );
       return;
     }
@@ -98,18 +99,21 @@ class _RoutineScheduleSheetState extends ConsumerState<_RoutineScheduleSheet> {
       );
       final completeRoutine = routine.copyWith(
         steps: [
-          RoutineStep.create(
-            routineId: routine.id,
-            position: 0,
-            title: firstStep,
-          ),
+          for (var index = 0; index < _steps.length; index++)
+            RoutineStep.create(
+              routineId: routine.id,
+              position: index,
+              title: _steps[index],
+            ),
         ],
       );
       await ref.read(routineRepositoryProvider).save(completeRoutine);
       ref.invalidate(activeRoutinesProvider);
       if (!mounted) return;
       Navigator.of(context).pop();
-    } catch (_) {
+    } catch (error, stackTrace) {
+      debugPrint('Could not save routine: $error');
+      debugPrintStack(stackTrace: stackTrace);
       if (!mounted) return;
       setState(() => _saving = false);
       ScaffoldMessenger.of(context).showSnackBar(
@@ -123,6 +127,29 @@ class _RoutineScheduleSheetState extends ConsumerState<_RoutineScheduleSheet> {
     if (selected != null && mounted) setState(() => _time = selected);
   }
 
+  void _addStep() {
+    final title = _stepController.text.trim();
+    if (title.isEmpty) return;
+    setState(() {
+      _steps.add(title);
+      _stepController.clear();
+    });
+  }
+
+  void _addWorkPrepStarter() {
+    setState(() {
+      for (final step in const [
+        'Brush teeth',
+        'Make bed',
+        'Take medicine',
+        'Grab wallet, watch, and keys',
+        'Leave for work by 5:45 AM',
+      ]) {
+        if (!_steps.contains(step)) _steps.add(step);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Padding(
@@ -132,48 +159,86 @@ class _RoutineScheduleSheetState extends ConsumerState<_RoutineScheduleSheet> {
         AppSpace.xl,
         MediaQuery.of(context).viewInsets.bottom + AppSpace.xl,
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          const Text('New routine', style: AppTextStyles.titleMedium),
-          const SizedBox(height: AppSpace.lg),
-          TextField(
-            controller: _nameController,
-            autofocus: true,
-            textCapitalization: TextCapitalization.sentences,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _save(),
-            decoration: const InputDecoration(
-              labelText: 'Routine name',
-              hintText: 'Morning launch pad',
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text('New routine', style: AppTextStyles.titleMedium),
+            const SizedBox(height: AppSpace.lg),
+            TextField(
+              controller: _nameController,
+              autofocus: true,
+              textCapitalization: TextCapitalization.sentences,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _save(),
+              decoration: const InputDecoration(
+                labelText: 'Routine name',
+                hintText: 'Morning launch pad',
+              ),
             ),
-          ),
-          const SizedBox(height: AppSpace.md),
-          TextField(
-            controller: _firstStepController,
-            textCapitalization: TextCapitalization.sentences,
-            textInputAction: TextInputAction.done,
-            onSubmitted: (_) => _save(),
-            decoration: const InputDecoration(
-              labelText: 'First step',
-              hintText: 'Put lunch pail by the door',
+            const SizedBox(height: AppSpace.md),
+            const Text('CHECKLIST', style: AppTextStyles.label),
+            const SizedBox(height: AppSpace.sm),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _stepController,
+                    textCapitalization: TextCapitalization.sentences,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _addStep(),
+                    decoration: const InputDecoration(
+                      labelText: 'Add a step',
+                      hintText: 'Brush teeth',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpace.sm),
+                IconButton.filled(
+                  tooltip: 'Add step',
+                  onPressed: _addStep,
+                  icon: const Icon(Icons.add),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: AppSpace.md),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.schedule_outlined),
-            title: const Text('Specific time'),
-            subtitle: Text(_time.format(context)),
-            onTap: _pickTime,
-          ),
-          const SizedBox(height: AppSpace.md),
-          FilledButton(
-            onPressed: _saving ? null : _save,
-            child: Text(_saving ? 'Saving…' : 'Save routine'),
-          ),
-        ],
+            const SizedBox(height: AppSpace.md),
+            OutlinedButton.icon(
+              onPressed: _addWorkPrepStarter,
+              icon: const Icon(Icons.work_outline),
+              label: const Text('Use work-prep starter'),
+            ),
+            if (_steps.isNotEmpty) ...[
+              const SizedBox(height: AppSpace.md),
+              ...List.generate(
+                _steps.length,
+                (index) => ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Text('${index + 1}', style: AppTextStyles.monoSmall),
+                  title: Text(_steps[index]),
+                  trailing: IconButton(
+                    tooltip: 'Remove step',
+                    icon: const Icon(Icons.close),
+                    onPressed: () => setState(() => _steps.removeAt(index)),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: AppSpace.md),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.schedule_outlined),
+              title: const Text('Specific time'),
+              subtitle: Text(_time.format(context)),
+              onTap: _pickTime,
+            ),
+            const SizedBox(height: AppSpace.md),
+            FilledButton(
+              onPressed: _saving ? null : _save,
+              child: Text(_saving ? 'Saving…' : 'Save routine'),
+            ),
+          ],
+        ),
       ),
     );
   }
