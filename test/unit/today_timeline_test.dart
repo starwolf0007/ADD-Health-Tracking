@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/domain/task.dart';
-import 'package:neuroflow/presentation/today/today_timeline.dart';
+import 'package:neuroflow/executive/timeline_logic.dart';
 
 void main() {
   final day = DateTime(2026, 7, 10);
