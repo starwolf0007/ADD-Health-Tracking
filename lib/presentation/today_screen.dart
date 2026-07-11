@@ -106,8 +106,12 @@ class _TodayTimelineBody extends ConsumerWidget {
       onRefresh: () async => ref.refresh(todayTimelineProvider.future),
       child: ListView(
         controller: scrollController,
-        padding: const EdgeInsets.fromLTRB(
-            AppSpace.lg, AppSpace.sm, AppSpace.lg, 112),
+        padding: EdgeInsets.fromLTRB(
+          AppSpace.lg,
+          AppSpace.sm,
+          AppSpace.lg,
+          MediaQuery.of(context).viewPadding.bottom + 72,
+        ),
         children: [
           _DaySummaryCard(data: data),
           if (!data.hasCalendarPermission) ...[
@@ -633,7 +637,8 @@ String _time(DateTime? value) {
   if (value == null) return '';
   final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
   final minute = value.minute.toString().padLeft(2, '0');
-  return '$hour:$minute';
+  final period = value.hour < 12 ? 'AM' : 'PM';
+  return '$hour:$minute $period';
 }
 
 String _timelineTypeLabel(TimelineItemType type) => switch (type) {
