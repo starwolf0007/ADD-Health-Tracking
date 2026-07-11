@@ -50,8 +50,8 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
       vsync: this,
       duration: const Duration(milliseconds: 400),
     );
-    _progressAnim = Tween<double>(begin: 0, end: _completedFraction)
-        .animate(CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
+    _progressAnim = Tween<double>(begin: 0, end: _completedFraction).animate(
+        CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
     _progressController.forward();
   }
 
@@ -103,7 +103,8 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
     _progressAnim = Tween<double>(
       begin: _progressAnim.value,
       end: target,
-    ).animate(CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
+    ).animate(
+        CurvedAnimation(parent: _progressController, curve: Curves.easeOut));
     _progressController
       ..reset()
       ..forward();
@@ -116,7 +117,9 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
 
   @override
   Widget build(BuildContext context) {
-    if (_showCelebration) return _CelebrationView(routineName: widget.routine.name);
+    if (_showCelebration) {
+      return _CelebrationView(routineName: widget.routine.name);
+    }
 
     final active = _activeStep;
 
@@ -154,12 +157,10 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
           Expanded(
             child: active == null
                 ? const Center(
-                    child: Text('All done!',
-                        style: AppTextStyles.titleMedium))
+                    child: Text('All done!', style: AppTextStyles.titleMedium))
                 : _StepView(
                     step: active,
-                    stepNumber:
-                        _steps.where((s) => s.isComplete).length + 1,
+                    stepNumber: _steps.where((s) => s.isComplete).length + 1,
                     total: _steps.length,
                     onComplete: () => _completeStep(active.id),
                     onSkip: () => _skipStep(active.id),
@@ -168,9 +169,7 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
           // Upcoming steps — de-emphasized list
           if (_steps.where((s) => !s.isComplete).length > 1)
             _UpNextList(
-              steps: _steps
-                  .where((s) => !s.isComplete)
-                  .toList()
+              steps: _steps.where((s) => !s.isComplete).toList()
                 ..sort((a, b) => a.position.compareTo(b.position))
                 ..removeAt(0), // active step is shown above
             ),
@@ -240,8 +239,9 @@ class _StepView extends StatelessWidget {
           ),
           if (step.notes != null && step.notes!.isNotEmpty) ...[
             const SizedBox(height: 12),
-            Text(step.notes!, style: AppTextStyles.bodyMedium
-                .copyWith(color: AppColors.textSecondary)),
+            Text(step.notes!,
+                style: AppTextStyles.bodyMedium
+                    .copyWith(color: AppColors.textSecondary)),
           ],
           if (step.durationMinutes != null) ...[
             const SizedBox(height: 16),
@@ -326,8 +326,8 @@ class _UpNextList extends StatelessWidget {
           if (steps.length > 3)
             Text(
               '+ ${steps.length - 3} more',
-              style: AppTextStyles.bodySmall
-                  .copyWith(color: AppColors.textMuted),
+              style:
+                  AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted),
             ),
         ],
       ),

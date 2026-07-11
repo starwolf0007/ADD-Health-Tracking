@@ -2,7 +2,15 @@ plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
-    id("com.google.gms.google-services")
+}
+
+// google-services.json is intentionally untracked. Configured developer/CI
+// builds still get Firebase resources; local offline-capable builds do not fail
+// merely because the optional Firebase configuration is absent.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
+} else {
+    logger.lifecycle("google-services.json not found; Google Services processing is disabled.")
 }
 
 android {
