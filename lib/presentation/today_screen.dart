@@ -1,211 +1,140 @@
-// lib/presentation/today_screen.dart
-//
-// Today screen — the single surface users see on open.
-// Consumes todayControllerProvider (AsyncNotifier) and renders:
-//   • Normal mode  : Next Best Action card + reason line
-//   • Quick Wins   : ≤3 low-effort task cards with reassurance line
-//   • Empty        : All-clear state
-//   • Heartbeat    : Live completed-today count (mono font, state-transition
-//                    only — no idle animation per spec v1.3)
-//   • FAB          : Capture sheet (§13 — one gesture from anywhere)
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:neuroflow/domain/routine.dart';
-import 'package:neuroflow/domain/task.dart';
-import 'package:neuroflow/executive/planner.dart';
 import 'package:neuroflow/app/providers.dart';
-import 'package:neuroflow/presentation/habits_widget.dart';
-import 'package:neuroflow/presentation/routine_screen.dart';
+import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/domain/reentry_note.dart';
+import 'package:neuroflow/presentation/lexi_conversation_screen.dart';
 import 'package:neuroflow/presentation/settings_screen.dart';
 import 'package:neuroflow/presentation/theme.dart';
+import 'package:neuroflow/presentation/today/lexi_avatar.dart';
+import 'package:neuroflow/presentation/today/today_timeline.dart';
 import 'package:neuroflow/presentation/widgets/capture_sheet.dart';
 
-class TodayScreen extends ConsumerWidget {
-  const TodayScreen({super.key});
+class TodayScreen extends ConsumerStatefulWidget {
+  final DateTime? now;
+  const TodayScreen({super.key, this.now});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final todayAsync = ref.watch(todayControllerProvider);
-    final completedAsync = ref.watch(completedTodayCountProvider);
-    final nameAsync = ref.watch(displayNameProvider);
+  ConsumerState<TodayScreen> createState() => _TodayScreenState();
+}
 
+class _TodayScreenState extends ConsumerState<TodayScreen> {
+  final _scrollController = ScrollController();
+  final _currentKey = GlobalKey();
+  bool _didInitialScroll = false;
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _scrollNearNow() {
+    if (_didInitialScroll) return;
+    _didInitialScroll = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = _currentKey.currentContext;
+      if (context != null) {
+        Scrollable.ensureVisible(context,
+            alignment: .38, duration: const Duration(milliseconds: 350));
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final timeline = ref.watch(todayTimelineProvider);
+    final name = ref.watch(displayNameProvider).value ?? '';
     return Scaffold(
-      backgroundColor: AppColors.background,
       appBar: AppBar(
-        backgroundColor: AppColors.background,
-        elevation: 0,
-        title: _GreetingHeader(nameAsync: nameAsync),
+        title: Text(name.isEmpty ? 'Today' : 'Hey, $name'),
         actions: [
-          // Heartbeat count lives in trailing position — §13 token
-          _HeartbeatCount(completedAsync: completedAsync),
           IconButton(
-            icon: const Icon(Icons.settings_outlined,
-                color: AppColors.textSecondary, size: 20),
             tooltip: 'Settings',
+            icon: const Icon(Icons.settings_outlined),
             onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => const SettingsScreen(),
-              ),
+              MaterialPageRoute<void>(builder: (_) => const SettingsScreen()),
             ),
           ),
         ],
       ),
-      body: todayAsync.when(
-        loading: () => const _LoadingBody(),
-        error: (e, _) => _ErrorBody(error: e),
-        data: (state) => SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _TodayBody(state: state),
-              const _DueRoutinesSection(),
-              const SizedBox(height: 8),
-              const HabitsWidget(),
-              const SizedBox(height: 100), // FAB clearance
-            ],
-          ),
+      body: timeline.when(
+        loading: () => const _LoadingState(),
+        error: (error, _) => _ErrorState(
+          onRetry: () => ref.invalidate(todayTimelineProvider),
         ),
+        data: (data) {
+          _scrollNearNow();
+          return _TodayTimelineBody(
+            data: data,
+            now: widget.now ?? DateTime.now(),
+            scrollController: _scrollController,
+            currentKey: _currentKey,
+          );
+        },
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => showCaptureSheet(context),
         tooltip: 'Add task',
+        onPressed: () => showCaptureSheet(context),
         child: const Icon(Icons.add),
       ),
     );
   }
 }
 
-// ---------------------------------------------------------------------------
-// Header
-// ---------------------------------------------------------------------------
+class _TodayTimelineBody extends ConsumerWidget {
+  final TodayTimelineData data;
+  final DateTime now;
+  final ScrollController scrollController;
+  final GlobalKey currentKey;
 
-class _GreetingHeader extends StatelessWidget {
-  final AsyncValue<String> nameAsync;
-
-  const _GreetingHeader({required this.nameAsync});
-
-  @override
-  Widget build(BuildContext context) {
-    final name = nameAsync.value ?? '';
-    final greeting = name.isNotEmpty ? 'Hey, $name' : 'Today';
-    return Text(
-      greeting,
-      style: AppTextStyles.titleMedium.copyWith(color: AppColors.textPrimary),
-    );
-  }
-}
-
-class _HeartbeatCount extends StatelessWidget {
-  final AsyncValue<int> completedAsync;
-
-  const _HeartbeatCount({required this.completedAsync});
-
-  @override
-  Widget build(BuildContext context) {
-    final count = completedAsync.value ?? 0;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.check_circle_outline,
-            size: 14, color: count > 0 ? AppColors.accent : AppColors.textMuted),
-        const SizedBox(width: 4),
-        Text(
-          '$count',
-          style: AppTextStyles.monoSmall.copyWith(
-            color: count > 0 ? AppColors.accent : AppColors.textMuted,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Body states
-// ---------------------------------------------------------------------------
-
-class _LoadingBody extends StatelessWidget {
-  const _LoadingBody();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: SizedBox(
-        width: 24,
-        height: 24,
-        child: CircularProgressIndicator(
-          strokeWidth: 1.5,
-          color: AppColors.accent,
-        ),
-      ),
-    );
-  }
-}
-
-class _ErrorBody extends StatelessWidget {
-  final Object error;
-
-  const _ErrorBody({required this.error});
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Padding(
-        padding: EdgeInsets.all(32),
-        child: Text(
-          'Something went wrong. Try restarting the app.',
-          style: AppTextStyles.bodySmall,
-          textAlign: TextAlign.center,
-        ),
-      ),
-    );
-  }
-}
-
-class _TodayBody extends ConsumerWidget {
-  final TodayState state;
-
-  const _TodayBody({required this.state});
+  const _TodayTimelineBody({
+    required this.data,
+    required this.now,
+    required this.scrollController,
+    required this.currentKey,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return switch (state.mode) {
-      DayMode.quickWins => _QuickWinsBody(state: state, ref: ref),
-      DayMode.normal => state.primaryTask == null
-          ? const _AllClearBody()
-          : _NormalBody(state: state, ref: ref),
-    };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Normal mode
-// ---------------------------------------------------------------------------
-
-class _NormalBody extends StatelessWidget {
-  final TodayState state;
-  final WidgetRef ref;
-
-  const _NormalBody({required this.state, required this.ref});
-
-  @override
-  Widget build(BuildContext context) {
-    final task = state.primaryTask!;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    final recommended = data.recommendedTask;
+    final markerIndex = data.items.indexWhere(
+      (item) => item.phaseAt(now) != TimelinePhase.past,
+    );
+    return RefreshIndicator(
+      onRefresh: () async => ref.refresh(todayTimelineProvider.future),
+      child: ListView(
+        controller: scrollController,
+        padding: EdgeInsets.fromLTRB(
+          AppSpace.lg,
+          AppSpace.sm,
+          AppSpace.lg,
+          MediaQuery.of(context).viewPadding.bottom + 72,
+        ),
         children: [
-          const Text('Next up', style: AppTextStyles.bodySmall),
-          const SizedBox(height: 12),
-          _TaskCard(task: task, onComplete: () {
-            ref.read(todayControllerProvider.notifier).complete(task.id);
-          }),
-          if (state.reason.isNotEmpty) ...[
-            const SizedBox(height: 16),
-            Text(state.reason, style: AppTextStyles.bodySmall),
+          _DaySummaryCard(data: data),
+          if (!data.hasCalendarPermission) ...[
+            const SizedBox(height: AppSpace.md),
+            const _CalendarPermissionNotice(),
+          ],
+          if (recommended != null) ...[
+            const SizedBox(height: AppSpace.lg),
+            _ActiveTaskCard(task: recommended),
+          ],
+          const SizedBox(height: AppSpace.xl),
+          const Text('Your day', style: AppTextStyles.titleMedium),
+          const SizedBox(height: AppSpace.md),
+          if (data.items.isEmpty)
+            const _EmptyDayState()
+          else ...[
+            for (var index = 0; index < data.items.length; index++) ...[
+              if (index == markerIndex)
+                _CurrentTimeMarker(key: currentKey, now: now),
+              _TimelineRow(item: data.items[index], now: now),
+            ],
+            if (markerIndex == -1)
+              _CurrentTimeMarker(key: currentKey, now: now),
           ],
         ],
       ),
@@ -213,243 +142,338 @@ class _NormalBody extends StatelessWidget {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Quick Wins mode
-// ---------------------------------------------------------------------------
-
-class _QuickWinsBody extends StatelessWidget {
-  final TodayState state;
-  final WidgetRef ref;
-
-  const _QuickWinsBody({required this.state, required this.ref});
+class _DaySummaryCard extends StatelessWidget {
+  final TodayTimelineData data;
+  const _DaySummaryCard({required this.data});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            state.reason,
-            style: AppTextStyles.bodySmall.copyWith(color: AppColors.accent),
-          ),
-          const SizedBox(height: 16),
-          ...state.quickWins.map(
-            (task) => Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: _TaskCard(
-                task: task,
-                onComplete: () {
-                  ref.read(todayControllerProvider.notifier).complete(task.id);
-                },
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// All clear
-// ---------------------------------------------------------------------------
-
-class _AllClearBody extends StatelessWidget {
-  const _AllClearBody();
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.check_circle_outline,
-              size: 48, color: AppColors.accent.withValues(alpha: 0.6)),
-          const SizedBox(height: 16),
-          const Text('All clear', style: AppTextStyles.titleMedium),
-          const SizedBox(height: 8),
-          const Text('Nothing pending — add something with +',
-              style: AppTextStyles.bodySmall),
-        ],
-      ),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Task card
-// ---------------------------------------------------------------------------
-
-class _TaskCard extends StatelessWidget {
-  final Task task;
-  final VoidCallback onComplete;
-
-  const _TaskCard({required this.task, required this.onComplete});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      child: Row(
-        children: [
-          _EnergyGlyph(energy: task.energy),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(task.title, style: AppTextStyles.bodyMedium),
-                if (task.notes != null && task.notes!.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(task.notes!, style: AppTextStyles.bodySmall),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: onComplete,
-            child: Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                border: Border.all(color: AppColors.textMuted, width: 1.5),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Icon(Icons.check,
-                  size: 16, color: AppColors.textMuted),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// Energy glyph — monochrome, shape-distinguished (no colour coding per §13)
-class _EnergyGlyph extends StatelessWidget {
-  final EnergyLevel energy;
-
-  const _EnergyGlyph({required this.energy});
-
-  @override
-  Widget build(BuildContext context) {
-    final (icon, label) = switch (energy) {
-      EnergyLevel.low => (Icons.remove, 'low'),
-      EnergyLevel.medium => (Icons.circle_outlined, 'medium'),
-      EnergyLevel.high => (Icons.keyboard_arrow_up, 'high'),
-    };
     return Semantics(
-      label: '$label energy',
-      child:
-          Icon(icon, size: 18, color: AppColors.textSecondary),
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Due routines section — shown between tasks and habits
-// ---------------------------------------------------------------------------
-
-/// Shows routines that are due right now (time-of-day aware).
-/// Hidden when no routines are due — zero visual noise.
-class _DueRoutinesSection extends ConsumerWidget {
-  const _DueRoutinesSection();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final dueAsync = ref.watch(dueRoutinesProvider);
-
-    return dueAsync.when(
-      loading: () => const SizedBox.shrink(),
-      error: (_, __) => const SizedBox.shrink(),
-      data: (routines) {
-        if (routines.isEmpty) return const SizedBox.shrink();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Text('Routines', style: AppTextStyles.bodySmall),
-            ),
-            ...routines.map(
-              (r) => _RoutineCard(
-                routine: r,
-                onTap: () => launchRoutine(context, r),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-}
-
-/// Single tappable routine card.
-/// Shows progress state when a routine is already in progress.
-class _RoutineCard extends StatelessWidget {
-  final Routine routine;
-  final VoidCallback onTap;
-
-  const _RoutineCard({required this.routine, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final inProgress = routine.completedCount > 0 && !routine.isComplete;
-    final totalMinutes = routine.steps.fold<int>(
-      0,
-      (sum, s) => sum + (s.durationMinutes ?? 0),
-    );
-    final stepLabel = inProgress
-        ? '${routine.completedCount} / ${routine.steps.length} steps'
-        : '${routine.steps.length} steps · ~$totalMinutes min';
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-      child: GestureDetector(
-        onTap: onTap,
-        behavior: HitTestBehavior.opaque,
+      button: true,
+      label: 'Open Lexi conversation',
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppSpace.radiusCard),
+        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => const LexiConversationScreen(),
+        )),
         child: Container(
+          padding: const EdgeInsets.all(AppSpace.lg),
           decoration: BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.circular(12),
-            // Accent border when already in progress — signals continuation
-            border: inProgress
-                ? Border.all(
-                    color: AppColors.accent.withValues(alpha: 0.35),
-                    width: 1,
-                  )
-                : null,
+            color: AppColors.surfaceGlass,
+            borderRadius: BorderRadius.circular(AppSpace.radiusCard),
+            boxShadow: const [
+              BoxShadow(
+                  color: Color(0x14000000),
+                  blurRadius: 18,
+                  offset: Offset(0, 8)),
+            ],
           ),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const LexiAvatar(
+                visualState: LexiVisualState.idle,
+                assetPath: 'assets/lexi/public/lexi-canonical-face.jpg',
+                size: 48,
+                subtleIdleAnimation: true,
+              ),
+              const SizedBox(width: AppSpace.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(routine.name, style: AppTextStyles.bodyMedium),
-                    const SizedBox(height: 2),
-                    Text(stepLabel, style: AppTextStyles.bodySmall),
+                    Text(
+                        data.lexiAvailable
+                            ? 'A calm look ahead'
+                            : 'Your plan, on device',
+                        style: AppTextStyles.label
+                            .copyWith(color: AppColors.accent)),
+                    const SizedBox(height: AppSpace.sm),
+                    Text(const DaySummary().build(data),
+                        style: AppTextStyles.bodyMedium),
+                    const SizedBox(height: AppSpace.sm),
+                    Text(
+                      data.lexiAvailable
+                          ? 'Tap to talk with Lexi'
+                          : 'Lexi is offline. Everything here still works.',
+                      style: AppTextStyles.bodySmall,
+                    ),
                   ],
                 ),
               ),
-              Text(
-                inProgress ? 'Continue' : 'Start',
-                style: AppTextStyles.bodySmall
-                    .copyWith(color: AppColors.accent),
+              const Icon(Icons.chevron_right, color: AppColors.textMuted),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ActiveTaskCard extends ConsumerWidget {
+  final Task task;
+  const _ActiveTaskCard({required this.task});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final actions = ref.read(taskActionControllerProvider);
+    final isPaused = task.status == TaskStatus.paused;
+    final isActive = task.status == TaskStatus.inProgress;
+    return Container(
+      padding: const EdgeInsets.all(AppSpace.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceRaised,
+        borderRadius: BorderRadius.circular(AppSpace.radiusCard),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              LexiAvatar(
+                visualState: LexiVisualState.focus,
+                assetPath: 'assets/lexi/public/lexi-canonical-face.jpg',
+                size: 30,
               ),
-              const SizedBox(width: 2),
-              const Icon(
-                Icons.chevron_right,
-                size: 16,
-                color: AppColors.accent,
+              SizedBox(width: AppSpace.sm),
+              Expanded(
+                child: Text('Recommended now', style: AppTextStyles.label),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpace.md),
+          Text(task.title, style: AppTextStyles.titleMedium),
+          if (task.notes?.isNotEmpty ?? false) ...[
+            const SizedBox(height: AppSpace.xs),
+            Text(task.notes!, style: AppTextStyles.bodySmall),
+          ],
+          const SizedBox(height: AppSpace.lg),
+          Wrap(
+            spacing: AppSpace.sm,
+            runSpacing: AppSpace.sm,
+            children: [
+              FilledButton.icon(
+                onPressed: () =>
+                    isPaused ? actions.resume(task.id) : actions.start(task.id),
+                icon: Icon(
+                    isPaused ? Icons.play_arrow_rounded : Icons.flag_outlined),
+                label: Text(isPaused
+                    ? 'Resume'
+                    : isActive
+                        ? 'Continue'
+                        : 'Start'),
+              ),
+              OutlinedButton(
+                onPressed: () => _saveForLater(context, ref),
+                child: const Text('Save for later'),
+              ),
+              TextButton(
+                onPressed: () => actions.notNow(task.id),
+                child: const Text('Not now'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _saveForLater(BuildContext context, WidgetRef ref) async {
+    final last = TextEditingController();
+    final next = TextEditingController();
+    DateTime? returnAt;
+    try {
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Save for later'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'A note can make returning easier, but every field is optional.',
+                    style: AppTextStyles.bodySmall,
+                  ),
+                  const SizedBox(height: AppSpace.md),
+                  TextField(
+                    controller: last,
+                    decoration: const InputDecoration(
+                      labelText: 'Last completed step (Optional)',
+                    ),
+                  ),
+                  TextField(
+                    controller: next,
+                    decoration: const InputDecoration(
+                      labelText: 'Exact next action (Optional)',
+                    ),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.schedule_outlined),
+                    title: const Text('Return time (Optional)'),
+                    subtitle: Text(returnAt == null
+                        ? 'No return time'
+                        : '${returnAt!.month}/${returnAt!.day}  ${_time(returnAt)}'),
+                    onTap: () async {
+                      final picked = await _pickReturnTime(context);
+                      if (picked != null) {
+                        setDialogState(() => returnAt = picked);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Save and pause'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (saved != true) return;
+
+      final lastStep = last.text.trim();
+      final nextAction = next.text.trim();
+      final hasNote =
+          lastStep.isNotEmpty || nextAction.isNotEmpty || returnAt != null;
+      await ref.read(taskActionControllerProvider).saveForLater(
+            task.id,
+            hasNote
+                ? ReentryNote(
+                    lastCompletedStep: lastStep.isEmpty ? null : lastStep,
+                    nextAction: nextAction.isEmpty ? null : nextAction,
+                    returnAt: returnAt,
+                    updatedAt: DateTime.now(),
+                  )
+                : null,
+          );
+    } finally {
+      last.dispose();
+      next.dispose();
+    }
+  }
+
+  Future<DateTime?> _pickReturnTime(BuildContext context) async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (date == null || !context.mounted) return null;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now),
+    );
+    if (time == null) return null;
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+}
+
+class _TimelineRow extends StatelessWidget {
+  final TimelineItem item;
+  final DateTime now;
+  const _TimelineRow({required this.item, required this.now});
+
+  @override
+  Widget build(BuildContext context) {
+    final phase = item.phaseAt(now);
+    final dimmed = phase == TimelinePhase.past;
+    final icon = switch (item.type) {
+      TimelineItemType.calendarEvent => Icons.event_outlined,
+      TimelineItemType.fixedAnchor => Icons.anchor_rounded,
+      TimelineItemType.flexibleBlock => Icons.drag_indicator_rounded,
+      TimelineItemType.task => Icons.check_box_outline_blank_rounded,
+      TimelineItemType.openSpace => Icons.air_rounded,
+    };
+    // Muted type colors are a secondary signal only. Icon, marker geometry,
+    // visible type label, and semantics keep every type distinct in grayscale.
+    final color = switch (item.type) {
+      TimelineItemType.calendarEvent => AppColors.calendar,
+      TimelineItemType.fixedAnchor => AppColors.accent,
+      TimelineItemType.flexibleBlock => AppColors.textSecondary,
+      TimelineItemType.task => AppColors.textPrimary,
+      TimelineItemType.openSpace => AppColors.textMuted,
+    };
+    final typeLabel = _timelineTypeLabel(item.type);
+    return Semantics(
+      container: true,
+      label: '$typeLabel, ${item.title}, ${_phaseLabel(phase)}'
+          '${item.isPaused ? ', paused' : ''}',
+      child: Opacity(
+        opacity: dimmed ? .55 : 1,
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: item.isCompleted ? 4 : 7),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 54,
+                child: Text(_time(item.start), style: AppTextStyles.monoSmall),
+              ),
+              Column(
+                children: [
+                  Container(width: 2, height: 8, color: AppColors.divider),
+                  _TimelineMarker(
+                    type: item.type,
+                    icon: item.isCompleted ? Icons.check_rounded : icon,
+                    color: color,
+                    completed: item.isCompleted,
+                  ),
+                  Container(
+                      width: 2,
+                      height: item.isCompleted ? 20 : 46,
+                      color: AppColors.divider),
+                ],
+              ),
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 7),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(item.title,
+                                style: item.isCompleted
+                                    ? AppTextStyles.bodySmall
+                                    : AppTextStyles.bodyMedium,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis),
+                          ),
+                          if (item.isPaused)
+                            Text('Paused',
+                                style: AppTextStyles.label
+                                    .copyWith(color: AppColors.warning)),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        typeLabel.toUpperCase(),
+                        style: AppTextStyles.label.copyWith(
+                          color: AppColors.textSecondary,
+                          fontSize: 9,
+                        ),
+                      ),
+                      if (!item.isCompleted &&
+                          item.subtitle?.isNotEmpty == true)
+                        Text(item.subtitle!,
+                            style: AppTextStyles.bodySmall, maxLines: 2),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
@@ -458,3 +482,175 @@ class _RoutineCard extends StatelessWidget {
     );
   }
 }
+
+class _TimelineMarker extends StatelessWidget {
+  final TimelineItemType type;
+  final IconData icon;
+  final Color color;
+  final bool completed;
+
+  const _TimelineMarker({
+    required this.type,
+    required this.icon,
+    required this.color,
+    required this.completed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = switch (type) {
+      TimelineItemType.fixedAnchor => BorderRadius.circular(2),
+      TimelineItemType.calendarEvent => BorderRadius.circular(6),
+      TimelineItemType.flexibleBlock => BorderRadius.circular(3),
+      TimelineItemType.task => BorderRadius.circular(12),
+      TimelineItemType.openSpace => BorderRadius.circular(12),
+    };
+    final marker = Container(
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        color: completed ? AppColors.accentWash : Colors.transparent,
+        borderRadius: borderRadius,
+        border: Border.all(
+          color: color,
+          width: type == TimelineItemType.flexibleBlock ? 1 : 1.5,
+        ),
+      ),
+      child: Icon(icon, color: color, size: 14),
+    );
+    return type == TimelineItemType.fixedAnchor
+        ? Transform.rotate(angle: .785398, child: marker)
+        : marker;
+  }
+}
+
+class _CurrentTimeMarker extends StatelessWidget {
+  final DateTime now;
+  const _CurrentTimeMarker({super.key, required this.now});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: 'Current time ${_time(now)}',
+      child: Row(
+        children: [
+          SizedBox(
+              width: 54,
+              child: Text(_time(now),
+                  style: AppTextStyles.monoSmall
+                      .copyWith(color: AppColors.accent))),
+          const CircleAvatar(radius: 5, backgroundColor: AppColors.accent),
+          const SizedBox(width: 6),
+          const Expanded(child: Divider(color: AppColors.accent)),
+          const SizedBox(width: 6),
+          Text('NOW',
+              style: AppTextStyles.label.copyWith(color: AppColors.accent)),
+        ],
+      ),
+    );
+  }
+}
+
+class _CalendarPermissionNotice extends StatelessWidget {
+  const _CalendarPermissionNotice();
+
+  @override
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(AppSpace.md),
+        decoration: BoxDecoration(
+          color: AppColors.accentWash,
+          borderRadius: BorderRadius.circular(AppSpace.radiusInput),
+        ),
+        child: const Row(
+          children: [
+            Icon(Icons.event_busy_outlined, color: AppColors.textSecondary),
+            SizedBox(width: AppSpace.sm),
+            Expanded(
+                child: Text(
+                    'Calendar is not connected. Tasks and anchors are still shown.',
+                    style: AppTextStyles.bodySmall)),
+          ],
+        ),
+      );
+}
+
+class _EmptyDayState extends StatelessWidget {
+  const _EmptyDayState();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 56),
+        child: Center(
+          child: Column(
+            children: [
+              Icon(Icons.wb_twilight_outlined,
+                  size: 46, color: AppColors.accent),
+              SizedBox(height: AppSpace.lg),
+              Text('Your day has room', style: AppTextStyles.titleMedium),
+              SizedBox(height: AppSpace.sm),
+              Text('Add one next step, or leave the space open.',
+                  style: AppTextStyles.bodySmall),
+            ],
+          ),
+        ),
+      );
+}
+
+class _LoadingState extends StatelessWidget {
+  const _LoadingState();
+  @override
+  Widget build(BuildContext context) => const Center(
+        child:
+            CircularProgressIndicator(strokeWidth: 2, color: AppColors.accent),
+      );
+}
+
+class _ErrorState extends StatelessWidget {
+  final VoidCallback onRetry;
+  const _ErrorState({required this.onRetry});
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpace.xxl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_outlined, color: AppColors.warning),
+              const SizedBox(height: AppSpace.md),
+              const Text('Today could not be loaded',
+                  style: AppTextStyles.titleMedium),
+              const SizedBox(height: AppSpace.sm),
+              const Text(
+                  'Your data is still on this device. Try again when you are ready.',
+                  style: AppTextStyles.bodySmall,
+                  textAlign: TextAlign.center),
+              const SizedBox(height: AppSpace.lg),
+              OutlinedButton(
+                  onPressed: onRetry, child: const Text('Try again')),
+            ],
+          ),
+        ),
+      );
+}
+
+String _time(DateTime? value) {
+  if (value == null) return '';
+  final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
+  final minute = value.minute.toString().padLeft(2, '0');
+  final period = value.hour < 12 ? 'AM' : 'PM';
+  return '$hour:$minute $period';
+}
+
+String _timelineTypeLabel(TimelineItemType type) => switch (type) {
+      TimelineItemType.calendarEvent => 'Calendar event',
+      TimelineItemType.fixedAnchor => 'Fixed anchor',
+      TimelineItemType.flexibleBlock => 'Flexible block',
+      TimelineItemType.task => 'Task',
+      TimelineItemType.openSpace => 'Open time',
+    };
+
+String _phaseLabel(TimelinePhase phase) => switch (phase) {
+      TimelinePhase.past => 'past',
+      TimelinePhase.current => 'current',
+      TimelinePhase.upcoming => 'upcoming',
+    };

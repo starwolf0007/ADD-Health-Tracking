@@ -16,6 +16,7 @@ class AppColors {
   static const surface = Color(0xFF161618);
   static const surfaceRaised = Color(0xFF1C1C1F);
   static const surfaceVariant = Color(0xFF212124);
+  static const surfaceGlass = Color(0xD91C1C1F);
   static const divider = Color(0xFF232326);
 
   // Text
@@ -26,6 +27,7 @@ class AppColors {
 
   // Semantic
   static const warning = Color(0xFFD9A441);
+  static const calendar = Color(0xFF7AA7A0);
   static const attention = Color(0xFFD9A441);
 
   // -- Trial colors (v-trial) --
@@ -148,6 +150,10 @@ class AppTheme {
         backgroundColor: AppColors.accent,
         foregroundColor: AppColors.background,
         elevation: 2,
+      ),
+      navigationBarTheme: const NavigationBarThemeData(
+        backgroundColor: AppColors.surface,
+        indicatorColor: AppColors.accentWash,
       ),
     );
   }

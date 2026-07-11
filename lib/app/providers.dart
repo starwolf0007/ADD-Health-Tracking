@@ -14,6 +14,7 @@ import 'package:neuroflow/data/task_repository.dart';
 import 'package:neuroflow/data/task_repository_impl.dart';
 import 'package:neuroflow/domain/habit.dart';
 import 'package:neuroflow/domain/routine.dart';
+import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/executive/planner.dart';
 import 'package:neuroflow/intelligence/lexi_plan_advisor.dart';
@@ -36,6 +37,7 @@ import 'package:neuroflow/platform/sync/google_tasks_sync_service.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository_impl.dart';
 import 'package:neuroflow/platform/wear/wear_sync_service.dart';
+import 'package:neuroflow/presentation/today/today_timeline.dart';
 
 // ---------------------------------------------------------------------------
 // Platform layer
@@ -59,15 +61,18 @@ final googleAuthRepositoryProvider = Provider<GoogleAuthRepository>((ref) {
   return GoogleAuthRepositoryImpl();
 });
 
-final googleAccountRepositoryProvider = Provider<GoogleAccountRepository>((ref) {
+final googleAccountRepositoryProvider =
+    Provider<GoogleAccountRepository>((ref) {
   return GoogleAccountRepositoryImpl(const FlutterSecureStorage());
 });
 
-final googlePermissionManagerProvider = Provider<GooglePermissionManager>((ref) {
+final googlePermissionManagerProvider =
+    Provider<GooglePermissionManager>((ref) {
   return GooglePermissionManagerImpl();
 });
 
-final connectedServicesRepositoryProvider = Provider<ConnectedServicesRepository>((ref) {
+final connectedServicesRepositoryProvider =
+    Provider<ConnectedServicesRepository>((ref) {
   return ConnectedServicesRepositoryImpl(const FlutterSecureStorage());
 });
 
@@ -87,7 +92,8 @@ final googleAccountProvider = StreamProvider<GoogleAccount?>((ref) {
 });
 
 /// Stream of the global Google connection state.
-final googleConnectionStateProvider = StreamProvider<GoogleConnectionState>((ref) {
+final googleConnectionStateProvider =
+    StreamProvider<GoogleConnectionState>((ref) {
   return ref.watch(googleServiceManagerProvider).connectionState;
 });
 
@@ -158,8 +164,7 @@ class AdvisorTierNotifier extends Notifier<AdvisorTier> {
   void set(AdvisorTier tier) => state = tier;
 }
 
-final advisorTierProvider =
-    NotifierProvider<AdvisorTierNotifier, AdvisorTier>(
+final advisorTierProvider = NotifierProvider<AdvisorTierNotifier, AdvisorTier>(
   AdvisorTierNotifier.new,
 );
 
@@ -216,12 +221,13 @@ class TodayController extends AsyncNotifier<TodayState> {
 
   @override
   Future<TodayState> build() async {
-    final pending = await ref.watch(taskRepositoryProvider).watchPending().first;
+    final pending =
+        await ref.watch(taskRepositoryProvider).watchPending().first;
     final state = await _computeState(pending);
-    
+
     // Push to watch after state change
     await ref.read(wearSyncServiceProvider).pushPrimaryTask(state);
-    
+
     return state;
   }
 
@@ -270,6 +276,77 @@ final activeRoutinesProvider = StreamProvider<List<Routine>>((ref) {
 final dueRoutinesProvider = FutureProvider<List<Routine>>((ref) {
   return ref.watch(routineRepositoryProvider).fetchDueNow();
 });
+
+final todayCalendarSourceProvider = Provider<TodayCalendarSource>(
+  (ref) => const NoCalendarSource(),
+);
+
+final todayTimelineProvider = FutureProvider<TodayTimelineData>((ref) async {
+  final tasks =
+      await ref.watch(taskRepositoryProvider).watchTodayTimeline().first;
+  final routines =
+      await ref.watch(routineRepositoryProvider).watchActive().first;
+  final calendar = ref.watch(todayCalendarSourceProvider);
+  final now = DateTime.now();
+  final calendarItems = await calendar.load(now);
+  final recommended = ref.watch(todayControllerProvider).value?.primaryTask;
+  return TodayTimelineData(
+    items: const TodayTimelineBuilder().build(
+      day: now,
+      tasks: tasks,
+      routines: routines,
+      calendarItems: calendarItems,
+    ),
+    recommendedTask: recommended,
+    hasCalendarPermission: calendar.hasPermission,
+    lexiAvailable: ref.watch(advisorTierProvider) != AdvisorTier.none,
+  );
+});
+
+class TaskActionController {
+  final Ref ref;
+  const TaskActionController(this.ref);
+
+  Future<void> start(String id) => _set(id, TaskStatus.inProgress);
+  Future<void> resume(String id) => _set(id, TaskStatus.inProgress);
+  Future<void> pause(String id) => _set(id, TaskStatus.paused);
+
+  Future<void> saveForLater(String id, ReentryNote? note) async {
+    if (note != null && !note.isEmpty) {
+      await ref.read(taskRepositoryProvider).saveReentryNote(id, note);
+    } else {
+      await ref.read(taskRepositoryProvider).clearReentryNote(id);
+    }
+    await _set(id, TaskStatus.paused);
+    ref.invalidate(reentryNoteProvider(id));
+  }
+
+  Future<void> clearReentry(String id) async {
+    await ref.read(taskRepositoryProvider).clearReentryNote(id);
+    ref.invalidate(reentryNoteProvider(id));
+    ref.invalidate(todayTimelineProvider);
+  }
+
+  void notNow(String id) {
+    ref.read(todayControllerProvider.notifier).snoozeForSession(id);
+    ref.invalidate(todayTimelineProvider);
+  }
+
+  Future<void> _set(String id, TaskStatus status) async {
+    await ref.read(taskRepositoryProvider).updateStatus(id, status);
+    // TodayController currently takes the first Drift stream emission instead
+    // of holding a live subscription. Status affects Executive selection, so a
+    // targeted rebuild is required until that controller becomes stream-based.
+    ref.invalidate(todayControllerProvider);
+    ref.invalidate(todayTimelineProvider);
+  }
+}
+
+final taskActionControllerProvider = Provider(TaskActionController.new);
+
+final reentryNoteProvider = FutureProvider.family<ReentryNote?, String>(
+  (ref, taskId) => ref.watch(taskRepositoryProvider).getReentryNote(taskId),
+);
 
 final activeHabitsProvider = StreamProvider<List<Habit>>((ref) {
   return ref.watch(habitRepositoryProvider).watchActive();
