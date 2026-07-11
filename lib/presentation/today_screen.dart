@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/presentation/lexi_conversation_screen.dart';
 import 'package:neuroflow/presentation/settings_screen.dart';
 import 'package:neuroflow/presentation/theme.dart';
@@ -168,7 +169,7 @@ class _DaySummaryCard extends StatelessWidget {
             children: [
               const LexiAvatar(
                 visualState: LexiVisualState.idle,
-                assetPath: 'assets/lexi/placeholder.png',
+                assetPath: 'assets/lexi/public/lexi_placeholder_public.png',
                 size: 48,
                 subtleIdleAnimation: true,
               ),
@@ -227,7 +228,7 @@ class _ActiveTaskCard extends ConsumerWidget {
             children: [
               LexiAvatar(
                 visualState: LexiVisualState.focus,
-                assetPath: 'assets/lexi/placeholder.png',
+                assetPath: 'assets/lexi/public/lexi_placeholder_public.png',
                 size: 30,
               ),
               SizedBox(width: AppSpace.sm),
@@ -276,44 +277,102 @@ class _ActiveTaskCard extends ConsumerWidget {
   Future<void> _saveForLater(BuildContext context, WidgetRef ref) async {
     final last = TextEditingController();
     final next = TextEditingController();
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Make returning easier'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: last,
-              decoration:
-                  const InputDecoration(labelText: 'Last completed step'),
+    DateTime? returnAt;
+    try {
+      final saved = await showDialog<bool>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Save for later'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'A note can make returning easier, but every field is optional.',
+                    style: AppTextStyles.bodySmall,
+                  ),
+                  const SizedBox(height: AppSpace.md),
+                  TextField(
+                    controller: last,
+                    decoration: const InputDecoration(
+                      labelText: 'Last completed step (Optional)',
+                    ),
+                  ),
+                  TextField(
+                    controller: next,
+                    decoration: const InputDecoration(
+                      labelText: 'Exact next action (Optional)',
+                    ),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.schedule_outlined),
+                    title: const Text('Return time (Optional)'),
+                    subtitle: Text(returnAt == null
+                        ? 'No return time'
+                        : '${returnAt!.month}/${returnAt!.day}  ${_time(returnAt)}'),
+                    onTap: () async {
+                      final picked = await _pickReturnTime(context);
+                      if (picked != null) {
+                        setDialogState(() => returnAt = picked);
+                      }
+                    },
+                  ),
+                ],
+              ),
             ),
-            TextField(
-              controller: next,
-              decoration: const InputDecoration(labelText: 'Exact next action'),
-            ),
-          ],
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancel'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Save and pause'),
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Not now')),
-          FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Save')),
-        ],
-      ),
-    );
-    if (saved == true && next.text.trim().isNotEmpty) {
-      ref.read(reentryNotesProvider.notifier).save(
+      );
+      if (saved != true) return;
+
+      final lastStep = last.text.trim();
+      final nextAction = next.text.trim();
+      final hasNote =
+          lastStep.isNotEmpty || nextAction.isNotEmpty || returnAt != null;
+      await ref.read(taskActionControllerProvider).saveForLater(
             task.id,
-            ReentryNote(
-              lastCompletedStep: last.text.trim(),
-              exactNextAction: next.text.trim(),
-            ),
+            hasNote
+                ? ReentryNote(
+                    lastCompletedStep: lastStep.isEmpty ? null : lastStep,
+                    nextAction: nextAction.isEmpty ? null : nextAction,
+                    returnAt: returnAt,
+                    updatedAt: DateTime.now(),
+                  )
+                : null,
           );
-      await ref.read(taskActionControllerProvider).pause(task.id);
+    } finally {
+      last.dispose();
+      next.dispose();
     }
+  }
+
+  Future<DateTime?> _pickReturnTime(BuildContext context) async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (date == null || !context.mounted) return null;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now),
+    );
+    if (time == null) return null;
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
   }
 }
 
@@ -333,6 +392,8 @@ class _TimelineRow extends StatelessWidget {
       TimelineItemType.task => Icons.check_box_outline_blank_rounded,
       TimelineItemType.openSpace => Icons.air_rounded,
     };
+    // Muted type colors are a secondary signal only. Icon, marker geometry,
+    // visible type label, and semantics keep every type distinct in grayscale.
     final color = switch (item.type) {
       TimelineItemType.calendarEvent => AppColors.calendar,
       TimelineItemType.fixedAnchor => AppColors.accent,
@@ -340,62 +401,122 @@ class _TimelineRow extends StatelessWidget {
       TimelineItemType.task => AppColors.textPrimary,
       TimelineItemType.openSpace => AppColors.textMuted,
     };
-    return Opacity(
-      opacity: dimmed ? .55 : 1,
-      child: Padding(
-        padding: EdgeInsets.symmetric(vertical: item.isCompleted ? 4 : 7),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 54,
-              child: Text(_time(item.start), style: AppTextStyles.monoSmall),
-            ),
-            Column(
-              children: [
-                Container(width: 2, height: 8, color: AppColors.divider),
-                Icon(item.isCompleted ? Icons.check_circle : icon,
-                    color: color, size: item.isCompleted ? 18 : 22),
-                Container(
-                    width: 2,
-                    height: item.isCompleted ? 20 : 46,
-                    color: AppColors.divider),
-              ],
-            ),
-            const SizedBox(width: AppSpace.md),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(top: 7),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(item.title,
-                              style: item.isCompleted
-                                  ? AppTextStyles.bodySmall
-                                  : AppTextStyles.bodyMedium,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis),
+    final typeLabel = _timelineTypeLabel(item.type);
+    return Semantics(
+      container: true,
+      label: '$typeLabel, ${item.title}, ${_phaseLabel(phase)}'
+          '${item.isPaused ? ', paused' : ''}',
+      child: Opacity(
+        opacity: dimmed ? .55 : 1,
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: item.isCompleted ? 4 : 7),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 54,
+                child: Text(_time(item.start), style: AppTextStyles.monoSmall),
+              ),
+              Column(
+                children: [
+                  Container(width: 2, height: 8, color: AppColors.divider),
+                  _TimelineMarker(
+                    type: item.type,
+                    icon: item.isCompleted ? Icons.check_rounded : icon,
+                    color: color,
+                    completed: item.isCompleted,
+                  ),
+                  Container(
+                      width: 2,
+                      height: item.isCompleted ? 20 : 46,
+                      color: AppColors.divider),
+                ],
+              ),
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.only(top: 7),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(item.title,
+                                style: item.isCompleted
+                                    ? AppTextStyles.bodySmall
+                                    : AppTextStyles.bodyMedium,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis),
+                          ),
+                          if (item.isPaused)
+                            Text('Paused',
+                                style: AppTextStyles.label
+                                    .copyWith(color: AppColors.warning)),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        typeLabel.toUpperCase(),
+                        style: AppTextStyles.label.copyWith(
+                          color: AppColors.textSecondary,
+                          fontSize: 9,
                         ),
-                        if (item.isPaused)
-                          Text('Paused',
-                              style: AppTextStyles.label
-                                  .copyWith(color: AppColors.warning)),
-                      ],
-                    ),
-                    if (!item.isCompleted && item.subtitle?.isNotEmpty == true)
-                      Text(item.subtitle!,
-                          style: AppTextStyles.bodySmall, maxLines: 2),
-                  ],
+                      ),
+                      if (!item.isCompleted &&
+                          item.subtitle?.isNotEmpty == true)
+                        Text(item.subtitle!,
+                            style: AppTextStyles.bodySmall, maxLines: 2),
+                    ],
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
+  }
+}
+
+class _TimelineMarker extends StatelessWidget {
+  final TimelineItemType type;
+  final IconData icon;
+  final Color color;
+  final bool completed;
+
+  const _TimelineMarker({
+    required this.type,
+    required this.icon,
+    required this.color,
+    required this.completed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final borderRadius = switch (type) {
+      TimelineItemType.fixedAnchor => BorderRadius.circular(2),
+      TimelineItemType.calendarEvent => BorderRadius.circular(6),
+      TimelineItemType.flexibleBlock => BorderRadius.circular(3),
+      TimelineItemType.task => BorderRadius.circular(12),
+      TimelineItemType.openSpace => BorderRadius.circular(12),
+    };
+    final marker = Container(
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        color: completed ? AppColors.accentWash : Colors.transparent,
+        borderRadius: borderRadius,
+        border: Border.all(
+          color: color,
+          width: type == TimelineItemType.flexibleBlock ? 1 : 1.5,
+        ),
+      ),
+      child: Icon(icon, color: color, size: 14),
+    );
+    return type == TimelineItemType.fixedAnchor
+        ? Transform.rotate(angle: .785398, child: marker)
+        : marker;
   }
 }
 
@@ -514,3 +635,17 @@ String _time(DateTime? value) {
   final minute = value.minute.toString().padLeft(2, '0');
   return '$hour:$minute';
 }
+
+String _timelineTypeLabel(TimelineItemType type) => switch (type) {
+      TimelineItemType.calendarEvent => 'Calendar event',
+      TimelineItemType.fixedAnchor => 'Fixed anchor',
+      TimelineItemType.flexibleBlock => 'Flexible block',
+      TimelineItemType.task => 'Task',
+      TimelineItemType.openSpace => 'Open time',
+    };
+
+String _phaseLabel(TimelinePhase phase) => switch (phase) {
+      TimelinePhase.past => 'past',
+      TimelinePhase.current => 'current',
+      TimelinePhase.upcoming => 'upcoming',
+    };

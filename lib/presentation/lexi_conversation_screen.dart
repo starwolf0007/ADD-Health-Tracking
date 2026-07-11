@@ -18,7 +18,7 @@ class LexiConversationScreen extends StatelessWidget {
             children: [
               LexiAvatar(
                 visualState: LexiVisualState.idle,
-                assetPath: 'assets/lexi/placeholder.png',
+                assetPath: 'assets/lexi/public/lexi_placeholder_public.png',
                 size: 72,
               ),
               SizedBox(height: AppSpace.lg),
