@@ -37,7 +37,11 @@ class _LexiAvatarState extends State<LexiAvatar>
       lowerBound: .97,
       upperBound: 1.03,
     );
-    if (widget.subtleIdleAnimation) _controller.repeat(reverse: true);
+    if (widget.subtleIdleAnimation) {
+      _controller.repeat(reverse: true);
+    } else {
+      _controller.value = 1.0;
+    }
   }
 
   @override

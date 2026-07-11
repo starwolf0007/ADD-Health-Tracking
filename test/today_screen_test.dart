@@ -6,7 +6,7 @@ import 'package:neuroflow/data/task_repository.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/presentation/theme.dart';
-import 'package:neuroflow/presentation/today/today_timeline.dart';
+import 'package:neuroflow/executive/timeline_logic.dart';
 import 'package:neuroflow/presentation/today_screen.dart';
 
 void main() {

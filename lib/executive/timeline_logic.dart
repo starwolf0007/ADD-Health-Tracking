@@ -1,3 +1,8 @@
+// lib/executive/timeline_logic.dart
+//
+// Today timeline construction and day-summary rules. Pure Dart — no Flutter,
+// no Drift, no Google — depends only on domain.
+
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/domain/task.dart';
 
@@ -194,6 +199,12 @@ class DaySummary {
       return data.items.isEmpty
           ? 'Your day is open. Add one gentle next step when you are ready.'
           : 'Your planned anchors and flexible blocks are clear.';
+    }
+    if (anchors == 0) {
+      return 'You have ${_count(flexible, 'flexible block')} left.';
+    }
+    if (flexible == 0) {
+      return 'You have ${_count(anchors, 'anchor')} left.';
     }
     return 'You have ${_count(anchors, 'anchor')} and '
         '${_count(flexible, 'flexible block')} left.';

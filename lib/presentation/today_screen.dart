@@ -8,7 +8,7 @@ import 'package:neuroflow/presentation/lexi_conversation_screen.dart';
 import 'package:neuroflow/presentation/settings_screen.dart';
 import 'package:neuroflow/presentation/theme.dart';
 import 'package:neuroflow/presentation/today/lexi_avatar.dart';
-import 'package:neuroflow/presentation/today/today_timeline.dart';
+import 'package:neuroflow/executive/timeline_logic.dart';
 import 'package:neuroflow/presentation/widgets/capture_sheet.dart';
 
 class TodayScreen extends ConsumerStatefulWidget {
@@ -46,6 +46,13 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
   Widget build(BuildContext context) {
     final timeline = ref.watch(todayTimelineProvider);
     final name = ref.watch(displayNameProvider).value ?? '';
+    ref.listen<String?>(taskActionErrorProvider, (previous, next) {
+      if (next == null) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(next)));
+      ref.read(taskActionErrorProvider.notifier).set(null);
+    });
     return Scaffold(
       appBar: AppBar(
         title: Text(name.isEmpty ? 'Today' : 'Hey, $name'),
