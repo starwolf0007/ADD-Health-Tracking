@@ -7,6 +7,7 @@
 import 'package:drift/drift.dart';
 
 import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/platform/sync/sync_operation.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
 import 'package:neuroflow/data/database.dart';
@@ -26,6 +27,7 @@ class DriftTaskRepository implements TaskRepository {
   // ------------------------------------------------------------------
 
   Task _rowToTask(TaskRow row) {
+    final hasReentry = row.reentryUpdatedAt != null;
     return Task(
       id: row.id,
       title: row.title,
@@ -36,6 +38,14 @@ class DriftTaskRepository implements TaskRepository {
       dueDate: row.dueDate,
       completedAt: row.completedAt,
       estimatedMinutes: row.estimatedMinutes,
+      reentryNote: hasReentry
+          ? ReentryNote(
+              lastCompletedStep: row.reentryLastCompletedStep,
+              nextAction: row.reentryNextAction,
+              returnAt: row.reentryReturnAt,
+              updatedAt: row.reentryUpdatedAt!,
+            )
+          : null,
       isQuickWin: row.isQuickWin,
     );
   }
@@ -51,6 +61,10 @@ class DriftTaskRepository implements TaskRepository {
       dueDate: Value(task.dueDate),
       completedAt: Value(task.completedAt),
       estimatedMinutes: Value(task.estimatedMinutes),
+      reentryLastCompletedStep: Value(task.reentryNote?.lastCompletedStep),
+      reentryNextAction: Value(task.reentryNote?.nextAction),
+      reentryReturnAt: Value(task.reentryNote?.returnAt),
+      reentryUpdatedAt: Value(task.reentryNote?.updatedAt),
       isQuickWin: Value(task.isQuickWin),
     );
   }
@@ -113,6 +127,25 @@ class DriftTaskRepository implements TaskRepository {
   @override
   Future<void> updateStatus(String id, TaskStatus status) async {
     await _db.updateTaskStatus(id, _statusToString(status));
+  }
+
+  @override
+  Future<void> saveReentryNote(String id, ReentryNote note) =>
+      _db.saveTaskReentry(
+        taskId: id,
+        lastCompletedStep: note.lastCompletedStep,
+        nextAction: note.nextAction,
+        returnAt: note.returnAt,
+        updatedAt: note.updatedAt,
+      );
+
+  @override
+  Future<void> clearReentryNote(String id) => _db.clearTaskReentry(id);
+
+  @override
+  Future<ReentryNote?> getReentryNote(String id) async {
+    final task = await getById(id);
+    return task?.reentryNote;
   }
 
   @override

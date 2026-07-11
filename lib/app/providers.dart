@@ -14,6 +14,7 @@ import 'package:neuroflow/data/task_repository.dart';
 import 'package:neuroflow/data/task_repository_impl.dart';
 import 'package:neuroflow/domain/habit.dart';
 import 'package:neuroflow/domain/routine.dart';
+import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/executive/planner.dart';
 import 'package:neuroflow/intelligence/lexi_plan_advisor.dart';
@@ -310,6 +311,22 @@ class TaskActionController {
   Future<void> resume(String id) => _set(id, TaskStatus.inProgress);
   Future<void> pause(String id) => _set(id, TaskStatus.paused);
 
+  Future<void> saveForLater(String id, ReentryNote? note) async {
+    if (note != null && !note.isEmpty) {
+      await ref.read(taskRepositoryProvider).saveReentryNote(id, note);
+    } else {
+      await ref.read(taskRepositoryProvider).clearReentryNote(id);
+    }
+    await _set(id, TaskStatus.paused);
+    ref.invalidate(reentryNoteProvider(id));
+  }
+
+  Future<void> clearReentry(String id) async {
+    await ref.read(taskRepositoryProvider).clearReentryNote(id);
+    ref.invalidate(reentryNoteProvider(id));
+    ref.invalidate(todayTimelineProvider);
+  }
+
   void notNow(String id) {
     ref.read(todayControllerProvider.notifier).snoozeForSession(id);
     ref.invalidate(todayTimelineProvider);
@@ -317,6 +334,9 @@ class TaskActionController {
 
   Future<void> _set(String id, TaskStatus status) async {
     await ref.read(taskRepositoryProvider).updateStatus(id, status);
+    // TodayController currently takes the first Drift stream emission instead
+    // of holding a live subscription. Status affects Executive selection, so a
+    // targeted rebuild is required until that controller becomes stream-based.
     ref.invalidate(todayControllerProvider);
     ref.invalidate(todayTimelineProvider);
   }
@@ -324,30 +344,8 @@ class TaskActionController {
 
 final taskActionControllerProvider = Provider(TaskActionController.new);
 
-class ReentryNote {
-  final String lastCompletedStep;
-  final String exactNextAction;
-  final DateTime? returnTime;
-
-  const ReentryNote({
-    required this.lastCompletedStep,
-    required this.exactNextAction,
-    this.returnTime,
-  });
-}
-
-class ReentryNotesNotifier extends Notifier<Map<String, ReentryNote>> {
-  @override
-  Map<String, ReentryNote> build() => const {};
-
-  void save(String taskId, ReentryNote note) {
-    state = {...state, taskId: note};
-  }
-}
-
-final reentryNotesProvider =
-    NotifierProvider<ReentryNotesNotifier, Map<String, ReentryNote>>(
-  ReentryNotesNotifier.new,
+final reentryNoteProvider = FutureProvider.family<ReentryNote?, String>(
+  (ref, taskId) => ref.watch(taskRepositoryProvider).getReentryNote(taskId),
 );
 
 final activeHabitsProvider = StreamProvider<List<Habit>>((ref) {

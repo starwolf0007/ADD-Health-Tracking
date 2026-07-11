@@ -35,6 +35,10 @@ class Tasks extends Table {
   IntColumn get estimatedMinutes => integer().nullable()();
   DateTimeColumn get completedAt => dateTime().nullable()();
   TextColumn get googleTaskId => text().nullable()();
+  TextColumn get reentryLastCompletedStep => text().nullable()();
+  TextColumn get reentryNextAction => text().nullable()();
+  DateTimeColumn get reentryReturnAt => dateTime().nullable()();
+  DateTimeColumn get reentryUpdatedAt => dateTime().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
@@ -153,8 +157,10 @@ class SyncQueue extends Table {
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());
 
+  AppDatabase.forTesting(super.executor);
+
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -162,6 +168,12 @@ class AppDatabase extends _$AppDatabase {
         onUpgrade: (m, from, to) async {
           if (from < 2) {
             await m.addColumn(routines, routines.activeDays);
+          }
+          if (from < 3) {
+            await m.addColumn(tasks, tasks.reentryLastCompletedStep);
+            await m.addColumn(tasks, tasks.reentryNextAction);
+            await m.addColumn(tasks, tasks.reentryReturnAt);
+            await m.addColumn(tasks, tasks.reentryUpdatedAt);
           }
         },
       );
@@ -216,6 +228,32 @@ class AppDatabase extends _$AppDatabase {
           status: Value(status),
           completedAt:
               status == 'completed' ? Value(DateTime.now()) : const Value(null),
+        ),
+      );
+
+  Future<void> saveTaskReentry({
+    required String taskId,
+    String? lastCompletedStep,
+    String? nextAction,
+    DateTime? returnAt,
+    required DateTime updatedAt,
+  }) =>
+      (update(tasks)..where((t) => t.id.equals(taskId))).write(
+        TasksCompanion(
+          reentryLastCompletedStep: Value(lastCompletedStep),
+          reentryNextAction: Value(nextAction),
+          reentryReturnAt: Value(returnAt),
+          reentryUpdatedAt: Value(updatedAt),
+        ),
+      );
+
+  Future<void> clearTaskReentry(String taskId) =>
+      (update(tasks)..where((t) => t.id.equals(taskId))).write(
+        const TasksCompanion(
+          reentryLastCompletedStep: Value(null),
+          reentryNextAction: Value(null),
+          reentryReturnAt: Value(null),
+          reentryUpdatedAt: Value(null),
         ),
       );
 

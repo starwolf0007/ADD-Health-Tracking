@@ -5,6 +5,8 @@
 
 import 'package:uuid/uuid.dart';
 
+import 'package:neuroflow/domain/reentry_note.dart';
+
 enum EnergyLevel { low, medium, high }
 
 enum TaskStatus { pending, inProgress, completed, skipped, paused, blocked }
@@ -19,6 +21,7 @@ class Task {
   final DateTime? dueDate;
   final DateTime? completedAt;
   final int? estimatedMinutes;
+  final ReentryNote? reentryNote;
   final bool isQuickWin; // §QW — eligible for auto-mode Quick Wins list
 
   const Task({
@@ -31,6 +34,7 @@ class Task {
     this.dueDate,
     this.completedAt,
     this.estimatedMinutes,
+    this.reentryNote,
     this.isQuickWin = false,
   });
 
@@ -41,6 +45,7 @@ class Task {
     DateTime? dueDate,
     DateTime? completedAt,
     int? estimatedMinutes,
+    ReentryNote? reentryNote,
     bool isQuickWin = false,
   }) {
     return Task(
@@ -53,6 +58,7 @@ class Task {
       dueDate: dueDate,
       completedAt: completedAt,
       estimatedMinutes: estimatedMinutes,
+      reentryNote: reentryNote,
       isQuickWin: isQuickWin,
     );
   }
@@ -65,6 +71,7 @@ class Task {
     DateTime? dueDate,
     DateTime? completedAt,
     int? estimatedMinutes,
+    ReentryNote? reentryNote,
     bool? isQuickWin,
   }) {
     return Task(
@@ -77,6 +84,7 @@ class Task {
       dueDate: dueDate ?? this.dueDate,
       completedAt: completedAt ?? this.completedAt,
       estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
+      reentryNote: reentryNote ?? this.reentryNote,
       isQuickWin: isQuickWin ?? this.isQuickWin,
     );
   }
