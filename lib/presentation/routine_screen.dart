@@ -39,6 +39,7 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
     with SingleTickerProviderStateMixin {
   late List<RoutineStep> _steps;
   bool _showCelebration = false;
+  bool _savingStep = false;
   late AnimationController _progressController;
   late Animation<double> _progressAnim;
 
@@ -72,30 +73,42 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
     return pending.isEmpty ? null : pending.first;
   }
 
-  void _completeStep(String stepId) {
-    RoutineStep? updated;
+  Future<void> _skipStep(String stepId) async {
+    // Skip = mark complete without ceremony. No judgement.
+    await _completeStep(stepId);
+  }
+
+  Future<void> _completeStep(String stepId) async {
+    if (_savingStep) return;
+    final index = _steps.indexWhere((step) => step.id == stepId);
+    if (index == -1) return;
+
+    final original = _steps[index];
+    final updated = original.copyWith(isComplete: true);
     setState(() {
-      final idx = _steps.indexWhere((s) => s.id == stepId);
-      if (idx != -1) {
-        updated = _steps[idx].copyWith(isComplete: true);
-        _steps[idx] = updated!;
-      }
+      _savingStep = true;
+      _steps[index] = updated;
     });
     _animateProgress();
 
-    // Persist to DB — fire-and-forget, UI already updated optimistically.
-    if (updated != null) {
-      ref.read(routineRepositoryProvider).updateStep(updated!);
+    try {
+      await ref.read(routineRepositoryProvider).updateStep(updated);
+      if (!mounted) return;
+      if (_completedFraction >= 1.0) _onAllDone();
+    } catch (error, stackTrace) {
+      debugPrint('Could not save routine step: $error');
+      debugPrintStack(stackTrace: stackTrace);
+      if (!mounted) return;
+      setState(() => _steps[index] = original);
+      _animateProgress();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not save that step. Try again.')),
+      );
+    } finally {
+      if (mounted && !_showCelebration) {
+        setState(() => _savingStep = false);
+      }
     }
-
-    if (_completedFraction >= 1.0) {
-      _onAllDone();
-    }
-  }
-
-  void _skipStep(String stepId) {
-    // Skip = mark complete without ceremony. No judgement.
-    _completeStep(stepId);
   }
 
   void _animateProgress() {
@@ -164,6 +177,7 @@ class _RoutineScreenState extends ConsumerState<RoutineScreen>
                     total: _steps.length,
                     onComplete: () => _completeStep(active.id),
                     onSkip: () => _skipStep(active.id),
+                    isSaving: _savingStep,
                   ),
           ),
           // Upcoming steps — de-emphasized list
@@ -210,8 +224,9 @@ class _StepView extends StatelessWidget {
   final RoutineStep step;
   final int stepNumber;
   final int total;
-  final VoidCallback onComplete;
-  final VoidCallback onSkip;
+  final Future<void> Function() onComplete;
+  final Future<void> Function() onSkip;
+  final bool isSaving;
 
   const _StepView({
     required this.step,
@@ -219,6 +234,7 @@ class _StepView extends StatelessWidget {
     required this.total,
     required this.onComplete,
     required this.onSkip,
+    required this.isSaving,
   });
 
   @override
@@ -262,7 +278,7 @@ class _StepView extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: onComplete,
+              onPressed: isSaving ? null : onComplete,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.accent,
                 foregroundColor: AppColors.background,
@@ -278,7 +294,7 @@ class _StepView extends StatelessWidget {
           // Skip — no judgement, same visual weight as a secondary link
           Center(
             child: TextButton(
-              onPressed: onSkip,
+              onPressed: isSaving ? null : onSkip,
               child: Text(
                 'Skip this step',
                 style: AppTextStyles.bodySmall
