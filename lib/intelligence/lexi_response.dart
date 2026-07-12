@@ -155,7 +155,9 @@ class LexiResponseParser {
     } catch (error) {
       return LexiResponseParseResult(
         response: LexiResponse(
-          dialogue: safeDialogue,
+          // A malformed or unknown proposal can be paired with text that
+          // wrongly claims an action happened. Do not display that claim.
+          dialogue: _fallbackDialogue,
           contextUsedSummary: summary,
         ),
         validationIssue: error.toString(),

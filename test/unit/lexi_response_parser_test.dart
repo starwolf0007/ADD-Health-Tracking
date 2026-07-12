@@ -24,7 +24,8 @@ void main() {
     expect(result.response.proposal?.payload['taskId'], 'task-1');
   });
 
-  test('drops an unknown proposal while preserving dialogue', () {
+  test('replaces dialogue when an unknown proposal could claim unsafe action',
+      () {
     final result = parser.parseRaw('''
       {
         "dialogue": "I can help you think this through.",
@@ -38,7 +39,7 @@ void main() {
     ''');
 
     expect(result.isValid, isFalse);
-    expect(result.response.dialogue, 'I can help you think this through.');
+    expect(result.response.dialogue, contains('remain safe'));
     expect(result.response.proposal, isNull);
   });
 
