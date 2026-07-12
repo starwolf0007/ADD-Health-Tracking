@@ -45,6 +45,19 @@ class _LexiAvatarState extends State<LexiAvatar>
   }
 
   @override
+  void didUpdateWidget(covariant LexiAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.subtleIdleAnimation != oldWidget.subtleIdleAnimation) {
+      if (widget.subtleIdleAnimation) {
+        _controller.repeat(reverse: true);
+      } else {
+        _controller.stop();
+        _controller.value = 1.0;
+      }
+    }
+  }
+
+  @override
   void dispose() {
     _controller.dispose();
     super.dispose();
