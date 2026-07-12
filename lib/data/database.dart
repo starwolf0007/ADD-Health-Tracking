@@ -92,7 +92,7 @@ class RoutineSteps extends Table {
   IntColumn get position => integer()();
   TextColumn get title => text()();
   TextColumn get notes => text().nullable()();
-  IntColumn get durationMinutes => integer().nullable()();
+  IntColumn get durationMinutes => integer().nullable();
   BoolColumn get isComplete => boolean().withDefault(const Constant(false))();
 
   @override
@@ -104,7 +104,7 @@ class Notes extends Table {
   TextColumn get id => text()();
   TextColumn get body => text()();
   BoolColumn get pinned => boolean().withDefault(const Constant(false))();
-  TextColumn get linkedTaskId => text().nullable()();
+  TextColumn get linkedTaskId => text().nullable();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 
@@ -154,7 +154,7 @@ class SyncQueue extends Table {
   MoodLogs,
   SyncQueue,
 ])
-class AppDatabase extends _$AppDatabase {
+class AppDatabase extends _$$AppDatabase {
   AppDatabase() : super(_open());
 
   AppDatabase.forTesting(super.executor);
