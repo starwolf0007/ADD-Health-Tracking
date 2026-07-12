@@ -91,7 +91,10 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         tooltip: 'Add task',
-        onPressed: () => showCaptureSheet(context),
+        onPressed: () => showCaptureSheet(
+          context,
+          scheduledDay: isViewingToday ? null : selectedDay,
+        ),
         child: const Icon(Icons.add),
       ),
     );

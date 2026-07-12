@@ -9,12 +9,15 @@ import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/presentation/theme.dart';
 
-Future<void> showCaptureSheet(BuildContext context) {
+Future<void> showCaptureSheet(
+  BuildContext context, {
+  DateTime? scheduledDay,
+}) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
-    builder: (_) => const _CaptureSheetBody(),
+    builder: (_) => _CaptureSheetBody(scheduledDay: scheduledDay),
   );
 }
 
@@ -30,7 +33,9 @@ Future<void> showTaskEditSheet(BuildContext context, Task task) {
 }
 
 class _CaptureSheetBody extends ConsumerStatefulWidget {
-  const _CaptureSheetBody();
+  final DateTime? scheduledDay;
+
+  const _CaptureSheetBody({this.scheduledDay});
 
   @override
   ConsumerState<_CaptureSheetBody> createState() => _CaptureSheetBodyState();
@@ -39,8 +44,18 @@ class _CaptureSheetBody extends ConsumerStatefulWidget {
 class _CaptureSheetBodyState extends ConsumerState<_CaptureSheetBody> {
   final _controller = TextEditingController();
   EnergyLevel _energy = EnergyLevel.medium;
+  DateTime? _scheduledAt;
   final bool _quickWin = false;
   bool _submitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final day = widget.scheduledDay;
+    if (day != null) {
+      _scheduledAt = DateTime(day.year, day.month, day.day, 9);
+    }
+  }
 
   @override
   void dispose() {
@@ -56,6 +71,7 @@ class _CaptureSheetBodyState extends ConsumerState<_CaptureSheetBody> {
     final task = Task.create(
       title: title,
       energy: _energy,
+      dueDate: _scheduledAt,
       isQuickWin: _quickWin || _energy == EnergyLevel.low,
     );
     final repository = ref.read(taskRepositoryProvider);
@@ -92,6 +108,31 @@ class _CaptureSheetBodyState extends ConsumerState<_CaptureSheetBody> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Captured'), duration: Duration(seconds: 1)),
     );
+  }
+
+  Future<void> _pickTime() async {
+    final value = _scheduledAt;
+    if (value == null) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(value),
+    );
+    if (time == null || !mounted) return;
+    setState(() => _scheduledAt = DateTime(
+          value.year,
+          value.month,
+          value.day,
+          time.hour,
+          time.minute,
+        ));
+  }
+
+  String _scheduledLabel(BuildContext context) {
+    final value = _scheduledAt;
+    if (value == null) return 'Flexible — add it to Today';
+    final localizations = MaterialLocalizations.of(context);
+    return '${localizations.formatFullDate(value)} at '
+        '${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(value))}';
   }
 
   @override
@@ -132,6 +173,17 @@ class _CaptureSheetBodyState extends ConsumerState<_CaptureSheetBody> {
             ),
           ),
           const SizedBox(height: AppSpace.lg),
+          if (_scheduledAt != null) ...[
+            ListTile(
+              key: const ValueKey('capture-scheduled-day'),
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.calendar_today_outlined),
+              title: const Text('Adding to selected day'),
+              subtitle: Text(_scheduledLabel(context)),
+              onTap: _pickTime,
+            ),
+            const SizedBox(height: AppSpace.sm),
+          ],
           const Text('ENERGY TO START', style: AppTextStyles.label),
           const SizedBox(height: AppSpace.sm),
           Row(
