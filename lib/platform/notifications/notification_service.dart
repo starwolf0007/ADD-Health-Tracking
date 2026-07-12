@@ -18,6 +18,7 @@ class NotificationService {
 
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
+  bool _isInitialized = false;
 
   static const _channelId = 'neuroflow_reminders';
   static const _channelName = 'NeuroFlow Reminders';
@@ -46,6 +47,8 @@ class NotificationService {
       ),
     );
 
+    _isInitialized = true;
+
     // Android 13+ notification permission
     await _plugin
         .resolvePlatformSpecificImplementation<
@@ -62,6 +65,7 @@ class NotificationService {
     required String body,
     required DateTime scheduledAt,
   }) async {
+    if (!_isInitialized) return;
     final tzScheduled = tz.TZDateTime.from(scheduledAt, tz.local);
 
     await _plugin.zonedSchedule(
@@ -86,6 +90,7 @@ class NotificationService {
   /// Shows once per morning; no sound (ADHD: don't startle awake).
   /// Safe to call from a background isolate after init() has been called.
   Future<void> showMorningBriefing({required int pendingCount}) async {
+    if (!_isInitialized) return;
     if (pendingCount <= 0) return; // nothing to brief about — stay quiet
 
     final body = pendingCount == 1
@@ -117,8 +122,9 @@ class NotificationService {
   Future<void> showActiveTaskTimer({
     required String taskTitle,
     required DateTime startedAt,
-  }) {
-    return _plugin.show(
+  }) async {
+    if (!_isInitialized) return;
+    await _plugin.show(
       id: _idActiveTask,
       title: 'Working on $taskTitle',
       body: 'Tap to return when you are ready.',
@@ -146,11 +152,15 @@ class NotificationService {
     );
   }
 
-  Future<void> cancelActiveTaskTimer() => _plugin.cancel(id: _idActiveTask);
+  Future<void> cancelActiveTaskTimer() async {
+    if (!_isInitialized) return;
+    await _plugin.cancel(id: _idActiveTask);
+  }
 
   /// Returns false only when Android explicitly reports notifications disabled.
   /// Null means this platform cannot report the setting.
   Future<bool?> areNotificationsEnabled() async {
+    if (!_isInitialized) return null;
     try {
       return await _plugin
           .resolvePlatformSpecificImplementation<
@@ -164,6 +174,7 @@ class NotificationService {
   }
 
   Future<bool?> requestNotificationPermission() async {
+    if (!_isInitialized) return null;
     try {
       return await _plugin
           .resolvePlatformSpecificImplementation<
@@ -177,10 +188,12 @@ class NotificationService {
   }
 
   Future<void> cancelReminder(int id) async {
+    if (!_isInitialized) return;
     await _plugin.cancel(id: id);
   }
 
   Future<void> cancelAll() async {
+    if (!_isInitialized) return;
     await _plugin.cancelAll();
   }
 }
