@@ -21,6 +21,7 @@ import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/executive/planner.dart';
 import 'package:neuroflow/intelligence/lexi_plan_advisor.dart';
+import 'package:neuroflow/intelligence/lexi_response.dart';
 import 'package:neuroflow/domain/google/google_account.dart';
 import 'package:neuroflow/domain/google/google_auth_repository.dart';
 import 'package:neuroflow/domain/google/google_account_repository.dart';
@@ -391,6 +392,73 @@ class TaskActionController {
 }
 
 final taskActionControllerProvider = Provider(TaskActionController.new);
+
+abstract interface class LexiProposalActionHandler {
+  Future<void> confirm(LexiProposal proposal);
+}
+
+/// The only bridge from a confirmed Lexi suggestion to deterministic app code.
+/// Unsupported proposal types remain staged drafts; they cannot mutate state.
+class LexiProposalController implements LexiProposalActionHandler {
+  final Ref ref;
+
+  const LexiProposalController(this.ref);
+
+  @override
+  Future<void> confirm(LexiProposal proposal) async {
+    final actions = ref.read(taskActionControllerProvider);
+    switch (proposal.type) {
+      case LexiProposalType.startTask:
+        await actions.start(_requiredPayloadString(proposal, 'taskId'));
+        return;
+      case LexiProposalType.pauseTask:
+        await actions.pause(_requiredPayloadString(proposal, 'taskId'));
+        return;
+      case LexiProposalType.createReentryNote:
+        final taskId = _requiredPayloadString(proposal, 'taskId');
+        final returnAt = _optionalDateTime(proposal.payload['returnAt']);
+        await actions.saveForLater(
+          taskId,
+          ReentryNote(
+            lastCompletedStep:
+                _optionalPayloadString(proposal.payload['lastCompletedStep']),
+            nextAction: _requiredPayloadString(proposal, 'nextAction'),
+            returnAt: returnAt,
+            updatedAt: DateTime.now(),
+          ),
+        );
+        return;
+      case LexiProposalType.createTaskDraft:
+      case LexiProposalType.createRoutineDraft:
+      case LexiProposalType.setReminderDraft:
+      case LexiProposalType.preparePhoneCall:
+      case LexiProposalType.reduceInputMode:
+        throw UnsupportedError(
+          '${proposal.type.wireName} is not available in this alpha.',
+        );
+    }
+  }
+
+  String _requiredPayloadString(LexiProposal proposal, String key) {
+    final value = proposal.payload[key];
+    if (value is String && value.trim().isNotEmpty) return value.trim();
+    throw ArgumentError.value(value, key, 'A non-empty value is required.');
+  }
+
+  String? _optionalPayloadString(Object? value) {
+    if (value is! String || value.trim().isEmpty) return null;
+    return value.trim();
+  }
+
+  DateTime? _optionalDateTime(Object? value) {
+    if (value is! String) return null;
+    return DateTime.tryParse(value);
+  }
+}
+
+final lexiProposalActionHandlerProvider = Provider<LexiProposalActionHandler>(
+  LexiProposalController.new,
+);
 
 final reentryNoteProvider = FutureProvider.family<ReentryNote?, String>(
   (ref, taskId) => ref.watch(taskRepositoryProvider).getReentryNote(taskId),
