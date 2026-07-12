@@ -2,7 +2,7 @@
 //
 // THE composition root — the only file allowed to know every layer at once.
 
-import 'dart:async' show unawaited;
+import 'dart:async' show Timer, unawaited;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +19,7 @@ import 'package:neuroflow/domain/habit.dart';
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/domain/date_key.dart';
 import 'package:neuroflow/executive/planner.dart';
 import 'package:neuroflow/intelligence/lexi_plan_advisor.dart';
 import 'package:neuroflow/intelligence/lexi_response.dart';
@@ -270,7 +271,72 @@ class TodayController extends AsyncNotifier<TodayState> {
 final todayControllerProvider =
     AsyncNotifierProvider<TodayController, TodayState>(TodayController.new);
 
+/// The device's real local calendar day. It changes at local midnight even
+/// when the process stays alive, and can be refreshed on app resume.
+class CurrentDayNotifier extends Notifier<DateTime> {
+  Timer? _midnightTimer;
+
+  @override
+  DateTime build() {
+    ref.onDispose(() => _midnightTimer?.cancel());
+    _scheduleNextMidnight();
+    return dateOnly(DateTime.now());
+  }
+
+  void refresh() {
+    final next = dateOnly(DateTime.now());
+    if (!isSameDay(state, next)) state = next;
+    _scheduleNextMidnight();
+  }
+
+  void _scheduleNextMidnight() {
+    _midnightTimer?.cancel();
+    final now = DateTime.now();
+    final nextMidnight = DateTime(now.year, now.month, now.day + 1);
+    _midnightTimer = Timer(
+      nextMidnight.difference(now) + const Duration(seconds: 1),
+      refresh,
+    );
+  }
+}
+
+final currentDayProvider = NotifierProvider<CurrentDayNotifier, DateTime>(
+  CurrentDayNotifier.new,
+);
+
+/// The day the user is browsing. It follows the real day until the user
+/// deliberately browses elsewhere; browsing never changes task state.
+class SelectedDayNotifier extends Notifier<DateTime> {
+  bool _followsToday = true;
+
+  @override
+  DateTime build() {
+    ref.listen<DateTime>(currentDayProvider, (previous, next) {
+      if (_followsToday) state = next;
+    });
+    return ref.read(currentDayProvider);
+  }
+
+  void select(DateTime day) {
+    _followsToday = false;
+    state = dateOnly(day);
+  }
+
+  void previousDay() => select(state.subtract(const Duration(days: 1)));
+  void nextDay() => select(state.add(const Duration(days: 1)));
+
+  void goToToday() {
+    _followsToday = true;
+    state = ref.read(currentDayProvider);
+  }
+}
+
+final selectedDayProvider = NotifierProvider<SelectedDayNotifier, DateTime>(
+  SelectedDayNotifier.new,
+);
+
 final completedTodayCountProvider = StreamProvider<int>((ref) {
+  ref.watch(currentDayProvider);
   return ref.watch(taskRepositoryProvider).watchCompletedTodayCount();
 });
 
@@ -286,18 +352,27 @@ final todayCalendarSourceProvider = Provider<TodayCalendarSource>(
   (ref) => const NoCalendarSource(),
 );
 
-final todayTimelineProvider = FutureProvider<TodayTimelineData>((ref) async {
-  final tasks =
-      await ref.watch(taskRepositoryProvider).watchTodayTimeline().first;
+final timelineForDayProvider =
+    FutureProvider.family<TodayTimelineData, DateTime>((ref, viewedDay) async {
+  final today = ref.watch(currentDayProvider);
+  final isViewingToday = isSameDay(viewedDay, today);
+  final tasks = await ref
+      .watch(taskRepositoryProvider)
+      .watchTimelineForDay(
+        viewedDay,
+        includeFlexibleTasks: isViewingToday,
+      )
+      .first;
   final routines =
       await ref.watch(routineRepositoryProvider).watchActive().first;
   final calendar = ref.watch(todayCalendarSourceProvider);
-  final now = DateTime.now();
-  final calendarItems = await calendar.load(now);
-  final recommended = ref.watch(todayControllerProvider).value?.primaryTask;
+  final calendarItems = await calendar.load(viewedDay);
+  final recommended = isViewingToday
+      ? ref.watch(todayControllerProvider).value?.primaryTask
+      : null;
   return TodayTimelineData(
     items: const TodayTimelineBuilder().build(
-      day: now,
+      day: viewedDay,
       tasks: tasks,
       routines: routines,
       calendarItems: calendarItems,
@@ -306,6 +381,13 @@ final todayTimelineProvider = FutureProvider<TodayTimelineData>((ref) async {
     hasCalendarPermission: calendar.hasPermission,
     lexiAvailable: ref.watch(advisorTierProvider) != AdvisorTier.none,
   );
+});
+
+/// Backward-compatible Today entry point used by the screen and existing
+/// mutation flows. The selected day controls the actual query.
+final todayTimelineProvider = FutureProvider<TodayTimelineData>((ref) {
+  final selectedDay = ref.watch(selectedDayProvider);
+  return ref.watch(timelineForDayProvider(selectedDay).future);
 });
 
 class TaskActionFailure implements Exception {

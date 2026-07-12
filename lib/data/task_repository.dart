@@ -9,7 +9,10 @@ import 'package:neuroflow/domain/reentry_note.dart';
 abstract class TaskRepository {
   /// All pending tasks, ordered by energy ascending (low first).
   Stream<List<Task>> watchPending();
-  Stream<List<Task>> watchTodayTimeline();
+  Stream<List<Task>> watchTimelineForDay(
+    DateTime day, {
+    required bool includeFlexibleTasks,
+  });
 
   /// Count of tasks completed today — used by the heartbeat line.
   Stream<int> watchCompletedTodayCount();

@@ -182,10 +182,9 @@ class AppDatabase extends _$AppDatabase {
         },
       );
 
-  DateTime get _startOfToday {
-    final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day);
-  }
+  DateTime _startOfDay(DateTime day) => DateTime(day.year, day.month, day.day);
+
+  DateTime get _startOfToday => _startOfDay(DateTime.now());
 
   // ---- Tasks --------------------------------------------------------------
 
@@ -211,14 +210,24 @@ class AppDatabase extends _$AppDatabase {
         .watch();
   }
 
-  Stream<List<TaskRow>> watchTodayTimeline() {
-    final tomorrow = _startOfToday.add(const Duration(days: 1));
+  Stream<List<TaskRow>> watchTimelineForDay(
+    DateTime day, {
+    required bool includeFlexibleTasks,
+  }) {
+    final start = _startOfDay(day);
+    final tomorrow = DateTime(start.year, start.month, start.day + 1);
+    final scheduledForDay = tasks.dueDate.isBiggerOrEqualValue(start) &
+        tasks.dueDate.isSmallerThanValue(tomorrow);
+    final completedOnDay = tasks.status.equals('completed') &
+        tasks.completedAt.isBiggerOrEqualValue(start) &
+        tasks.completedAt.isSmallerThanValue(tomorrow);
+    final flexibleForToday = includeFlexibleTasks
+        ? tasks.dueDate.isNull() & tasks.status.isNotIn(['completed'])
+        : const Constant(false);
     return (select(tasks)
           ..where((t) =>
               t.status.isNotIn(['skipped']) &
-              (t.status.isNotIn(['completed']) |
-                  (t.completedAt.isBiggerOrEqualValue(_startOfToday) &
-                      t.completedAt.isSmallerThanValue(tomorrow))))
+              (scheduledForDay | completedOnDay | flexibleForToday))
           ..orderBy([
             (t) => OrderingTerm.asc(t.dueDate),
             (t) => OrderingTerm.asc(t.createdAt),

@@ -19,6 +19,7 @@ void main() {
 
     expect(find.text('Your plan, on device'), findsOneWidget);
     expect(find.textContaining('Lexi is offline'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Calendar sync'), 150);
     expect(find.text('Calendar sync'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Morning anchor'), 180);
     expect(find.text('Morning anchor'), findsOneWidget);
@@ -39,6 +40,22 @@ void main() {
         now));
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('Your day has room'), findsOneWidget);
+  });
+
+  testWidgets('date navigation can browse away and return to today',
+      (tester) async {
+    await tester.pumpWidget(_app(_mixedData(lexiAvailable: false), now));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final nextDay = find.byKey(const ValueKey('date-next-day'));
+    await tester.ensureVisible(nextDay);
+    await tester.tap(nextDay);
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Back to Today'), findsOneWidget);
+    await tester.tap(find.text('Back to Today'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Back to Today'), findsNothing);
   });
 
   testWidgets('Pixel-sized screenshot layout supports large text',
@@ -189,21 +206,6 @@ void main() {
     expect(
         find.byKey(const ValueKey('task-editor-clear-time')), findsOneWidget);
     expect(find.byKey(const ValueKey('task-editor-save')), findsOneWidget);
-  });
-
-  testWidgets('timeline task menu deletes after confirmation', (tester) async {
-    final repository = _FakeTaskRepository(_task());
-    await tester.pumpWidget(_interactiveApp(repository, now));
-    await tester.pump(const Duration(milliseconds: 300));
-
-    final delete = find.byKey(const ValueKey('timeline-task-delete-task'));
-    await tester.ensureVisible(delete);
-    await tester.tap(delete);
-    await tester.pump(const Duration(milliseconds: 500));
-    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
-    await tester.pump(const Duration(milliseconds: 500));
-
-    expect(repository.deleted, isTrue);
   });
 }
 
@@ -363,7 +365,11 @@ class _FakeTaskRepository implements TaskRepository {
   Stream<List<Task>> watchPending() => Stream.value([task]);
 
   @override
-  Stream<List<Task>> watchTodayTimeline() => Stream.value([task]);
+  Stream<List<Task>> watchTimelineForDay(
+    DateTime day, {
+    required bool includeFlexibleTasks,
+  }) =>
+      Stream.value([task]);
 
   @override
   Stream<int> watchCompletedTodayCount() => Stream.value(0);

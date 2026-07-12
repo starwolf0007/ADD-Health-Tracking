@@ -103,7 +103,11 @@ class _TaskRepository implements TaskRepository {
   Stream<List<Task>> watchPending() => Stream.value([task]);
 
   @override
-  Stream<List<Task>> watchTodayTimeline() => Stream.value([task]);
+  Stream<List<Task>> watchTimelineForDay(
+    DateTime day, {
+    required bool includeFlexibleTasks,
+  }) =>
+      Stream.value([task]);
 
   @override
   Stream<int> watchCompletedTodayCount() => Stream.value(0);

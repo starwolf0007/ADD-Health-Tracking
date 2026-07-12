@@ -83,8 +83,13 @@ class DriftTaskRepository implements TaskRepository {
   }
 
   @override
-  Stream<List<Task>> watchTodayTimeline() =>
-      _db.watchTodayTimeline().map((rows) => rows.map(_rowToTask).toList());
+  Stream<List<Task>> watchTimelineForDay(
+    DateTime day, {
+    required bool includeFlexibleTasks,
+  }) =>
+      _db
+          .watchTimelineForDay(day, includeFlexibleTasks: includeFlexibleTasks)
+          .map((rows) => rows.map(_rowToTask).toList());
 
   @override
   Stream<int> watchCompletedTodayCount() {

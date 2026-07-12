@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/domain/date_key.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/presentation/lexi_conversation_screen.dart';
 import 'package:neuroflow/presentation/settings_screen.dart';
@@ -49,6 +50,15 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
   Widget build(BuildContext context) {
     final timeline = ref.watch(todayTimelineProvider);
     final name = ref.watch(displayNameProvider).value ?? '';
+    final selectedDay = ref.watch(selectedDayProvider);
+    final currentDay = ref.watch(currentDayProvider);
+    final isViewingToday = isSameDay(selectedDay, currentDay);
+    final realNow = widget.now ?? DateTime.now();
+    final phaseNow = isViewingToday
+        ? realNow
+        : selectedDay.isBefore(currentDay)
+            ? DateTime(selectedDay.year, selectedDay.month, selectedDay.day + 1)
+            : selectedDay;
     return Scaffold(
       appBar: AppBar(
         title: Text(name.isEmpty ? 'Today' : 'Hey, $name'),
@@ -71,7 +81,9 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
           _scrollNearNow();
           return _TodayTimelineBody(
             data: data,
-            now: widget.now ?? DateTime.now(),
+            now: phaseNow,
+            viewedDay: selectedDay,
+            isViewingToday: isViewingToday,
             scrollController: _scrollController,
             currentKey: _currentKey,
           );
@@ -89,12 +101,16 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
 class _TodayTimelineBody extends ConsumerWidget {
   final TodayTimelineData data;
   final DateTime now;
+  final DateTime viewedDay;
+  final bool isViewingToday;
   final ScrollController scrollController;
   final GlobalKey currentKey;
 
   const _TodayTimelineBody({
     required this.data,
     required this.now,
+    required this.viewedDay,
+    required this.isViewingToday,
     required this.scrollController,
     required this.currentKey,
   });
@@ -116,6 +132,11 @@ class _TodayTimelineBody extends ConsumerWidget {
           MediaQuery.of(context).viewPadding.bottom + 72,
         ),
         children: [
+          _DateNavigator(
+            selectedDay: viewedDay,
+            isViewingToday: isViewingToday,
+          ),
+          const SizedBox(height: AppSpace.md),
           _DaySummaryCard(data: data),
           if (!data.hasCalendarPermission) ...[
             const SizedBox(height: AppSpace.md),
@@ -126,7 +147,10 @@ class _TodayTimelineBody extends ConsumerWidget {
             _ActiveTaskCard(task: recommended),
           ],
           const SizedBox(height: AppSpace.xl),
-          const Text('Your day', style: AppTextStyles.titleMedium),
+          Text(
+            isViewingToday ? 'Your day' : 'Schedule for this day',
+            style: AppTextStyles.titleMedium,
+          ),
           const SizedBox(height: AppSpace.md),
           if (data.items.isEmpty)
             const _EmptyDayState()
@@ -142,6 +166,82 @@ class _TodayTimelineBody extends ConsumerWidget {
         ],
       ),
     );
+  }
+}
+
+class _DateNavigator extends ConsumerWidget {
+  final DateTime selectedDay;
+  final bool isViewingToday;
+
+  const _DateNavigator({
+    required this.selectedDay,
+    required this.isViewingToday,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = MaterialLocalizations.of(context);
+    final dateLabel = isViewingToday
+        ? 'Today · ${localizations.formatFullDate(selectedDay)}'
+        : '${_relativeLabel()} · ${localizations.formatFullDate(selectedDay)}';
+    final selected = ref.read(selectedDayProvider.notifier);
+    return Semantics(
+      label: 'Date navigation, $dateLabel',
+      child: Row(
+        children: [
+          IconButton(
+            key: const ValueKey('date-previous-day'),
+            tooltip: 'Previous day',
+            icon: const Icon(Icons.chevron_left_rounded),
+            onPressed: selected.previousDay,
+          ),
+          Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(AppSpace.radiusInput),
+              onTap: () async {
+                final day = await showDatePicker(
+                  context: context,
+                  initialDate: selectedDay,
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime(2035),
+                );
+                if (day != null) selected.select(day);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+                child: Text(
+                  dateLabel,
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.bodyMedium,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            key: const ValueKey('date-next-day'),
+            tooltip: 'Next day',
+            icon: const Icon(Icons.chevron_right_rounded),
+            onPressed: selected.nextDay,
+          ),
+          if (!isViewingToday)
+            TextButton(
+              onPressed: selected.goToToday,
+              child: const Text('Back to Today'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _relativeLabel() {
+    final now = dateOnly(DateTime.now());
+    if (isSameDay(selectedDay, now.subtract(const Duration(days: 1)))) {
+      return 'Yesterday';
+    }
+    if (isSameDay(selectedDay, now.add(const Duration(days: 1)))) {
+      return 'Tomorrow';
+    }
+    return 'Selected day';
   }
 }
 
