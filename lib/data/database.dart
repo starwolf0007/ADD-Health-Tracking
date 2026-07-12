@@ -92,7 +92,7 @@ class RoutineSteps extends Table {
   IntColumn get position => integer()();
   TextColumn get title => text()();
   TextColumn get notes => text().nullable()();
-  IntColumn get durationMinutes => integer().nullable();
+  IntColumn get durationMinutes => integer().nullable()();
   BoolColumn get isComplete => boolean().withDefault(const Constant(false))();
 
   @override
@@ -104,7 +104,7 @@ class Notes extends Table {
   TextColumn get id => text()();
   TextColumn get body => text()();
   BoolColumn get pinned => boolean().withDefault(const Constant(false))();
-  TextColumn get linkedTaskId => text().nullable();
+  TextColumn get linkedTaskId => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get updatedAt => dateTime()();
 
@@ -154,7 +154,7 @@ class SyncQueue extends Table {
   MoodLogs,
   SyncQueue,
 ])
-class AppDatabase extends _$$AppDatabase {
+class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());
 
   AppDatabase.forTesting(super.executor);
@@ -222,14 +222,19 @@ class AppDatabase extends _$$AppDatabase {
         .watch();
   }
 
-  Future<void> updateTaskStatus(String id, String status) =>
-      (update(tasks)..where((t) => t.id.equals(id))).write(
-        TasksCompanion(
-          status: Value(status),
-          completedAt:
-              status == 'completed' ? Value(DateTime.now()) : const Value(null),
-        ),
-      );
+  Future<void> updateTaskStatus(String id, String status) async {
+    final rowsUpdated = await (update(tasks)..where((t) => t.id.equals(id))).write(
+      TasksCompanion(
+        status: Value(status),
+        completedAt:
+            status == 'completed' ? Value(DateTime.now()) : const Value(null),
+      ),
+    );
+
+    if (rowsUpdated == 0) {
+      throw Exception('Task with id $id not found or could not be updated');
+    }
+  }
 
   Future<void> saveTaskReentry({
     required String taskId,
