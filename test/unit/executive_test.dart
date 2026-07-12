@@ -51,9 +51,9 @@ void main() {
 
   group('priority ordering', () {
     test('surfaces lowest-energy task first', () {
-      final low  = _task('Quick reply',       EnergyLevel.low);
-      final med  = _task('Review doc',        EnergyLevel.medium);
-      final high = _task('Big presentation',  EnergyLevel.high);
+      final low = _task('Quick reply', EnergyLevel.low);
+      final med = _task('Review doc', EnergyLevel.medium);
+      final high = _task('Big presentation', EnergyLevel.high);
 
       final plan = executive.evaluate([high, med, low]);
       expect(plan.primaryTask?.id, low.id);
@@ -73,8 +73,8 @@ void main() {
   group('Quick Wins auto-mode', () {
     test('triggers when all tasks low-energy and count ≤ 3', () {
       final tasks = [
-        _task('Reply to Slack',      EnergyLevel.low),
-        _task('Archive emails',      EnergyLevel.low),
+        _task('Reply to Slack', EnergyLevel.low),
+        _task('Archive emails', EnergyLevel.low),
         _task('Mark yesterday done', EnergyLevel.low),
       ];
       final plan = executive.evaluate(tasks);
@@ -90,7 +90,7 @@ void main() {
 
     test('does NOT trigger when any task is medium-energy', () {
       final plan = executive.evaluate([
-        _task('Low task',    EnergyLevel.low),
+        _task('Low task', EnergyLevel.low),
         _task('Medium task', EnergyLevel.medium),
       ]);
       expect(plan.mode, DayMode.normal);
@@ -98,7 +98,7 @@ void main() {
 
     test('does NOT trigger when any task is high-energy', () {
       final plan = executive.evaluate([
-        _task('Low task',  EnergyLevel.low),
+        _task('Low task', EnergyLevel.low),
         _task('High task', EnergyLevel.high),
       ]);
       expect(plan.mode, DayMode.normal);

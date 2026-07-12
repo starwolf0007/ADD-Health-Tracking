@@ -71,8 +71,7 @@ class GoogleAuthRepositoryImpl implements GoogleAuthRepository {
   }
 
   @override
-  Future<GoogleAccount?> get currentAccount async =>
-      _mapAccount(_currentUser);
+  Future<GoogleAccount?> get currentAccount async => _mapAccount(_currentUser);
 
   @override
   Future<GoogleAccount?> signIn() async {

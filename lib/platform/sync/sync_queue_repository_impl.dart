@@ -60,8 +60,7 @@ class DriftSyncQueueRepository implements SyncQueueRepository {
   }
 
   @override
-  Future<void> markDone(String operationId) =>
-      _db.markSyncOpDone(operationId);
+  Future<void> markDone(String operationId) => _db.markSyncOpDone(operationId);
 
   @override
   Future<void> incrementRetry(String operationId) =>

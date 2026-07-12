@@ -73,7 +73,7 @@ void main() {
       )
     ''');
     raw.execute('PRAGMA user_version = 2');
-    raw.dispose();
+    raw.close();
 
     final database = AppDatabase.forTesting(NativeDatabase(file));
     final columns =

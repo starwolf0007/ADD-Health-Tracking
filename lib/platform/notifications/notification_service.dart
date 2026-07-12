@@ -40,7 +40,7 @@ class NotificationService {
     );
 
     await _plugin.initialize(
-      const InitializationSettings(
+      settings: const InitializationSettings(
         android: androidSettings,
         iOS: iosSettings,
       ),
@@ -65,11 +65,11 @@ class NotificationService {
     final tzScheduled = tz.TZDateTime.from(scheduledAt, tz.local);
 
     await _plugin.zonedSchedule(
-      id,
-      title,
-      body,
-      tzScheduled,
-      const NotificationDetails(
+      id: id,
+      title: title,
+      body: body,
+      scheduledDate: tzScheduled,
+      notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
@@ -79,8 +79,6 @@ class NotificationService {
         iOS: DarwinNotificationDetails(),
       ),
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
-      uiLocalNotificationDateInterpretation:
-          UILocalNotificationDateInterpretation.absoluteTime,
     );
   }
 
@@ -95,10 +93,10 @@ class NotificationService {
         : 'You have $pendingCount tasks today. Tap to see what\'s first.';
 
     await _plugin.show(
-      _idMorningBriefing,
-      'Good morning',
-      body,
-      const NotificationDetails(
+      id: _idMorningBriefing,
+      title: 'Good morning',
+      body: body,
+      notificationDetails: const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
@@ -121,10 +119,10 @@ class NotificationService {
     required DateTime startedAt,
   }) {
     return _plugin.show(
-      _idActiveTask,
-      'Working on $taskTitle',
-      'Tap to return when you are ready.',
-      NotificationDetails(
+      id: _idActiveTask,
+      title: 'Working on $taskTitle',
+      body: 'Tap to return when you are ready.',
+      notificationDetails: NotificationDetails(
         android: AndroidNotificationDetails(
           _activeTaskChannelId,
           _activeTaskChannelName,
@@ -148,7 +146,7 @@ class NotificationService {
     );
   }
 
-  Future<void> cancelActiveTaskTimer() => _plugin.cancel(_idActiveTask);
+  Future<void> cancelActiveTaskTimer() => _plugin.cancel(id: _idActiveTask);
 
   /// Returns false only when Android explicitly reports notifications disabled.
   /// Null means this platform cannot report the setting.
@@ -179,7 +177,7 @@ class NotificationService {
   }
 
   Future<void> cancelReminder(int id) async {
-    await _plugin.cancel(id);
+    await _plugin.cancel(id: id);
   }
 
   Future<void> cancelAll() async {

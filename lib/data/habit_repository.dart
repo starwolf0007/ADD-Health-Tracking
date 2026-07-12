@@ -16,5 +16,5 @@ abstract class HabitRepository {
 
   Future<void> save(Habit habit);
   Future<void> archive(String habitId); // soft-delete: sets isActive = false
-  Future<void> delete(String habitId);  // hard-delete with all check-ins
+  Future<void> delete(String habitId); // hard-delete with all check-ins
 }

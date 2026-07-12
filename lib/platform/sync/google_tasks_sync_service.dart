@@ -140,8 +140,7 @@ class GoogleTasksSyncService {
       _storage.write(key: _kGoogleTasksToken, value: token);
 
   /// Clear token on sign-out — deactivates sync.
-  static Future<void> clearToken() =>
-      _storage.delete(key: _kGoogleTasksToken);
+  static Future<void> clearToken() => _storage.delete(key: _kGoogleTasksToken);
 
   /// Whether the user has connected Google Tasks.
   static Future<bool> isConnected() async {

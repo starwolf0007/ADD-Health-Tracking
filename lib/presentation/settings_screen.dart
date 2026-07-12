@@ -51,8 +51,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     });
     // Hydrate the in-memory advisor tier so it matches persisted prefs,
     // even if the user never toggled the switch in this session.
-    ref.read(advisorTierProvider.notifier).set(
-        cloud ? AdvisorTier.cloud : AdvisorTier.lexi);
+    ref
+        .read(advisorTierProvider.notifier)
+        .set(cloud ? AdvisorTier.cloud : AdvisorTier.lexi);
   }
 
   Future<void> _saveName(String value) async {
@@ -82,8 +83,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     await ref.read(settingsServiceProvider).setCloudGeminiEnabled(value);
     // Immediately swap the live advisor so TodayController picks it up
     // without requiring an app restart.
-    ref.read(advisorTierProvider.notifier).set(
-        value ? AdvisorTier.cloud : AdvisorTier.lexi);
+    ref
+        .read(advisorTierProvider.notifier)
+        .set(value ? AdvisorTier.cloud : AdvisorTier.lexi);
   }
 
   Future<bool> _confirmCloudGemini() async {
@@ -106,8 +108,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Enable',
-                style: TextStyle(color: AppColors.accent)),
+            child:
+                const Text('Enable', style: TextStyle(color: AppColors.accent)),
           ),
         ],
       ),
@@ -152,14 +154,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const _SectionLabel('Integrations'),
                 const SizedBox(height: 8),
                 ListTile(
-                  leading: const Icon(Icons.cloud_sync_outlined, color: AppColors.accent),
-                  title: const Text('Connected Services', style: AppTextStyles.bodyMedium),
-                  subtitle: const Text('Google Tasks, Calendar, and more', style: AppTextStyles.bodySmall),
-                  trailing: const Icon(Icons.chevron_right, size: 20, color: AppColors.textMuted),
+                  leading: const Icon(Icons.cloud_sync_outlined,
+                      color: AppColors.accent),
+                  title: const Text('Connected Services',
+                      style: AppTextStyles.bodyMedium),
+                  subtitle: const Text('Google Tasks, Calendar, and more',
+                      style: AppTextStyles.bodySmall),
+                  trailing: const Icon(Icons.chevron_right,
+                      size: 20, color: AppColors.textMuted),
                   tileColor: AppColors.surface,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
                   onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ConnectedServicesScreen()),
+                    MaterialPageRoute(
+                        builder: (_) => const ConnectedServicesScreen()),
                   ),
                 ),
                 const SizedBox(height: 32),
@@ -230,7 +238,8 @@ class _NameField extends StatelessWidget {
       cursorColor: AppColors.accent,
       decoration: InputDecoration(
         hintText: 'Your first name (optional)',
-        hintStyle: AppTextStyles.bodyMedium.copyWith(color: AppColors.textMuted),
+        hintStyle:
+            AppTextStyles.bodyMedium.copyWith(color: AppColors.textMuted),
         enabledBorder: const UnderlineInputBorder(
           borderSide: BorderSide(color: AppColors.surfaceVariant),
         ),

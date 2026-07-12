@@ -11,7 +11,8 @@ class GoogleServiceManager {
   final GoogleAuthRepository _authRepo;
   final GoogleAccountRepository _accountRepo;
 
-  final _connectionController = StreamController<GoogleConnectionState>.broadcast();
+  final _connectionController =
+      StreamController<GoogleConnectionState>.broadcast();
   GoogleConnectionState _currentState = const GoogleConnectionState(
     status: GoogleConnectionStatus.disconnected,
   );
@@ -24,12 +25,14 @@ class GoogleServiceManager {
     _initStatus();
   }
 
-  Stream<GoogleConnectionState> get connectionState => _connectionController.stream;
+  Stream<GoogleConnectionState> get connectionState =>
+      _connectionController.stream;
   GoogleConnectionState get currentState => _currentState;
   Stream<GoogleAccount?> get accountChanges => _authRepo.onAccountChanged;
 
   Future<void> _initStatus() async {
-    _setState(const GoogleConnectionState(status: GoogleConnectionStatus.connecting));
+    _setState(
+        const GoogleConnectionState(status: GoogleConnectionStatus.connecting));
     final account = await _authRepo.currentAccount;
     _handleAccountChange(account);
   }
@@ -42,7 +45,8 @@ class GoogleServiceManager {
       ));
       _accountRepo.saveAccount(account);
     } else {
-      _setState(const GoogleConnectionState(status: GoogleConnectionStatus.disconnected));
+      _setState(const GoogleConnectionState(
+          status: GoogleConnectionStatus.disconnected));
       _accountRepo.clearAccount();
     }
   }
@@ -53,11 +57,13 @@ class GoogleServiceManager {
   }
 
   Future<GoogleAccount?> signIn() async {
-    _setState(const GoogleConnectionState(status: GoogleConnectionStatus.connecting));
+    _setState(
+        const GoogleConnectionState(status: GoogleConnectionStatus.connecting));
     try {
       final account = await _authRepo.signIn();
       if (account == null) {
-        _setState(const GoogleConnectionState(status: GoogleConnectionStatus.disconnected));
+        _setState(const GoogleConnectionState(
+            status: GoogleConnectionStatus.disconnected));
       }
       return account;
     } catch (e) {
@@ -71,11 +77,13 @@ class GoogleServiceManager {
   }
 
   Future<GoogleAccount?> restoreSession() async {
-    _setState(const GoogleConnectionState(status: GoogleConnectionStatus.connecting));
+    _setState(
+        const GoogleConnectionState(status: GoogleConnectionStatus.connecting));
     try {
       final account = await _authRepo.signInSilently();
       if (account == null) {
-        _setState(const GoogleConnectionState(status: GoogleConnectionStatus.disconnected));
+        _setState(const GoogleConnectionState(
+            status: GoogleConnectionStatus.disconnected));
       }
       return account;
     } catch (e) {
@@ -96,7 +104,8 @@ class GoogleServiceManager {
   }
 
   Future<void> refreshToken() async {
-    _setState(const GoogleConnectionState(status: GoogleConnectionStatus.connecting));
+    _setState(
+        const GoogleConnectionState(status: GoogleConnectionStatus.connecting));
     try {
       await _authRepo.refreshToken();
       _setState(GoogleConnectionState(

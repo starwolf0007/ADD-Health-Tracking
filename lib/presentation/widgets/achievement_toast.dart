@@ -15,7 +15,8 @@ class AchievementToastHost extends ConsumerStatefulWidget {
   const AchievementToastHost({super.key, required this.child});
 
   @override
-  ConsumerState<AchievementToastHost> createState() => _AchievementToastHostState();
+  ConsumerState<AchievementToastHost> createState() =>
+      _AchievementToastHostState();
 }
 
 class _AchievementToastHostState extends ConsumerState<AchievementToastHost> {
@@ -43,7 +44,8 @@ class _AchievementToastHostState extends ConsumerState<AchievementToastHost> {
                   children: _activeToasts
                       .map((kind) => _AchievementToast(
                             kind: kind,
-                            onDismiss: () => setState(() => _activeToasts.remove(kind)),
+                            onDismiss: () =>
+                                setState(() => _activeToasts.remove(kind)),
                           ))
                       .toList(),
                 ),
@@ -81,7 +83,8 @@ class _AchievementToast extends StatelessWidget {
 
     return Container(
       margin: const EdgeInsets.only(bottom: AppSpace.sm),
-      padding: const EdgeInsets.symmetric(horizontal: AppSpace.lg, vertical: AppSpace.md),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpace.lg, vertical: AppSpace.md),
       decoration: BoxDecoration(
         color: AppColors.surfaceRaised,
         borderRadius: BorderRadius.circular(AppSpace.radiusCard),
@@ -103,8 +106,11 @@ class _AchievementToast extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(title, style: AppTextStyles.label.copyWith(color: AppColors.gold)),
-              Text(subtitle, style: AppTextStyles.bodySmall.copyWith(color: AppColors.textPrimary)),
+              Text(title,
+                  style: AppTextStyles.label.copyWith(color: AppColors.gold)),
+              Text(subtitle,
+                  style: AppTextStyles.bodySmall
+                      .copyWith(color: AppColors.textPrimary)),
             ],
           ),
         ],

@@ -22,7 +22,8 @@ class ConnectedServicesScreen extends ConsumerWidget {
           icon: const Icon(Icons.arrow_back, color: AppColors.textSecondary),
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: const Text('Connected Services', style: AppTextStyles.titleMedium),
+        title:
+            const Text('Connected Services', style: AppTextStyles.titleMedium),
       ),
       body: accountAsync.when(
         data: (account) => ListView(
@@ -115,7 +116,8 @@ class _GoogleAccountTile extends ConsumerWidget {
                     ? NetworkImage(account!.photoUrl!)
                     : null,
                 child: account == null
-                    ? const Icon(Icons.person_outline, color: AppColors.textMuted)
+                    ? const Icon(Icons.person_outline,
+                        color: AppColors.textMuted)
                     : null,
               ),
               const SizedBox(width: AppSpace.md),
@@ -124,13 +126,17 @@ class _GoogleAccountTile extends ConsumerWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      account?.displayName ?? (account == null ? 'Not Connected' : 'Google Account'),
+                      account?.displayName ??
+                          (account == null
+                              ? 'Not Connected'
+                              : 'Google Account'),
                       style: AppTextStyles.titleMedium,
                     ),
                     if (account != null)
                       Text(
                         account!.email,
-                        style: AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted),
+                        style: AppTextStyles.bodySmall
+                            .copyWith(color: AppColors.textMuted),
                       ),
                   ],
                 ),
@@ -155,7 +161,8 @@ class _GoogleAccountTile extends ConsumerWidget {
                 Expanded(
                   child: TextButton(
                     onPressed: () => _confirmSignOut(context, manager),
-                    child: const Text('Sign Out', style: TextStyle(color: Colors.redAccent)),
+                    child: const Text('Sign Out',
+                        style: TextStyle(color: Colors.redAccent)),
                   ),
                 ),
               ],
@@ -171,15 +178,18 @@ class _GoogleAccountTile extends ConsumerWidget {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surfaceRaised,
         title: const Text('Disconnect Google?'),
-        content: const Text('This will stop all cloud synchronization. Your local data will remain safe.'),
+        content: const Text(
+            'This will stop all cloud synchronization. Your local data will remain safe.'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           TextButton(
             onPressed: () {
               manager.signOut();
               Navigator.pop(ctx);
             },
-            child: const Text('Disconnect', style: TextStyle(color: Colors.redAccent)),
+            child: const Text('Disconnect',
+                style: TextStyle(color: Colors.redAccent)),
           ),
         ],
       ),
@@ -222,10 +232,14 @@ class _ServiceTile extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.only(bottom: AppSpace.sm),
         child: ListTile(
-          leading: Icon(icon, color: isAvailable ? AppColors.accent : AppColors.textMuted),
+          leading: Icon(icon,
+              color: isAvailable ? AppColors.accent : AppColors.textMuted),
           title: Text(title, style: AppTextStyles.bodyMedium),
-          subtitle: Text(status, style: AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppSpace.radiusInput)),
+          subtitle: Text(status,
+              style:
+                  AppTextStyles.bodySmall.copyWith(color: AppColors.textMuted)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppSpace.radiusInput)),
           tileColor: AppColors.surface,
           trailing: const Switch(
             value: false,
