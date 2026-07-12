@@ -481,6 +481,53 @@ class _TimelineRow extends ConsumerWidget {
   final DateTime now;
   const _TimelineRow({required this.item, required this.now});
 
+  Future<void> _editTask(BuildContext context) async {
+    final task = item.task;
+    if (task == null) return;
+    await showTaskEditSheet(context, task);
+  }
+
+  Future<void> _deleteTask(BuildContext context, WidgetRef ref) async {
+    final task = item.task;
+    if (task == null) return;
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete task?'),
+        content: Text('Delete “${task.title}” from your timeline?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (shouldDelete != true) return;
+
+    try {
+      if (task.status == TaskStatus.inProgress) {
+        await ref.read(taskActionControllerProvider).pause(task.id);
+      }
+      await ref.read(taskRepositoryProvider).delete(task.id);
+      ref.invalidate(todayControllerProvider);
+      ref.invalidate(todayTimelineProvider);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Task deleted')),
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not delete task. Try again.')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final phase = item.phaseAt(now);
@@ -578,6 +625,22 @@ class _TimelineRow extends ConsumerWidget {
                               Text('Paused',
                                   style: AppTextStyles.label
                                       .copyWith(color: AppColors.warning)),
+                            if (item.task != null) ...[
+                              IconButton(
+                                key: ValueKey(
+                                    'timeline-task-edit-${item.task!.id}'),
+                                tooltip: 'Edit timeline item',
+                                icon: const Icon(Icons.edit_outlined),
+                                onPressed: () => _editTask(context),
+                              ),
+                              IconButton(
+                                key: ValueKey(
+                                    'timeline-task-delete-${item.task!.id}'),
+                                tooltip: 'Delete task',
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () => _deleteTask(context, ref),
+                              ),
+                            ],
                           ],
                         ),
                         const SizedBox(height: 2),

@@ -170,6 +170,41 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('timeline task edit control opens the time editor',
+      (tester) async {
+    final repository = _FakeTaskRepository(
+      _task().copyWith(dueDate: DateTime(2026, 7, 10, 14)),
+    );
+    await tester.pumpWidget(_interactiveApp(repository, now));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final edit = find.byKey(const ValueKey('timeline-task-edit-task'));
+    await tester.ensureVisible(edit);
+    await tester.tap(edit);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byKey(const ValueKey('task-editor-title')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-editor-time')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('task-editor-clear-time')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-editor-save')), findsOneWidget);
+  });
+
+  testWidgets('timeline task menu deletes after confirmation', (tester) async {
+    final repository = _FakeTaskRepository(_task());
+    await tester.pumpWidget(_interactiveApp(repository, now));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final delete = find.byKey(const ValueKey('timeline-task-delete-task'));
+    await tester.ensureVisible(delete);
+    await tester.tap(delete);
+    await tester.pump(const Duration(milliseconds: 500));
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(repository.deleted, isTrue);
+  });
 }
 
 Future<void> _openSaveDialog(WidgetTester tester) async {
@@ -321,6 +356,7 @@ TodayTimelineData _mixedData({required bool lexiAvailable}) {
 
 class _FakeTaskRepository implements TaskRepository {
   Task task;
+  bool deleted = false;
   _FakeTaskRepository(this.task);
 
   @override
@@ -381,8 +417,9 @@ class _FakeTaskRepository implements TaskRepository {
   Future<ReentryNote?> getReentryNote(String id) async => task.reentryNote;
 
   @override
-  Future<Task?> getById(String id) async => id == task.id ? task : null;
+  Future<Task?> getById(String id) async =>
+      id == task.id && !deleted ? task : null;
 
   @override
-  Future<void> delete(String id) async {}
+  Future<void> delete(String id) async => deleted = true;
 }
