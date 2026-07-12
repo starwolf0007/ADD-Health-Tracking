@@ -17,15 +17,12 @@
 
 import 'dart:convert';
 
-import 'package:flutter/services.dart';
-
 import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/intelligence/lexi_bridge.dart';
 import 'package:neuroflow/intelligence/lexi_config.dart';
 import 'package:neuroflow/executive/planner.dart';
 
 class LexiPlanAdvisor implements PlanAdvisor {
-  static const _channel = MethodChannel('neuroflow/lexi');
-
   /// Whether Gemini Nano is available on this device.
   /// Cached after first check.
   bool? _isAvailable;
@@ -75,12 +72,7 @@ class LexiPlanAdvisor implements PlanAdvisor {
 
   Future<bool> _checkAvailabilityNative() async {
     try {
-      final result =
-          await _channel.invokeMethod<bool>('checkGeminiNanoAvailable');
-      return result ?? false;
-    } on MissingPluginException {
-      // Platform channel not registered yet — SDK not integrated.
-      return false;
+      return LexiBridge.isAvailable();
     } catch (_) {
       return false;
     }
@@ -91,15 +83,12 @@ class LexiPlanAdvisor implements PlanAdvisor {
     required String userMessage,
   }) async {
     try {
-      final result = await _channel.invokeMethod<String>('generateResponse', {
-        'systemPrompt': systemPrompt,
-        'userMessage': userMessage,
-        'maxTokens': 80, // Lexi is brief — hard cap
-        'temperature': 0.7,
-      });
-      return result;
-    } on MissingPluginException {
-      return null;
+      return LexiBridge.generateResponse(
+        systemPrompt: systemPrompt,
+        userMessage: userMessage,
+        maxTokens: 80,
+        temperature: 0.7,
+      );
     } catch (_) {
       return null;
     }

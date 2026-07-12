@@ -42,6 +42,31 @@ class LexiBridge {
     }
   }
 
+  /// Generates one response through the native on-device bridge.
+  ///
+  /// The native runtime currently returns null while the real model is not
+  /// wired. Keeping the request shape here prevents UI code from depending on
+  /// an unofficial MethodChannel payload.
+  static Future<String?> generateResponse({
+    required String systemPrompt,
+    required String userMessage,
+    required int maxTokens,
+    required double temperature,
+  }) async {
+    try {
+      return await _channel.invokeMethod<String>('generateResponse', {
+        'systemPrompt': systemPrompt,
+        'userMessage': userMessage,
+        'maxTokens': maxTokens,
+        'temperature': temperature,
+      });
+    } on PlatformException catch (_) {
+      return null;
+    } on MissingPluginException catch (_) {
+      return null;
+    }
+  }
+
   // ── Phase 2 placeholders (not yet implemented in Kotlin) ──────────────────
   //
   // static Future<String?> refinePlan(Map<String, dynamic> context) async { ... }
