@@ -15,7 +15,7 @@ Stand up the multi-AI handoff system. Immediate priority: **rotate the Firebase 
 |---|---|---|
 | Stale-branch report workflow (PR #12, merged to main) | 9e575c8 | GitHub Actions run #1 succeeded (manual dispatch; correctly found 0 stale branches) |
 | Transition design docs + ADR-007 (PR #13, open draft) | f8a404f | Repo Hygiene CI passed on PR #13 |
-| Added TEAM_CHARTER.md + HANDOFF.md + HANDOFF_PROMPTS.md under docs/ | _(hash added in follow-up commit — see git log)_ | — |
+| Added TEAM_CHARTER.md + HANDOFF.md + HANDOFF_PROMPTS.md under docs/ | 4391b9c | — |
 
 > "Done" without a commit hash is not done. Per Charter: nothing is Verified unless the toolchain ran it.
 > **Note:** these files live in `docs/`, not the repo root — the Repo Hygiene CI check fails any new root-level `.md` file. The session-start prompt's "read TEAM_CHARTER.md, then HANDOFF.md" means `docs/TEAM_CHARTER.md` and `docs/HANDOFF.md`.
