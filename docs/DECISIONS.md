@@ -1,5 +1,17 @@
 # NeuroFlow — Architecture Decision Records
 
+## ADR-007: Transition-First Reframing
+
+**Date:** 2026-07-14
+**Status:** Accepted (design-only; implementation gated on Alpha 1 evidence)
+
+**Decision:**
+NeuroFlow's core mission is reframed from task management to guiding people through life's transitions — "optimize for transitions, not tasks" becomes a first-order product filter alongside the existing locked principles. Transitions are modeled by extending `Routine` (no parallel `TransitionTemplate` model). Full record and rationale: `2026-07-14-transition-first.md`; UX spec: `transitions.md`; field-level mapping: `routine-evolution.md`.
+
+**Enforcement:**
+- This is Phase 3 work. No implementation before Alpha 1 has real-world evidence, without exception.
+- Location and Bluetooth triggers are held pending an explicit privacy decision.
+
 ## ADR-006: Dependency Modernization Policy
 
 **Date:** 2026-07-08
