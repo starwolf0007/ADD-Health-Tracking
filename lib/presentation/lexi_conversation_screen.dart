@@ -195,7 +195,7 @@ class _LexiConversationScreenState
                 onConfirm: _confirming ? () {} : _confirmProposal,
                 onEdit: _editProposal,
                 onNotNow: _notNow,
-              ),
+                onConfirm: _confirming ? null : _confirmProposal,
             ],
             const Spacer(),
             const TextField(
