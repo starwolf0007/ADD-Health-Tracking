@@ -44,7 +44,7 @@ void main() {
     expect(restored?.nextAction, 'Write the first paragraph');
     expect(restored?.returnAt, returnAt);
     expect(restored?.updatedAt, updatedAt);
-    expect(database.schemaVersion, 3);
+    expect(database.schemaVersion, 4);
 
     await repository.clearReentryNote(task.id);
     expect(await repository.getReentryNote(task.id), isNull);
@@ -52,7 +52,7 @@ void main() {
     await directory.delete(recursive: true);
   });
 
-  test('version 2 task schema migrates re-entry columns', () async {
+  test('version 2 schema migrates re-entry columns and Hevy tables', () async {
     final directory =
         await Directory.systemTemp.createTemp('neuroflow-migration');
     final file = File('${directory.path}/v2.sqlite');
@@ -88,6 +88,19 @@ void main() {
           'reentry_return_at',
           'reentry_updated_at',
         ]));
+    final tables = await database
+        .customSelect("SELECT name FROM sqlite_master WHERE type = 'table'")
+        .get();
+    final tableNames = tables.map((row) => row.read<String>('name')).toSet();
+    expect(
+      tableNames,
+      containsAll([
+        'hevy_workouts',
+        'hevy_exercises',
+        'hevy_sets',
+        'hevy_sync_metadata',
+      ]),
+    );
 
     await database.close();
     await directory.delete(recursive: true);
