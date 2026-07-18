@@ -141,6 +141,70 @@ class SyncQueue extends Table {
 }
 
 // ---------------------------------------------------------------------------
+// Hevy cache (read-only import mirror — Hevy remains the source of truth)
+// ---------------------------------------------------------------------------
+
+@DataClassName('HevyWorkoutRow')
+class HevyWorkouts extends Table {
+  TextColumn get id => text()(); // stable Hevy workout ID = upsert key
+  TextColumn get title => text()();
+  TextColumn get description => text().nullable()();
+  DateTimeColumn get startTime => dateTime()();
+  DateTimeColumn get endTime => dateTime()();
+  DateTimeColumn get hevyUpdatedAt => dateTime().nullable()();
+  DateTimeColumn get hevyCreatedAt => dateTime().nullable()();
+  DateTimeColumn get importedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('HevyExerciseRow')
+class HevyExercises extends Table {
+  TextColumn get id => text()(); // '<workoutId>:<position>'
+  TextColumn get workoutId => text().references(HevyWorkouts, #id)();
+  IntColumn get position => integer()();
+  TextColumn get title => text()();
+  TextColumn get notes => text().nullable()();
+  TextColumn get exerciseTemplateId => text()();
+  TextColumn get supersetId => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('HevySetRow')
+class HevySets extends Table {
+  TextColumn get id => text()(); // '<exerciseId>:<position>'
+  TextColumn get exerciseId => text().references(HevyExercises, #id)();
+  IntColumn get position => integer()();
+  TextColumn get type => text()();
+  RealColumn get weightKg => real().nullable()();
+  IntColumn get reps => integer().nullable()();
+  IntColumn get distanceMeters => integer().nullable()();
+  IntColumn get durationSeconds => integer().nullable()();
+  RealColumn get rpe => real().nullable()();
+  BoolColumn get customMetric => boolean().nullable()();
+  TextColumn get rawJson => text()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('HevySyncMetadataRow')
+class HevySyncMetadata extends Table {
+  TextColumn get id => text()(); // single row keyed 'hevy'
+  DateTimeColumn get lastAttemptAt => dateTime().nullable()();
+  DateTimeColumn get lastSuccessAt => dateTime().nullable()();
+  TextColumn get lastError =>
+      text().nullable()(); // failure type only, never bodies
+  IntColumn get lastImportedCount => integer().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+// ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
 
@@ -153,6 +217,10 @@ class SyncQueue extends Table {
   Notes,
   MoodLogs,
   SyncQueue,
+  HevyWorkouts,
+  HevyExercises,
+  HevySets,
+  HevySyncMetadata,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());
@@ -160,7 +228,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -174,6 +242,12 @@ class AppDatabase extends _$AppDatabase {
             await m.addColumn(tasks, tasks.reentryNextAction);
             await m.addColumn(tasks, tasks.reentryReturnAt);
             await m.addColumn(tasks, tasks.reentryUpdatedAt);
+          }
+          if (from < 4) {
+            await m.createTable(hevyWorkouts);
+            await m.createTable(hevyExercises);
+            await m.createTable(hevySets);
+            await m.createTable(hevySyncMetadata);
           }
         },
       );
@@ -223,7 +297,8 @@ class AppDatabase extends _$AppDatabase {
   }
 
   Future<void> updateTaskStatus(String id, String status) async {
-    final rowsUpdated = await (update(tasks)..where((t) => t.id.equals(id))).write(
+    final rowsUpdated =
+        await (update(tasks)..where((t) => t.id.equals(id))).write(
       TasksCompanion(
         status: Value(status),
         completedAt:

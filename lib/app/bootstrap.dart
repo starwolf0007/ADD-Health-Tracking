@@ -25,7 +25,7 @@ class AppBootstrap {
     // 2. Data seeding (no-ops if already seeded)
     await _seedOnFirstLaunch(container);
     await _cleanupDuplicates(container);
-    
+
     // 3. State maintenance
     await resetRoutinesIfNewDay(container);
     await _hydrateAdvisorTier(container);
@@ -36,7 +36,9 @@ class AppBootstrap {
     ForegroundSyncObserver(container).start();
 
     // 5. Alarms
-    final briefingEnabled = await container.read(settingsServiceProvider).getMorningBriefingEnabled();
+    final briefingEnabled = await container
+        .read(settingsServiceProvider)
+        .getMorningBriefingEnabled();
     if (briefingEnabled) {
       await AlarmScheduler.scheduleMorning();
     }

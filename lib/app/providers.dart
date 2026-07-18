@@ -5,9 +5,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'package:neuroflow/app/database_providers.dart';
+
+export 'package:neuroflow/app/database_providers.dart';
 export 'package:neuroflow/app/hevy_providers.dart';
 
-import 'package:neuroflow/data/database.dart';
 import 'package:neuroflow/data/habit_repository.dart';
 import 'package:neuroflow/data/habit_repository_impl.dart';
 import 'package:neuroflow/data/routine_repository.dart';
@@ -44,12 +46,6 @@ import 'package:neuroflow/executive/timeline_logic.dart';
 // ---------------------------------------------------------------------------
 // Platform layer
 // ---------------------------------------------------------------------------
-
-final databaseProvider = Provider<AppDatabase>((ref) {
-  final db = AppDatabase();
-  ref.onDispose(db.close);
-  return db;
-});
 
 final settingsServiceProvider = Provider<SettingsService>((ref) {
   return SettingsService();

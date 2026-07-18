@@ -90,8 +90,10 @@ class HevyRepository implements HevyWorkoutSink, HevySyncMetadataSink {
             ..orderBy([(row) => OrderingTerm.desc(row.startTime)]))
           .get();
 
-  Stream<int> watchImportedWorkoutCount() =>
-      _database.select(_database.hevyWorkouts).watch().map((rows) => rows.length);
+  Stream<int> watchImportedWorkoutCount() => _database
+      .select(_database.hevyWorkouts)
+      .watch()
+      .map((rows) => rows.length);
 
   Stream<List<HevyWorkoutSummary>> watchRecentWorkouts({int limit = 10}) {
     final query = _database.customSelect(
