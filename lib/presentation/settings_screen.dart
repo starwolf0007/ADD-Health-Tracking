@@ -11,6 +11,7 @@
 //   • Destructive actions (clear data) live here but require a confirmation tap.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:neuroflow/platform/alarms/alarm_scheduler.dart';
@@ -28,6 +29,7 @@ class SettingsScreen extends ConsumerStatefulWidget {
 
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   final _nameController = TextEditingController();
+  final _nameFocusNode = FocusNode();
   bool _morningBriefing = true;
   bool _cloudGemini = false;
   bool _loading = true;
@@ -63,6 +65,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     ref.invalidate(displayNameProvider);
   }
 
+  Future<void> _commitNameAndDismiss() async {
+    _nameFocusNode.unfocus();
+    await SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+    await _saveName(_nameController.text);
+  }
+
   Future<void> _toggleMorningBriefing(bool value) async {
     setState(() => _morningBriefing = value);
     await ref.read(settingsServiceProvider).setMorningBriefingEnabled(value);
@@ -94,8 +102,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppColors.surface,
-        title: const Text('Enable Cloud Gemini?',
-            style: AppTextStyles.titleMedium),
+        title: const Text(
+          'Enable Cloud Gemini?',
+          style: AppTextStyles.titleMedium,
+        ),
         content: const Text(
           'Task titles and descriptions will be sent to Google for AI suggestions. '
           'No health data, energy logs, or personal notes are shared. '
@@ -109,8 +119,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child:
-                const Text('Enable', style: TextStyle(color: AppColors.accent)),
+            child: const Text(
+              'Enable',
+              style: TextStyle(color: AppColors.accent),
+            ),
           ),
         ],
       ),
@@ -121,6 +133,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _nameFocusNode.dispose();
     super.dispose();
   }
 
@@ -147,7 +160,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const SizedBox(height: 8),
                 _NameField(
                   controller: _nameController,
-                  onSubmitted: _saveName,
+                  focusNode: _nameFocusNode,
+                  onDone: _commitNameAndDismiss,
                 ),
                 const SizedBox(height: 32),
 
@@ -155,39 +169,61 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 const _SectionLabel('Integrations'),
                 const SizedBox(height: 8),
                 ListTile(
-                  leading: const Icon(Icons.cloud_sync_outlined,
-                      color: AppColors.accent),
-                  title: const Text('Connected Services',
-                      style: AppTextStyles.bodyMedium),
-                  subtitle: const Text('Google Tasks, Calendar, and more',
-                      style: AppTextStyles.bodySmall),
-                  trailing: const Icon(Icons.chevron_right,
-                      size: 20, color: AppColors.textMuted),
+                  leading: const Icon(
+                    Icons.cloud_sync_outlined,
+                    color: AppColors.accent,
+                  ),
+                  title: const Text(
+                    'Connected Services',
+                    style: AppTextStyles.bodyMedium,
+                  ),
+                  subtitle: const Text(
+                    'Google Tasks, Calendar, and more',
+                    style: AppTextStyles.bodySmall,
+                  ),
+                  trailing: const Icon(
+                    Icons.chevron_right,
+                    size: 20,
+                    color: AppColors.textMuted,
+                  ),
                   tileColor: AppColors.surface,
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
-                        builder: (_) => const ConnectedServicesScreen()),
+                      builder: (_) => const ConnectedServicesScreen(),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 8),
                 ListTile(
-                  leading: const Icon(Icons.fitness_center_outlined,
-                      color: AppColors.accent),
-                  title: const Text('Health Integrations',
-                      style: AppTextStyles.bodyMedium),
-                  subtitle: const Text('Hevy connection and imported workouts',
-                      style: AppTextStyles.bodySmall),
-                  trailing: const Icon(Icons.chevron_right,
-                      size: 20, color: AppColors.textMuted),
+                  leading: const Icon(
+                    Icons.fitness_center_outlined,
+                    color: AppColors.accent,
+                  ),
+                  title: const Text(
+                    'Health Integrations',
+                    style: AppTextStyles.bodyMedium,
+                  ),
+                  subtitle: const Text(
+                    'Hevy connection and imported workouts',
+                    style: AppTextStyles.bodySmall,
+                  ),
+                  trailing: const Icon(
+                    Icons.chevron_right,
+                    size: 20,
+                    color: AppColors.textMuted,
+                  ),
                   tileColor: AppColors.surface,
                   shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(
                       settings: const RouteSettings(
-                          name: HealthIntegrationsScreen.routeName),
+                        name: HealthIntegrationsScreen.routeName,
+                      ),
                       builder: (_) => const HealthIntegrationsScreen(),
                     ),
                   ),
@@ -245,23 +281,28 @@ class _SectionLabel extends StatelessWidget {
 
 class _NameField extends StatelessWidget {
   final TextEditingController controller;
-  final ValueChanged<String> onSubmitted;
+  final FocusNode focusNode;
+  final VoidCallback onDone;
 
   const _NameField({
     required this.controller,
-    required this.onSubmitted,
+    required this.focusNode,
+    required this.onDone,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextField(
+      key: const ValueKey('about-you-name-field'),
       controller: controller,
+      focusNode: focusNode,
       style: AppTextStyles.bodyMedium,
       cursorColor: AppColors.accent,
       decoration: InputDecoration(
         hintText: 'Your first name (optional)',
-        hintStyle:
-            AppTextStyles.bodyMedium.copyWith(color: AppColors.textMuted),
+        hintStyle: AppTextStyles.bodyMedium.copyWith(
+          color: AppColors.textMuted,
+        ),
         enabledBorder: const UnderlineInputBorder(
           borderSide: BorderSide(color: AppColors.surfaceVariant),
         ),
@@ -270,8 +311,8 @@ class _NameField extends StatelessWidget {
         ),
         contentPadding: const EdgeInsets.symmetric(vertical: 8),
       ),
-      onSubmitted: onSubmitted,
-      onEditingComplete: () => onSubmitted(controller.text),
+      onSubmitted: (_) => onDone(),
+      onTapOutside: (_) => onDone(),
       textInputAction: TextInputAction.done,
     );
   }
@@ -309,8 +350,9 @@ class _ToggleTile extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   subtitle,
-                  style: AppTextStyles.bodySmall
-                      .copyWith(color: AppColors.textMuted),
+                  style: AppTextStyles.bodySmall.copyWith(
+                    color: AppColors.textMuted,
+                  ),
                 ),
               ],
             ),

@@ -8,6 +8,7 @@ import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/domain/date_key.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/presentation/lexi_conversation_screen.dart';
+import 'package:neuroflow/presentation/hevy_workouts_screen.dart';
 import 'package:neuroflow/presentation/settings_screen.dart';
 import 'package:neuroflow/presentation/theme.dart';
 import 'package:neuroflow/presentation/today/lexi_avatar.dart';
@@ -39,8 +40,11 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final context = _currentKey.currentContext;
       if (context != null) {
-        Scrollable.ensureVisible(context,
-            alignment: .38, duration: const Duration(milliseconds: 350));
+        Scrollable.ensureVisible(
+          context,
+          alignment: .38,
+          duration: const Duration(milliseconds: 350),
+        );
       }
     });
   }
@@ -63,6 +67,19 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
         title: Text(name.isEmpty ? 'Today' : 'Hey, $name'),
         actions: [
           IconButton(
+            key: const ValueKey('open-hevy-workouts'),
+            tooltip: 'Workouts',
+            icon: const Icon(Icons.fitness_center_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                settings: const RouteSettings(
+                  name: HevyWorkoutsScreen.routeName,
+                ),
+                builder: (_) => const HevyWorkoutsScreen(),
+              ),
+            ),
+          ),
+          IconButton(
             tooltip: 'Settings',
             icon: const Icon(Icons.settings_outlined),
             onPressed: () => Navigator.of(context).push(
@@ -73,9 +90,8 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
       ),
       body: timeline.when(
         loading: () => const _LoadingState(),
-        error: (error, _) => _ErrorState(
-          onRetry: () => ref.invalidate(todayTimelineProvider),
-        ),
+        error: (error, _) =>
+            _ErrorState(onRetry: () => ref.invalidate(todayTimelineProvider)),
         data: (data) {
           _scrollNearNow();
           return _TodayTimelineBody(
@@ -258,9 +274,11 @@ class _DaySummaryCard extends StatelessWidget {
       label: 'Open Lexi conversation',
       child: InkWell(
         borderRadius: BorderRadius.circular(AppSpace.radiusCard),
-        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => const LexiConversationScreen(),
-        )),
+        onTap: () => Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => const LexiConversationScreen(),
+          ),
+        ),
         child: Container(
           padding: const EdgeInsets.all(AppSpace.lg),
           decoration: BoxDecoration(
@@ -268,9 +286,10 @@ class _DaySummaryCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppSpace.radiusCard),
             boxShadow: const [
               BoxShadow(
-                  color: Color(0x14000000),
-                  blurRadius: 18,
-                  offset: Offset(0, 8)),
+                color: Color(0x14000000),
+                blurRadius: 18,
+                offset: Offset(0, 8),
+              ),
             ],
           ),
           child: Row(
@@ -288,14 +307,18 @@ class _DaySummaryCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                        data.lexiAvailable
-                            ? 'A calm look ahead'
-                            : 'Your plan, on device',
-                        style: AppTextStyles.label
-                            .copyWith(color: AppColors.accent)),
+                      data.lexiAvailable
+                          ? 'A calm look ahead'
+                          : 'Your plan, on device',
+                      style: AppTextStyles.label.copyWith(
+                        color: AppColors.accent,
+                      ),
+                    ),
                     const SizedBox(height: AppSpace.sm),
-                    Text(const DaySummary().build(data),
-                        style: AppTextStyles.bodyMedium),
+                    Text(
+                      const DaySummary().build(data),
+                      style: AppTextStyles.bodyMedium,
+                    ),
                     const SizedBox(height: AppSpace.sm),
                     Text(
                       data.lexiAvailable
@@ -377,19 +400,23 @@ class _ActiveTaskCard extends ConsumerWidget {
                           if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
-                              content:
-                                  Text('Could not ${error.action}. Try again.'),
+                              content: Text(
+                                'Could not ${error.action}. Try again.',
+                              ),
                             ),
                           );
                         }
                       },
                 icon: Icon(
-                    isPaused ? Icons.play_arrow_rounded : Icons.flag_outlined),
-                label: Text(isPaused
-                    ? 'Resume'
-                    : isActive
-                        ? 'Running'
-                        : 'Start'),
+                  isPaused ? Icons.play_arrow_rounded : Icons.flag_outlined,
+                ),
+                label: Text(
+                  isPaused
+                      ? 'Resume'
+                      : isActive
+                          ? 'Running'
+                          : 'Start',
+                ),
               ),
               OutlinedButton(
                 onPressed: () => _saveForLater(context, ref),
@@ -441,9 +468,11 @@ class _ActiveTaskCard extends ConsumerWidget {
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.schedule_outlined),
                     title: const Text('Return time (Optional)'),
-                    subtitle: Text(returnAt == null
-                        ? 'No return time'
-                        : '${returnAt!.month}/${returnAt!.day}  ${_time(returnAt)}'),
+                    subtitle: Text(
+                      returnAt == null
+                          ? 'No return time'
+                          : '${returnAt!.month}/${returnAt!.day}  ${_time(returnAt)}',
+                    ),
                     onTap: () async {
                       final picked = await _pickReturnTime(context);
                       if (picked != null) {
@@ -488,9 +517,7 @@ class _ActiveTaskCard extends ConsumerWidget {
       } on TaskActionFailure catch (error) {
         if (!context.mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not ${error.action}. Try again.'),
-          ),
+          SnackBar(content: Text('Could not ${error.action}. Try again.')),
         );
       }
     } finally {
@@ -517,19 +544,21 @@ class _ActiveTaskCard extends ConsumerWidget {
   }
 
   Future<void> _showTimerPermissionHint(
-      BuildContext context, WidgetRef ref) async {
+    BuildContext context,
+    WidgetRef ref,
+  ) async {
     final notifications = ref.read(notificationServiceProvider);
     final enabled = await notifications.areNotificationsEnabled();
     if (enabled != false || !context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: const Text(
-            'Allow notifications to see the task timer outside the app.'),
+          'Allow notifications to see the task timer outside the app.',
+        ),
         action: SnackBarAction(
           label: 'Allow',
-          onPressed: () => unawaited(
-            notifications.requestNotificationPermission(),
-          ),
+          onPressed: () =>
+              unawaited(notifications.requestNotificationPermission()),
         ),
       ),
     );
@@ -563,15 +592,20 @@ class _ActiveTaskTimer extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.timer_outlined,
-                  size: 18, color: AppColors.accent),
+              const Icon(
+                Icons.timer_outlined,
+                size: 18,
+                color: AppColors.accent,
+              ),
               const SizedBox(width: AppSpace.xs),
-              Text(value,
-                  key: const ValueKey('active-task-timer'),
-                  style: AppTextStyles.label.copyWith(
-                    color: AppColors.accent,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  )),
+              Text(
+                value,
+                key: const ValueKey('active-task-timer'),
+                style: AppTextStyles.label.copyWith(
+                  color: AppColors.accent,
+                  fontFeatures: const [FontFeature.tabularFigures()],
+                ),
+              ),
             ],
           ),
         );
@@ -621,9 +655,9 @@ class _TimelineRow extends ConsumerWidget {
       ref.invalidate(todayControllerProvider);
       ref.invalidate(todayTimelineProvider);
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Task deleted')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Task deleted')));
     } catch (_) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -690,8 +724,10 @@ class _TimelineRow extends ConsumerWidget {
               children: [
                 SizedBox(
                   width: 54,
-                  child:
-                      Text(_time(item.start), style: AppTextStyles.monoSmall),
+                  child: Text(
+                    _time(item.start),
+                    style: AppTextStyles.monoSmall,
+                  ),
                 ),
                 Column(
                   children: [
@@ -703,9 +739,10 @@ class _TimelineRow extends ConsumerWidget {
                       completed: item.isCompleted,
                     ),
                     Container(
-                        width: 2,
-                        height: item.isCompleted ? 20 : 46,
-                        color: AppColors.divider),
+                      width: 2,
+                      height: item.isCompleted ? 20 : 46,
+                      color: AppColors.divider,
+                    ),
                   ],
                 ),
                 const SizedBox(width: AppSpace.md),
@@ -718,28 +755,35 @@ class _TimelineRow extends ConsumerWidget {
                         Row(
                           children: [
                             Expanded(
-                              child: Text(item.title,
-                                  style: item.isCompleted
-                                      ? AppTextStyles.bodySmall
-                                      : AppTextStyles.bodyMedium,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis),
+                              child: Text(
+                                item.title,
+                                style: item.isCompleted
+                                    ? AppTextStyles.bodySmall
+                                    : AppTextStyles.bodyMedium,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                             if (item.isPaused)
-                              Text('Paused',
-                                  style: AppTextStyles.label
-                                      .copyWith(color: AppColors.warning)),
+                              Text(
+                                'Paused',
+                                style: AppTextStyles.label.copyWith(
+                                  color: AppColors.warning,
+                                ),
+                              ),
                             if (item.task != null) ...[
                               IconButton(
                                 key: ValueKey(
-                                    'timeline-task-edit-${item.task!.id}'),
+                                  'timeline-task-edit-${item.task!.id}',
+                                ),
                                 tooltip: 'Edit timeline item',
                                 icon: const Icon(Icons.edit_outlined),
                                 onPressed: () => _editTask(context),
                               ),
                               IconButton(
                                 key: ValueKey(
-                                    'timeline-task-delete-${item.task!.id}'),
+                                  'timeline-task-delete-${item.task!.id}',
+                                ),
                                 tooltip: 'Delete task',
                                 icon: const Icon(Icons.delete_outline),
                                 onPressed: () => _deleteTask(context, ref),
@@ -757,8 +801,11 @@ class _TimelineRow extends ConsumerWidget {
                         ),
                         if (!item.isCompleted &&
                             item.subtitle?.isNotEmpty == true)
-                          Text(item.subtitle!,
-                              style: AppTextStyles.bodySmall, maxLines: 2),
+                          Text(
+                            item.subtitle!,
+                            style: AppTextStyles.bodySmall,
+                            maxLines: 2,
+                          ),
                       ],
                     ),
                   ),
@@ -824,16 +871,20 @@ class _CurrentTimeMarker extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-              width: 54,
-              child: Text(_time(now),
-                  style: AppTextStyles.monoSmall
-                      .copyWith(color: AppColors.accent))),
+            width: 54,
+            child: Text(
+              _time(now),
+              style: AppTextStyles.monoSmall.copyWith(color: AppColors.accent),
+            ),
+          ),
           const CircleAvatar(radius: 5, backgroundColor: AppColors.accent),
           const SizedBox(width: 6),
           const Expanded(child: Divider(color: AppColors.accent)),
           const SizedBox(width: 6),
-          Text('NOW',
-              style: AppTextStyles.label.copyWith(color: AppColors.accent)),
+          Text(
+            'NOW',
+            style: AppTextStyles.label.copyWith(color: AppColors.accent),
+          ),
         ],
       ),
     );
@@ -855,9 +906,11 @@ class _CalendarPermissionNotice extends StatelessWidget {
             Icon(Icons.event_busy_outlined, color: AppColors.textSecondary),
             SizedBox(width: AppSpace.sm),
             Expanded(
-                child: Text(
-                    'Calendar is not connected. Tasks and anchors are still shown.',
-                    style: AppTextStyles.bodySmall)),
+              child: Text(
+                'Calendar is not connected. Tasks and anchors are still shown.',
+                style: AppTextStyles.bodySmall,
+              ),
+            ),
           ],
         ),
       );
@@ -877,8 +930,10 @@ class _EmptyDayState extends StatelessWidget {
               SizedBox(height: AppSpace.lg),
               Text('Your day has room', style: AppTextStyles.titleMedium),
               SizedBox(height: AppSpace.sm),
-              Text('Add one next step, or leave the space open.',
-                  style: AppTextStyles.bodySmall),
+              Text(
+                'Add one next step, or leave the space open.',
+                style: AppTextStyles.bodySmall,
+              ),
             ],
           ),
         ),
@@ -906,13 +961,16 @@ class _ErrorState extends StatelessWidget {
             children: [
               const Icon(Icons.cloud_off_outlined, color: AppColors.warning),
               const SizedBox(height: AppSpace.md),
-              const Text('Today could not be loaded',
-                  style: AppTextStyles.titleMedium),
+              const Text(
+                'Today could not be loaded',
+                style: AppTextStyles.titleMedium,
+              ),
               const SizedBox(height: AppSpace.sm),
               const Text(
-                  'Your data is still on this device. Try again when you are ready.',
-                  style: AppTextStyles.bodySmall,
-                  textAlign: TextAlign.center),
+                'Your data is still on this device. Try again when you are ready.',
+                style: AppTextStyles.bodySmall,
+                textAlign: TextAlign.center,
+              ),
               const SizedBox(height: AppSpace.lg),
               OutlinedButton(
                   onPressed: onRetry, child: const Text('Try again')),

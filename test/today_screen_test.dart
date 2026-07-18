@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/data/hevy_repository.dart';
 import 'package:neuroflow/data/task_repository.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/domain/task.dart';
@@ -40,6 +41,18 @@ void main() {
         now));
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('Your day has room'), findsOneWidget);
+  });
+
+  testWidgets('opens imported workouts from the Today app bar', (tester) async {
+    await tester.pumpWidget(_app(_mixedData(lexiAvailable: false), now));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await tester.tap(find.byKey(const ValueKey('open-hevy-workouts')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Workouts'), findsOneWidget);
+    expect(find.text('IMPORTED FROM HEVY'), findsOneWidget);
+    expect(find.text('No imported workouts yet.'), findsOneWidget);
   });
 
   testWidgets('date navigation can browse away and return to today',
@@ -226,6 +239,9 @@ Widget _app(TodayTimelineData data, DateTime now) {
     overrides: [
       todayTimelineProvider.overrideWith((ref) async => data),
       displayNameProvider.overrideWith((ref) async => 'Bryan'),
+      recentHevyWorkoutsProvider.overrideWith(
+        (ref) => Stream.value(const <HevyWorkoutSummary>[]),
+      ),
     ],
     child: MaterialApp(
       theme: AppTheme.dark(),
