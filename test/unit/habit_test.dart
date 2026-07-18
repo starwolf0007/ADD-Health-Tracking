@@ -95,8 +95,8 @@ Habit _habit(List<HabitCheckIn> checkIns) {
 /// daysAgo = 0 means today, 1 = yesterday, etc.
 HabitCheckIn _checkIn(int daysAgo, {required bool completed}) {
   final now = DateTime.now();
-  final date = DateTime(now.year, now.month, now.day)
-      .subtract(Duration(days: daysAgo));
+  final date =
+      DateTime(now.year, now.month, now.day).subtract(Duration(days: daysAgo));
   return HabitCheckIn(
     id: 'ci-$daysAgo',
     habitId: 'test-habit',

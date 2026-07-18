@@ -22,45 +22,53 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: IndexedStack(
-        index: _index,
-        children: const [
-          TodayScreen(),
-          NotesScreen(),
-          RoutinesListScreen(),
-          ReflectScreen(),
-        ],
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) {
-          if (i == _index) return;
-          HapticFeedback.selectionClick();
-          setState(() => _index = i);
-        },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.wb_sunny_outlined),
-            selectedIcon: Icon(Icons.wb_sunny),
-            label: 'Today',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.sticky_note_2_outlined),
-            selectedIcon: Icon(Icons.sticky_note_2),
-            label: 'Notes',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.repeat_rounded),
-            selectedIcon: Icon(Icons.repeat_on_rounded),
-            label: 'Routines',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.spa_outlined),
-            selectedIcon: Icon(Icons.spa),
-            label: 'Reflect',
-          ),
-        ],
+    return PopScope(
+      canPop: _index == 0,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && _index != 0) {
+          setState(() => _index = 0);
+        }
+      },
+      child: Scaffold(
+        body: IndexedStack(
+          index: _index,
+          children: const [
+            TodayScreen(),
+            NotesScreen(),
+            RoutinesListScreen(),
+            ReflectScreen(),
+          ],
+        ),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (i) {
+            if (i == _index) return;
+            HapticFeedback.selectionClick();
+            setState(() => _index = i);
+          },
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.wb_sunny_outlined),
+              selectedIcon: Icon(Icons.wb_sunny),
+              label: 'Today',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.sticky_note_2_outlined),
+              selectedIcon: Icon(Icons.sticky_note_2),
+              label: 'Notes',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.repeat_rounded),
+              selectedIcon: Icon(Icons.repeat_on_rounded),
+              label: 'Routines',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.spa_outlined),
+              selectedIcon: Icon(Icons.spa),
+              label: 'Reflect',
+            ),
+          ],
+        ),
       ),
     );
   }

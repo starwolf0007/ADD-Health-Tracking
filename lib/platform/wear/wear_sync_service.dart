@@ -38,7 +38,8 @@ class WearSyncService {
         'quickWinCount': state.quickWins.length,
         // pendingCount derived on phone side from task repo; passed via state
         // TODO(wear/phase1): pass pendingCount through TodayState or fetch here
-        'pendingCount': state.quickWins.length + (state.primaryTask != null ? 1 : 0),
+        'pendingCount':
+            state.quickWins.length + (state.primaryTask != null ? 1 : 0),
         'pushedAt': DateTime.now().millisecondsSinceEpoch,
         'hasPrimaryTask': state.primaryTask != null,
       });

@@ -13,6 +13,7 @@
 // ADHD rationale: waking up to a fresh routine list every morning removes
 // the friction of manually resetting yesterday's completed steps.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -28,7 +29,8 @@ Future<void> resetRoutinesIfNewDay(ProviderContainer container) async {
     final today = _todayKey();
     final lastReset = await storage.read(key: _kLastResetKey);
 
-    if (lastReset == today) return; // already reset today
+    // Never reset backwards after a clock correction or timezone change.
+    if (lastReset != null && lastReset.compareTo(today) >= 0) return;
 
     // New day — reset all active routine steps.
     final repo = container.read(routineRepositoryProvider);
@@ -39,7 +41,9 @@ Future<void> resetRoutinesIfNewDay(ProviderContainer container) async {
 
     // Record today so we don't reset again until tomorrow.
     await storage.write(key: _kLastResetKey, value: today);
-  } catch (_) {
+  } catch (error, stackTrace) {
+    debugPrint('Could not reset routines for a new day: $error');
+    debugPrintStack(stackTrace: stackTrace);
     // Non-fatal — worst case the user sees yesterday's step state.
   }
 }

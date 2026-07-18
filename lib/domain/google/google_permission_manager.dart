@@ -9,6 +9,8 @@ abstract class GooglePermissionManager {
 
   /// Standard scopes required by specific services.
   static const tasksScopes = ['https://www.googleapis.com/auth/tasks'];
-  static const calendarScopes = ['https://www.googleapis.com/auth/calendar.readonly'];
+  static const calendarScopes = [
+    'https://www.googleapis.com/auth/calendar.readonly'
+  ];
   static const driveScopes = ['https://www.googleapis.com/auth/drive.file'];
 }

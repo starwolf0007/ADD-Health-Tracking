@@ -84,8 +84,7 @@ Future<void> _runSyncFlush() async {
 }
 
 class BackgroundScheduler {
-  static final BackgroundScheduler _instance =
-      BackgroundScheduler._internal();
+  static final BackgroundScheduler _instance = BackgroundScheduler._internal();
   factory BackgroundScheduler() => _instance;
   BackgroundScheduler._internal();
 

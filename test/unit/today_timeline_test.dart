@@ -105,4 +105,22 @@ void main() {
     expect(const DaySummary().build(data),
         'You have one anchor and 2 flexible blocks left.');
   });
+
+  test('summary omits item types with no remaining work', () {
+    final data = TodayTimelineData(
+      items: [
+        TimelineItem(
+          id: 'flex',
+          type: TimelineItemType.flexibleBlock,
+          title: 'Email',
+          start: DateTime(2026, 7, 10, 13),
+        ),
+      ],
+      recommendedTask: null,
+      hasCalendarPermission: false,
+      lexiAvailable: false,
+    );
+
+    expect(const DaySummary().build(data), 'You have one flexible block left.');
+  });
 }

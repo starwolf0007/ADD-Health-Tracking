@@ -89,8 +89,7 @@ class _HabitRow extends ConsumerWidget {
                   shape: BoxShape.circle,
                   color: checked ? AppColors.accent : Colors.transparent,
                   border: Border.all(
-                    color:
-                        checked ? AppColors.accent : AppColors.textMuted,
+                    color: checked ? AppColors.accent : AppColors.textMuted,
                     width: 1.5,
                   ),
                 ),
@@ -106,11 +105,9 @@ class _HabitRow extends ConsumerWidget {
               child: Text(
                 habit.name,
                 style: AppTextStyles.bodyMedium.copyWith(
-                  color: checked
-                      ? AppColors.textSecondary
-                      : AppColors.textPrimary,
-                  decoration:
-                      checked ? TextDecoration.lineThrough : null,
+                  color:
+                      checked ? AppColors.textSecondary : AppColors.textPrimary,
+                  decoration: checked ? TextDecoration.lineThrough : null,
                   decorationColor: AppColors.textSecondary,
                 ),
                 maxLines: 1,
@@ -119,8 +116,7 @@ class _HabitRow extends ConsumerWidget {
             ),
             const SizedBox(width: 8),
             // Streak
-            if (streak > 0)
-              _StreakBadge(streak: streak),
+            if (streak > 0) _StreakBadge(streak: streak),
           ],
         ),
       ),

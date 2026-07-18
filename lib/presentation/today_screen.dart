@@ -1,8 +1,11 @@
+import 'dart:async' show unawaited;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/domain/date_key.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/presentation/lexi_conversation_screen.dart';
 import 'package:neuroflow/presentation/settings_screen.dart';
@@ -46,13 +49,15 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
   Widget build(BuildContext context) {
     final timeline = ref.watch(todayTimelineProvider);
     final name = ref.watch(displayNameProvider).value ?? '';
-    ref.listen<String?>(taskActionErrorProvider, (previous, next) {
-      if (next == null) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(next)));
-      ref.read(taskActionErrorProvider.notifier).set(null);
-    });
+    final selectedDay = ref.watch(selectedDayProvider);
+    final currentDay = ref.watch(currentDayProvider);
+    final isViewingToday = isSameDay(selectedDay, currentDay);
+    final realNow = widget.now ?? DateTime.now();
+    final phaseNow = isViewingToday
+        ? realNow
+        : selectedDay.isBefore(currentDay)
+            ? DateTime(selectedDay.year, selectedDay.month, selectedDay.day + 1)
+            : selectedDay;
     return Scaffold(
       appBar: AppBar(
         title: Text(name.isEmpty ? 'Today' : 'Hey, $name'),
@@ -75,7 +80,9 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
           _scrollNearNow();
           return _TodayTimelineBody(
             data: data,
-            now: widget.now ?? DateTime.now(),
+            now: phaseNow,
+            viewedDay: selectedDay,
+            isViewingToday: isViewingToday,
             scrollController: _scrollController,
             currentKey: _currentKey,
           );
@@ -83,7 +90,10 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
       ),
       floatingActionButton: FloatingActionButton(
         tooltip: 'Add task',
-        onPressed: () => showCaptureSheet(context),
+        onPressed: () => showCaptureSheet(
+          context,
+          scheduledDay: isViewingToday ? null : selectedDay,
+        ),
         child: const Icon(Icons.add),
       ),
     );
@@ -93,12 +103,16 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
 class _TodayTimelineBody extends ConsumerWidget {
   final TodayTimelineData data;
   final DateTime now;
+  final DateTime viewedDay;
+  final bool isViewingToday;
   final ScrollController scrollController;
   final GlobalKey currentKey;
 
   const _TodayTimelineBody({
     required this.data,
     required this.now,
+    required this.viewedDay,
+    required this.isViewingToday,
     required this.scrollController,
     required this.currentKey,
   });
@@ -120,6 +134,11 @@ class _TodayTimelineBody extends ConsumerWidget {
           MediaQuery.of(context).viewPadding.bottom + 72,
         ),
         children: [
+          _DateNavigator(
+            selectedDay: viewedDay,
+            isViewingToday: isViewingToday,
+          ),
+          const SizedBox(height: AppSpace.md),
           _DaySummaryCard(data: data),
           if (!data.hasCalendarPermission) ...[
             const SizedBox(height: AppSpace.md),
@@ -130,7 +149,10 @@ class _TodayTimelineBody extends ConsumerWidget {
             _ActiveTaskCard(task: recommended),
           ],
           const SizedBox(height: AppSpace.xl),
-          const Text('Your day', style: AppTextStyles.titleMedium),
+          Text(
+            isViewingToday ? 'Your day' : 'Schedule for this day',
+            style: AppTextStyles.titleMedium,
+          ),
           const SizedBox(height: AppSpace.md),
           if (data.items.isEmpty)
             const _EmptyDayState()
@@ -146,6 +168,82 @@ class _TodayTimelineBody extends ConsumerWidget {
         ],
       ),
     );
+  }
+}
+
+class _DateNavigator extends ConsumerWidget {
+  final DateTime selectedDay;
+  final bool isViewingToday;
+
+  const _DateNavigator({
+    required this.selectedDay,
+    required this.isViewingToday,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final localizations = MaterialLocalizations.of(context);
+    final dateLabel = isViewingToday
+        ? 'Today · ${localizations.formatFullDate(selectedDay)}'
+        : '${_relativeLabel()} · ${localizations.formatFullDate(selectedDay)}';
+    final selected = ref.read(selectedDayProvider.notifier);
+    return Semantics(
+      label: 'Date navigation, $dateLabel',
+      child: Row(
+        children: [
+          IconButton(
+            key: const ValueKey('date-previous-day'),
+            tooltip: 'Previous day',
+            icon: const Icon(Icons.chevron_left_rounded),
+            onPressed: selected.previousDay,
+          ),
+          Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(AppSpace.radiusInput),
+              onTap: () async {
+                final day = await showDatePicker(
+                  context: context,
+                  initialDate: selectedDay,
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime(2035),
+                );
+                if (day != null) selected.select(day);
+              },
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+                child: Text(
+                  dateLabel,
+                  textAlign: TextAlign.center,
+                  style: AppTextStyles.bodyMedium,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            key: const ValueKey('date-next-day'),
+            tooltip: 'Next day',
+            icon: const Icon(Icons.chevron_right_rounded),
+            onPressed: selected.nextDay,
+          ),
+          if (!isViewingToday)
+            TextButton(
+              onPressed: selected.goToToday,
+              child: const Text('Back to Today'),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _relativeLabel() {
+    final now = dateOnly(DateTime.now());
+    if (isSameDay(selectedDay, now.subtract(const Duration(days: 1)))) {
+      return 'Yesterday';
+    }
+    if (isSameDay(selectedDay, now.add(const Duration(days: 1)))) {
+      return 'Tomorrow';
+    }
+    return 'Selected day';
   }
 }
 
@@ -250,6 +348,10 @@ class _ActiveTaskCard extends ConsumerWidget {
           ),
           const SizedBox(height: AppSpace.md),
           Text(task.title, style: AppTextStyles.titleMedium),
+          if (isActive && task.activeStartedAt != null) ...[
+            const SizedBox(height: AppSpace.sm),
+            _ActiveTaskTimer(startedAt: task.activeStartedAt!),
+          ],
           if (task.notes?.isNotEmpty ?? false) ...[
             const SizedBox(height: AppSpace.xs),
             Text(task.notes!, style: AppTextStyles.bodySmall),
@@ -260,14 +362,33 @@ class _ActiveTaskCard extends ConsumerWidget {
             runSpacing: AppSpace.sm,
             children: [
               FilledButton.icon(
-                onPressed: () =>
-                    isPaused ? actions.resume(task.id) : actions.start(task.id),
+                onPressed: isActive
+                    ? null
+                    : () async {
+                        try {
+                          if (isPaused) {
+                            await actions.resume(task.id);
+                          } else {
+                            await actions.start(task.id);
+                          }
+                          if (!context.mounted) return;
+                          unawaited(_showTimerPermissionHint(context, ref));
+                        } on TaskActionFailure catch (error) {
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content:
+                                  Text('Could not ${error.action}. Try again.'),
+                            ),
+                          );
+                        }
+                      },
                 icon: Icon(
                     isPaused ? Icons.play_arrow_rounded : Icons.flag_outlined),
                 label: Text(isPaused
                     ? 'Resume'
                     : isActive
-                        ? 'Continue'
+                        ? 'Running'
                         : 'Start'),
               ),
               OutlinedButton(
@@ -352,17 +473,26 @@ class _ActiveTaskCard extends ConsumerWidget {
       final nextAction = next.text.trim();
       final hasNote =
           lastStep.isNotEmpty || nextAction.isNotEmpty || returnAt != null;
-      await ref.read(taskActionControllerProvider).saveForLater(
-            task.id,
-            hasNote
-                ? ReentryNote(
-                    lastCompletedStep: lastStep.isEmpty ? null : lastStep,
-                    nextAction: nextAction.isEmpty ? null : nextAction,
-                    returnAt: returnAt,
-                    updatedAt: DateTime.now(),
-                  )
-                : null,
-          );
+      try {
+        await ref.read(taskActionControllerProvider).saveForLater(
+              task.id,
+              hasNote
+                  ? ReentryNote(
+                      lastCompletedStep: lastStep.isEmpty ? null : lastStep,
+                      nextAction: nextAction.isEmpty ? null : nextAction,
+                      returnAt: returnAt,
+                      updatedAt: DateTime.now(),
+                    )
+                  : null,
+            );
+      } on TaskActionFailure catch (error) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not ${error.action}. Try again.'),
+          ),
+        );
+      }
     } finally {
       last.dispose();
       next.dispose();
@@ -385,15 +515,125 @@ class _ActiveTaskCard extends ConsumerWidget {
     if (time == null) return null;
     return DateTime(date.year, date.month, date.day, time.hour, time.minute);
   }
+
+  Future<void> _showTimerPermissionHint(
+      BuildContext context, WidgetRef ref) async {
+    final notifications = ref.read(notificationServiceProvider);
+    final enabled = await notifications.areNotificationsEnabled();
+    if (enabled != false || !context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text(
+            'Allow notifications to see the task timer outside the app.'),
+        action: SnackBarAction(
+          label: 'Allow',
+          onPressed: () => unawaited(
+            notifications.requestNotificationPermission(),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
-class _TimelineRow extends StatelessWidget {
+class _ActiveTaskTimer extends StatelessWidget {
+  final DateTime startedAt;
+
+  const _ActiveTaskTimer({required this.startedAt});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<int>(
+      stream: Stream<int>.periodic(const Duration(seconds: 1), (tick) => tick),
+      builder: (context, _) {
+        final elapsed = DateTime.now().difference(startedAt);
+        final safeElapsed = elapsed.isNegative ? Duration.zero : elapsed;
+        final hours = safeElapsed.inHours;
+        final minutes = safeElapsed.inMinutes.remainder(60);
+        final seconds = safeElapsed.inSeconds.remainder(60);
+        final value = hours > 0
+            ? '${hours.toString().padLeft(2, '0')}:'
+                '${minutes.toString().padLeft(2, '0')}:'
+                '${seconds.toString().padLeft(2, '0')}'
+            : '${minutes.toString().padLeft(2, '0')}:'
+                '${seconds.toString().padLeft(2, '0')}';
+        return Semantics(
+          liveRegion: true,
+          label: 'Task running for $value',
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.timer_outlined,
+                  size: 18, color: AppColors.accent),
+              const SizedBox(width: AppSpace.xs),
+              Text(value,
+                  key: const ValueKey('active-task-timer'),
+                  style: AppTextStyles.label.copyWith(
+                    color: AppColors.accent,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  )),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _TimelineRow extends ConsumerWidget {
   final TimelineItem item;
   final DateTime now;
   const _TimelineRow({required this.item, required this.now});
 
+  Future<void> _editTask(BuildContext context) async {
+    final task = item.task;
+    if (task == null) return;
+    await showTaskEditSheet(context, task);
+  }
+
+  Future<void> _deleteTask(BuildContext context, WidgetRef ref) async {
+    final task = item.task;
+    if (task == null) return;
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete task?'),
+        content: Text('Delete “${task.title}” from your timeline?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (shouldDelete != true) return;
+
+    try {
+      if (task.status == TaskStatus.inProgress) {
+        await ref.read(taskActionControllerProvider).pause(task.id);
+      }
+      await ref.read(taskRepositoryProvider).delete(task.id);
+      ref.invalidate(todayControllerProvider);
+      ref.invalidate(todayTimelineProvider);
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Task deleted')),
+      );
+    } catch (_) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not delete task. Try again.')),
+      );
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final phase = item.phaseAt(now);
     final dimmed = phase == TimelinePhase.past;
     final icon = switch (item.type) {
@@ -415,74 +655,116 @@ class _TimelineRow extends StatelessWidget {
     final typeLabel = _timelineTypeLabel(item.type);
     return Semantics(
       container: true,
+      button: item.task != null && !item.isCompleted,
       label: '$typeLabel, ${item.title}, ${_phaseLabel(phase)}'
           '${item.isPaused ? ', paused' : ''}',
-      child: Opacity(
-        opacity: dimmed ? .55 : 1,
-        child: Padding(
-          padding: EdgeInsets.symmetric(vertical: item.isCompleted ? 4 : 7),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              SizedBox(
-                width: 54,
-                child: Text(_time(item.start), style: AppTextStyles.monoSmall),
-              ),
-              Column(
-                children: [
-                  Container(width: 2, height: 8, color: AppColors.divider),
-                  _TimelineMarker(
-                    type: item.type,
-                    icon: item.isCompleted ? Icons.check_rounded : icon,
-                    color: color,
-                    completed: item.isCompleted,
-                  ),
-                  Container(
-                      width: 2,
-                      height: item.isCompleted ? 20 : 46,
-                      color: AppColors.divider),
-                ],
-              ),
-              const SizedBox(width: AppSpace.md),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(top: 7),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(item.title,
-                                style: item.isCompleted
-                                    ? AppTextStyles.bodySmall
-                                    : AppTextStyles.bodyMedium,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis),
-                          ),
-                          if (item.isPaused)
-                            Text('Paused',
-                                style: AppTextStyles.label
-                                    .copyWith(color: AppColors.warning)),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        typeLabel.toUpperCase(),
-                        style: AppTextStyles.label.copyWith(
-                          color: AppColors.textSecondary,
-                          fontSize: 9,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppSpace.radiusInput),
+        onTap: item.task == null || item.isCompleted
+            ? null
+            : () async {
+                final task = item.task!;
+                if (task.status == TaskStatus.inProgress) return;
+                try {
+                  final actions = ref.read(taskActionControllerProvider);
+                  if (task.status == TaskStatus.paused) {
+                    await actions.resume(task.id);
+                  } else {
+                    await actions.start(task.id);
+                  }
+                } on TaskActionFailure catch (error) {
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Could not ${error.action}. Try again.'),
+                    ),
+                  );
+                }
+              },
+        child: Opacity(
+          opacity: dimmed ? .55 : 1,
+          child: Padding(
+            padding: EdgeInsets.symmetric(vertical: item.isCompleted ? 4 : 7),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                SizedBox(
+                  width: 54,
+                  child:
+                      Text(_time(item.start), style: AppTextStyles.monoSmall),
+                ),
+                Column(
+                  children: [
+                    Container(width: 2, height: 8, color: AppColors.divider),
+                    _TimelineMarker(
+                      type: item.type,
+                      icon: item.isCompleted ? Icons.check_rounded : icon,
+                      color: color,
+                      completed: item.isCompleted,
+                    ),
+                    Container(
+                        width: 2,
+                        height: item.isCompleted ? 20 : 46,
+                        color: AppColors.divider),
+                  ],
+                ),
+                const SizedBox(width: AppSpace.md),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 7),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(item.title,
+                                  style: item.isCompleted
+                                      ? AppTextStyles.bodySmall
+                                      : AppTextStyles.bodyMedium,
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis),
+                            ),
+                            if (item.isPaused)
+                              Text('Paused',
+                                  style: AppTextStyles.label
+                                      .copyWith(color: AppColors.warning)),
+                            if (item.task != null) ...[
+                              IconButton(
+                                key: ValueKey(
+                                    'timeline-task-edit-${item.task!.id}'),
+                                tooltip: 'Edit timeline item',
+                                icon: const Icon(Icons.edit_outlined),
+                                onPressed: () => _editTask(context),
+                              ),
+                              IconButton(
+                                key: ValueKey(
+                                    'timeline-task-delete-${item.task!.id}'),
+                                tooltip: 'Delete task',
+                                icon: const Icon(Icons.delete_outline),
+                                onPressed: () => _deleteTask(context, ref),
+                              ),
+                            ],
+                          ],
                         ),
-                      ),
-                      if (!item.isCompleted &&
-                          item.subtitle?.isNotEmpty == true)
-                        Text(item.subtitle!,
-                            style: AppTextStyles.bodySmall, maxLines: 2),
-                    ],
+                        const SizedBox(height: 2),
+                        Text(
+                          typeLabel.toUpperCase(),
+                          style: AppTextStyles.label.copyWith(
+                            color: AppColors.textSecondary,
+                            fontSize: 9,
+                          ),
+                        ),
+                        if (!item.isCompleted &&
+                            item.subtitle?.isNotEmpty == true)
+                          Text(item.subtitle!,
+                              style: AppTextStyles.bodySmall, maxLines: 2),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

@@ -44,7 +44,7 @@ void main() {
     expect(restored?.nextAction, 'Write the first paragraph');
     expect(restored?.returnAt, returnAt);
     expect(restored?.updatedAt, updatedAt);
-    expect(database.schemaVersion, 4);
+    expect(database.schemaVersion, 5);
 
     await repository.clearReentryNote(task.id);
     expect(await repository.getReentryNote(task.id), isNull);
@@ -73,7 +73,7 @@ void main() {
       )
     ''');
     raw.execute('PRAGMA user_version = 2');
-    raw.dispose();
+    raw.close();
 
     final database = AppDatabase.forTesting(NativeDatabase(file));
     final columns =
@@ -101,6 +101,50 @@ void main() {
         'hevy_sync_metadata',
       ]),
     );
+
+    await database.close();
+    await directory.delete(recursive: true);
+  });
+
+  test('version 4 schema backfills active timer for running tasks', () async {
+    final directory =
+        await Directory.systemTemp.createTemp('neuroflow-v4-migration');
+    final file = File('${directory.path}/v4.sqlite');
+    final raw = sqlite.sqlite3.open(file.path);
+    raw.execute('''
+      CREATE TABLE tasks (
+        id TEXT NOT NULL PRIMARY KEY,
+        title TEXT NOT NULL,
+        notes TEXT NULL,
+        energy TEXT NOT NULL,
+        status TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        due_date INTEGER NULL,
+        is_quick_win INTEGER NOT NULL DEFAULT 0,
+        estimated_minutes INTEGER NULL,
+        completed_at INTEGER NULL,
+        google_task_id TEXT NULL,
+        reentry_last_completed_step TEXT NULL,
+        reentry_next_action TEXT NULL,
+        reentry_return_at INTEGER NULL,
+        reentry_updated_at INTEGER NULL
+      )
+    ''');
+    raw.execute(
+      "INSERT INTO tasks (id, title, energy, status, created_at) "
+      "VALUES ('running', 'Focus', 'medium', 'inProgress', 0)",
+    );
+    raw.execute('PRAGMA user_version = 4');
+    raw.close();
+
+    final database = AppDatabase.forTesting(NativeDatabase(file));
+    final row = await database
+        .customSelect(
+          "SELECT active_started_at FROM tasks WHERE id = 'running'",
+        )
+        .getSingle();
+
+    expect(row.data['active_started_at'], isNotNull);
 
     await database.close();
     await directory.delete(recursive: true);

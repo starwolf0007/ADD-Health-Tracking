@@ -20,6 +20,7 @@ class Task {
   final DateTime createdAt;
   final DateTime? dueDate;
   final DateTime? completedAt;
+  final DateTime? activeStartedAt;
   final int? estimatedMinutes;
   final ReentryNote? reentryNote;
   final bool isQuickWin; // §QW — eligible for auto-mode Quick Wins list
@@ -33,6 +34,7 @@ class Task {
     required this.createdAt,
     this.dueDate,
     this.completedAt,
+    this.activeStartedAt,
     this.estimatedMinutes,
     this.reentryNote,
     this.isQuickWin = false,
@@ -44,6 +46,7 @@ class Task {
     EnergyLevel energy = EnergyLevel.medium,
     DateTime? dueDate,
     DateTime? completedAt,
+    DateTime? activeStartedAt,
     int? estimatedMinutes,
     ReentryNote? reentryNote,
     bool isQuickWin = false,
@@ -57,6 +60,7 @@ class Task {
       createdAt: DateTime.now(),
       dueDate: dueDate,
       completedAt: completedAt,
+      activeStartedAt: activeStartedAt,
       estimatedMinutes: estimatedMinutes,
       reentryNote: reentryNote,
       isQuickWin: isQuickWin,
@@ -70,6 +74,7 @@ class Task {
     TaskStatus? status,
     DateTime? dueDate,
     DateTime? completedAt,
+    DateTime? activeStartedAt,
     int? estimatedMinutes,
     ReentryNote? reentryNote,
     bool? isQuickWin,
@@ -83,6 +88,7 @@ class Task {
       createdAt: createdAt,
       dueDate: dueDate ?? this.dueDate,
       completedAt: completedAt ?? this.completedAt,
+      activeStartedAt: activeStartedAt ?? this.activeStartedAt,
       estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
       reentryNote: reentryNote ?? this.reentryNote,
       isQuickWin: isQuickWin ?? this.isQuickWin,

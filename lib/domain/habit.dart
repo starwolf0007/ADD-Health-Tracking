@@ -15,9 +15,9 @@ import 'package:uuid/uuid.dart';
 // ---------------------------------------------------------------------------
 
 enum HabitFrequency {
-  daily,      // every day
-  weekdays,   // Mon–Fri only
-  weekends,   // Sat–Sun only
+  daily, // every day
+  weekdays, // Mon–Fri only
+  weekends, // Sat–Sun only
 }
 
 // ---------------------------------------------------------------------------
@@ -169,9 +169,11 @@ class Habit {
       case HabitFrequency.daily:
         return true;
       case HabitFrequency.weekdays:
-        return date.weekday >= DateTime.monday && date.weekday <= DateTime.friday;
+        return date.weekday >= DateTime.monday &&
+            date.weekday <= DateTime.friday;
       case HabitFrequency.weekends:
-        return date.weekday == DateTime.saturday || date.weekday == DateTime.sunday;
+        return date.weekday == DateTime.saturday ||
+            date.weekday == DateTime.sunday;
     }
   }
 

@@ -55,7 +55,7 @@ class WearActionHandler {
 
   Future<void> _onComplete(String taskId) async {
     try {
-      await _container.read(taskRepositoryProvider).markComplete(taskId);
+      await _container.read(taskActionControllerProvider).complete(taskId);
       // TodayController watches the task stream and will rebuild automatically,
       // then WearSyncService.pushPrimaryTask() will push the updated state.
     } catch (_) {

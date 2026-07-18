@@ -150,8 +150,20 @@ class LexiBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
             return
         }
 
-        val prompt = call.argument<String>("prompt") ?: run {
-            result.error("INVALID_ARG", "prompt argument is required", null)
+        val prompt = call.argument<String>("prompt")
+            ?: buildString {
+                call.argument<String>("systemPrompt")?.let {
+                    append(it)
+                    append("\n\n")
+                }
+                call.argument<String>("userMessage")?.let { append(it) }
+            }.takeIf { it.isNotBlank() }
+            ?: run {
+            result.error(
+                "INVALID_ARG",
+                "prompt or systemPrompt/userMessage arguments are required",
+                null,
+            )
             return
         }
 

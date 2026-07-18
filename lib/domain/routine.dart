@@ -11,9 +11,9 @@ import 'package:uuid/uuid.dart';
 
 enum RoutineAnchor {
   morning, // ~6–9 AM
-  midday,  // ~11 AM–1 PM
+  midday, // ~11 AM–1 PM
   evening, // ~5–8 PM
-  custom,  // user-defined time
+  custom, // user-defined time
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +86,7 @@ class Routine {
   final int? scheduleHour;
   final int? scheduleMinute;
   final bool isActive;
+
   /// Which weekdays this routine fires — ISO weekday digits (Mon=1 … Sun=7)
   /// as a compact string, e.g. "12345" for weekdays. Null = every day.
   final String? activeDays;
@@ -163,5 +164,6 @@ class Routine {
 
   bool get isComplete => steps.isNotEmpty && steps.every((s) => s.isComplete);
   int get completedCount => steps.where((s) => s.isComplete).length;
-  double get progressFraction => steps.isEmpty ? 0.0 : completedCount / steps.length;
+  double get progressFraction =>
+      steps.isEmpty ? 0.0 : completedCount / steps.length;
 }

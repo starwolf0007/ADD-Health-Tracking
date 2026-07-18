@@ -22,7 +22,7 @@ class GoogleSyncEngineImpl implements SyncEngine {
 
     try {
       _emit(const SyncProgress(phase: SyncPhase.running));
-      
+
       final pending = await _queue.fetchPending(limit: 50);
       if (pending.isEmpty) {
         _emit(const SyncProgress(phase: SyncPhase.idle));
@@ -63,7 +63,8 @@ class GoogleSyncEngineImpl implements SyncEngine {
   }
 
   @override
-  Future<void> resolveConflict(String entityId, dynamic local, dynamic remote) async {
+  Future<void> resolveConflict(
+      String entityId, dynamic local, dynamic remote) async {
     // TODO: Implement default conflict resolution (e.g., local wins or most recent wins).
   }
 
@@ -73,7 +74,7 @@ class GoogleSyncEngineImpl implements SyncEngine {
   }
 
   void _emit(SyncProgress p) => _progressController.add(p);
-  
+
   void dispose() {
     _progressController.close();
   }

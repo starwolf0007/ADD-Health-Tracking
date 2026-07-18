@@ -34,6 +34,7 @@ class Tasks extends Table {
   BoolColumn get isQuickWin => boolean().withDefault(const Constant(false))();
   IntColumn get estimatedMinutes => integer().nullable()();
   DateTimeColumn get completedAt => dateTime().nullable()();
+  DateTimeColumn get activeStartedAt => dateTime().nullable()();
   TextColumn get googleTaskId => text().nullable()();
   TextColumn get reentryLastCompletedStep => text().nullable()();
   TextColumn get reentryNextAction => text().nullable()();
@@ -228,7 +229,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -249,13 +250,22 @@ class AppDatabase extends _$AppDatabase {
             await m.createTable(hevySets);
             await m.createTable(hevySyncMetadata);
           }
+          if (from < 5) {
+            await m.addColumn(tasks, tasks.activeStartedAt);
+            await (update(tasks)
+                  ..where((task) =>
+                      task.status.equals('inProgress') &
+                      task.activeStartedAt.isNull()))
+                .write(
+              TasksCompanion(activeStartedAt: Value(DateTime.now())),
+            );
+          }
         },
       );
 
-  DateTime get _startOfToday {
-    final now = DateTime.now();
-    return DateTime(now.year, now.month, now.day);
-  }
+  DateTime _startOfDay(DateTime day) => DateTime(day.year, day.month, day.day);
+
+  DateTime get _startOfToday => _startOfDay(DateTime.now());
 
   // ---- Tasks --------------------------------------------------------------
 
@@ -267,6 +277,7 @@ class AppDatabase extends _$AppDatabase {
         TasksCompanion(
           status: const Value('completed'),
           completedAt: Value(DateTime.now()),
+          activeStartedAt: const Value(null),
         ),
       );
 
@@ -281,14 +292,24 @@ class AppDatabase extends _$AppDatabase {
         .watch();
   }
 
-  Stream<List<TaskRow>> watchTodayTimeline() {
-    final tomorrow = _startOfToday.add(const Duration(days: 1));
+  Stream<List<TaskRow>> watchTimelineForDay(
+    DateTime day, {
+    required bool includeFlexibleTasks,
+  }) {
+    final start = _startOfDay(day);
+    final tomorrow = DateTime(start.year, start.month, start.day + 1);
+    final scheduledForDay = tasks.dueDate.isBiggerOrEqualValue(start) &
+        tasks.dueDate.isSmallerThanValue(tomorrow);
+    final completedOnDay = tasks.status.equals('completed') &
+        tasks.completedAt.isBiggerOrEqualValue(start) &
+        tasks.completedAt.isSmallerThanValue(tomorrow);
+    final flexibleForToday = includeFlexibleTasks
+        ? tasks.dueDate.isNull() & tasks.status.isNotIn(['completed'])
+        : const Constant(false);
     return (select(tasks)
           ..where((t) =>
               t.status.isNotIn(['skipped']) &
-              (t.status.isNotIn(['completed']) |
-                  (t.completedAt.isBiggerOrEqualValue(_startOfToday) &
-                      t.completedAt.isSmallerThanValue(tomorrow))))
+              (scheduledForDay | completedOnDay | flexibleForToday))
           ..orderBy([
             (t) => OrderingTerm.asc(t.dueDate),
             (t) => OrderingTerm.asc(t.createdAt),
@@ -303,6 +324,8 @@ class AppDatabase extends _$AppDatabase {
         status: Value(status),
         completedAt:
             status == 'completed' ? Value(DateTime.now()) : const Value(null),
+        activeStartedAt:
+            status == 'inProgress' ? Value(DateTime.now()) : const Value(null),
       ),
     );
 

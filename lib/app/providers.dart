@@ -2,6 +2,9 @@
 //
 // THE composition root — the only file allowed to know every layer at once.
 
+import 'dart:async' show Timer, unawaited;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
@@ -20,8 +23,10 @@ import 'package:neuroflow/domain/habit.dart';
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/domain/date_key.dart';
 import 'package:neuroflow/executive/planner.dart';
 import 'package:neuroflow/intelligence/lexi_plan_advisor.dart';
+import 'package:neuroflow/intelligence/lexi_response.dart';
 import 'package:neuroflow/domain/google/google_account.dart';
 import 'package:neuroflow/domain/google/google_auth_repository.dart';
 import 'package:neuroflow/domain/google/google_account_repository.dart';
@@ -37,6 +42,7 @@ import 'package:neuroflow/platform/google/google_service_manager.dart';
 import 'package:neuroflow/platform/google/google_api_factory.dart';
 import 'package:neuroflow/platform/sync/google_sync_engine_impl.dart';
 import 'package:neuroflow/platform/settings_service.dart';
+import 'package:neuroflow/platform/notifications/notification_service.dart';
 import 'package:neuroflow/platform/sync/google_tasks_sync_service.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository_impl.dart';
@@ -49,6 +55,11 @@ import 'package:neuroflow/executive/timeline_logic.dart';
 
 final settingsServiceProvider = Provider<SettingsService>((ref) {
   return SettingsService();
+});
+
+final notificationServiceProvider =
+    Provider<ActiveTaskNotificationService>((ref) {
+  return NotificationService();
 });
 
 // ---------------------------------------------------------------------------
@@ -250,8 +261,7 @@ class TodayController extends AsyncNotifier<TodayState> {
   }
 
   Future<void> complete(String taskId) async {
-    await ref.read(taskRepositoryProvider).markComplete(taskId);
-    ref.invalidateSelf();
+    await ref.read(taskActionControllerProvider).complete(taskId);
   }
 
   void snoozeForSession(String taskId) {
@@ -263,7 +273,73 @@ class TodayController extends AsyncNotifier<TodayState> {
 final todayControllerProvider =
     AsyncNotifierProvider<TodayController, TodayState>(TodayController.new);
 
+/// The device's real local calendar day. It changes at local midnight even
+/// when the process stays alive, and can be refreshed on app resume.
+class CurrentDayNotifier extends Notifier<DateTime> {
+  Timer? _midnightTimer;
+
+  @override
+  DateTime build() {
+    ref.onDispose(() => _midnightTimer?.cancel());
+    _scheduleNextMidnight();
+    return dateOnly(DateTime.now());
+  }
+
+  void refresh() {
+    final next = dateOnly(DateTime.now());
+    if (!isSameDay(state, next)) state = next;
+    _scheduleNextMidnight();
+  }
+
+  void _scheduleNextMidnight() {
+    _midnightTimer?.cancel();
+    final now = DateTime.now();
+    final nextMidnight = DateTime(now.year, now.month, now.day + 1);
+    _midnightTimer = Timer(
+      nextMidnight.difference(now) + const Duration(seconds: 1),
+      refresh,
+    );
+  }
+}
+
+final currentDayProvider = NotifierProvider<CurrentDayNotifier, DateTime>(
+  CurrentDayNotifier.new,
+);
+
+/// The day the user is browsing. It follows the real day until the user
+/// deliberately browses elsewhere; browsing never changes task state.
+class SelectedDayNotifier extends Notifier<DateTime> {
+  bool _followsToday = true;
+
+  @override
+  DateTime build() {
+    ref.listen<DateTime>(currentDayProvider, (previous, next) {
+      if (_followsToday) state = next;
+    });
+    return ref.read(currentDayProvider);
+  }
+
+  void select(DateTime day) {
+    _followsToday = false;
+    state = dateOnly(day);
+  }
+
+  void previousDay() =>
+      select(DateTime(state.year, state.month, state.day - 1));
+  void nextDay() => select(DateTime(state.year, state.month, state.day + 1));
+
+  void goToToday() {
+    _followsToday = true;
+    state = ref.read(currentDayProvider);
+  }
+}
+
+final selectedDayProvider = NotifierProvider<SelectedDayNotifier, DateTime>(
+  SelectedDayNotifier.new,
+);
+
 final completedTodayCountProvider = StreamProvider<int>((ref) {
+  ref.watch(currentDayProvider);
   return ref.watch(taskRepositoryProvider).watchCompletedTodayCount();
 });
 
@@ -279,18 +355,27 @@ final todayCalendarSourceProvider = Provider<TodayCalendarSource>(
   (ref) => const NoCalendarSource(),
 );
 
-final todayTimelineProvider = FutureProvider<TodayTimelineData>((ref) async {
-  final tasks =
-      await ref.watch(taskRepositoryProvider).watchTodayTimeline().first;
+final timelineForDayProvider =
+    FutureProvider.family<TodayTimelineData, DateTime>((ref, viewedDay) async {
+  final today = ref.watch(currentDayProvider);
+  final isViewingToday = isSameDay(viewedDay, today);
+  final tasks = await ref
+      .watch(taskRepositoryProvider)
+      .watchTimelineForDay(
+        viewedDay,
+        includeFlexibleTasks: isViewingToday,
+      )
+      .first;
   final routines =
       await ref.watch(routineRepositoryProvider).watchActive().first;
   final calendar = ref.watch(todayCalendarSourceProvider);
-  final now = DateTime.now();
-  final calendarItems = await calendar.load(now);
-  final recommended = ref.watch(todayControllerProvider).value?.primaryTask;
+  final calendarItems = await calendar.load(viewedDay);
+  final recommended = isViewingToday
+      ? ref.watch(todayControllerProvider).value?.primaryTask
+      : null;
   return TodayTimelineData(
     items: const TodayTimelineBuilder().build(
-      day: now,
+      day: viewedDay,
       tasks: tasks,
       routines: routines,
       calendarItems: calendarItems,
@@ -301,20 +386,19 @@ final todayTimelineProvider = FutureProvider<TodayTimelineData>((ref) async {
   );
 });
 
-/// Latest task-action failure, for the UI to surface (e.g. as a SnackBar).
-/// Null when there is nothing to show.
-class TaskActionErrorNotifier extends Notifier<String?> {
-  @override
-  String? build() => null;
+/// Backward-compatible Today entry point used by the screen and existing
+/// mutation flows. The selected day controls the actual query.
+final todayTimelineProvider = FutureProvider<TodayTimelineData>((ref) {
+  final selectedDay = ref.watch(selectedDayProvider);
+  return ref.watch(timelineForDayProvider(selectedDay).future);
+});
 
-  // ignore: use_setters_to_change_properties
-  void set(String? message) => state = message;
+class TaskActionFailure implements Exception {
+  final String action;
+  final Object cause;
+
+  const TaskActionFailure(this.action, this.cause);
 }
-
-final taskActionErrorProvider =
-    NotifierProvider<TaskActionErrorNotifier, String?>(
-  TaskActionErrorNotifier.new,
-);
 
 class TaskActionController {
   final Ref ref;
@@ -324,6 +408,17 @@ class TaskActionController {
   Future<void> resume(String id) => _set(id, TaskStatus.inProgress);
   Future<void> pause(String id) => _set(id, TaskStatus.paused);
 
+  Future<void> complete(String id) async {
+    try {
+      await ref.read(taskRepositoryProvider).markComplete(id);
+      unawaited(_cancelActiveTaskNotification());
+      ref.invalidate(todayControllerProvider);
+      ref.invalidate(todayTimelineProvider);
+    } catch (error) {
+      throw TaskActionFailure('complete this task', error);
+    }
+  }
+
   Future<void> saveForLater(String id, ReentryNote? note) async {
     try {
       if (note != null && !note.isEmpty) {
@@ -331,19 +426,23 @@ class TaskActionController {
       } else {
         await ref.read(taskRepositoryProvider).clearReentryNote(id);
       }
-      await _set(id, TaskStatus.paused);
       ref.invalidate(reentryNoteProvider(id));
-    } catch (_) {
-      ref
-          .read(taskActionErrorProvider.notifier)
-          .set('Could not save your note. Please try again.');
+    } catch (error) {
+      throw TaskActionFailure('save this task for later', error);
     }
+    // Keep the status update outside the note-write catch so an existing
+    // TaskActionFailure is not wrapped a second time.
+    await _set(id, TaskStatus.paused);
   }
 
   Future<void> clearReentry(String id) async {
-    await ref.read(taskRepositoryProvider).clearReentryNote(id);
-    ref.invalidate(reentryNoteProvider(id));
-    ref.invalidate(todayTimelineProvider);
+    try {
+      await ref.read(taskRepositoryProvider).clearReentryNote(id);
+      ref.invalidate(reentryNoteProvider(id));
+      ref.invalidate(todayTimelineProvider);
+    } catch (error) {
+      throw TaskActionFailure('clear the saved return point', error);
+    }
   }
 
   void notNow(String id) {
@@ -353,22 +452,121 @@ class TaskActionController {
 
   Future<void> _set(String id, TaskStatus status) async {
     try {
+      final task = await ref.read(taskRepositoryProvider).getById(id);
+      if (task == null) {
+        throw StateError('Task no longer exists');
+      }
       await ref.read(taskRepositoryProvider).updateStatus(id, status);
-      // TodayController currently takes the first Drift stream emission
-      // instead of holding a live subscription. Status affects Executive
-      // selection, so a targeted rebuild is required until that controller
-      // becomes stream-based.
+      unawaited(_updateActiveTaskNotification(task, status));
+      // TodayController currently takes the first Drift stream emission instead
+      // of holding a live subscription. Status affects Executive selection, so a
+      // targeted rebuild is required until that controller becomes stream-based.
       ref.invalidate(todayControllerProvider);
       ref.invalidate(todayTimelineProvider);
-    } catch (_) {
-      ref
-          .read(taskActionErrorProvider.notifier)
-          .set('Could not update this task. Please try again.');
+    } catch (error) {
+      throw TaskActionFailure('update this task', error);
+    }
+  }
+
+  Future<void> _updateActiveTaskNotification(
+      Task task, TaskStatus status) async {
+    try {
+      final notifications = ref.read(notificationServiceProvider);
+      if (status == TaskStatus.inProgress) {
+        await notifications.showActiveTaskTimer(
+          taskTitle: task.title,
+          startedAt: DateTime.now(),
+        );
+      } else {
+        await notifications.cancelActiveTaskTimer();
+      }
+    } catch (error, stackTrace) {
+      // Notification permission or OS notification failures must never
+      // prevent the deterministic task state from updating locally.
+      // Keep a dogfooding trace instead of silently discarding the failure.
+      debugPrint('Could not update active task notification: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  Future<void> _cancelActiveTaskNotification() async {
+    try {
+      await ref.read(notificationServiceProvider).cancelActiveTaskTimer();
+    } catch (error, stackTrace) {
+      debugPrint('Could not cancel active task notification: $error');
+      debugPrintStack(stackTrace: stackTrace);
     }
   }
 }
 
 final taskActionControllerProvider = Provider(TaskActionController.new);
+
+abstract interface class LexiProposalActionHandler {
+  Future<void> confirm(LexiProposal proposal);
+}
+
+/// The only bridge from a confirmed Lexi suggestion to deterministic app code.
+/// Unsupported proposal types remain staged drafts; they cannot mutate state.
+class LexiProposalController implements LexiProposalActionHandler {
+  final Ref ref;
+
+  const LexiProposalController(this.ref);
+
+  @override
+  Future<void> confirm(LexiProposal proposal) async {
+    final actions = ref.read(taskActionControllerProvider);
+    switch (proposal.type) {
+      case LexiProposalType.startTask:
+        await actions.start(_requiredPayloadString(proposal, 'taskId'));
+        return;
+      case LexiProposalType.pauseTask:
+        await actions.pause(_requiredPayloadString(proposal, 'taskId'));
+        return;
+      case LexiProposalType.createReentryNote:
+        final taskId = _requiredPayloadString(proposal, 'taskId');
+        final returnAt = _optionalDateTime(proposal.payload['returnAt']);
+        await actions.saveForLater(
+          taskId,
+          ReentryNote(
+            lastCompletedStep:
+                _optionalPayloadString(proposal.payload['lastCompletedStep']),
+            nextAction: _requiredPayloadString(proposal, 'nextAction'),
+            returnAt: returnAt,
+            updatedAt: DateTime.now(),
+          ),
+        );
+        return;
+      case LexiProposalType.createTaskDraft:
+      case LexiProposalType.createRoutineDraft:
+      case LexiProposalType.setReminderDraft:
+      case LexiProposalType.preparePhoneCall:
+      case LexiProposalType.reduceInputMode:
+        throw UnsupportedError(
+          '${proposal.type.wireName} is not available in this alpha.',
+        );
+    }
+  }
+
+  String _requiredPayloadString(LexiProposal proposal, String key) {
+    final value = proposal.payload[key];
+    if (value is String && value.trim().isNotEmpty) return value.trim();
+    throw ArgumentError.value(value, key, 'A non-empty value is required.');
+  }
+
+  String? _optionalPayloadString(Object? value) {
+    if (value is! String || value.trim().isEmpty) return null;
+    return value.trim();
+  }
+
+  DateTime? _optionalDateTime(Object? value) {
+    if (value is! String) return null;
+    return DateTime.tryParse(value);
+  }
+}
+
+final lexiProposalActionHandlerProvider = Provider<LexiProposalActionHandler>(
+  LexiProposalController.new,
+);
 
 final reentryNoteProvider = FutureProvider.family<ReentryNote?, String>(
   (ref, taskId) => ref.watch(taskRepositoryProvider).getReentryNote(taskId),

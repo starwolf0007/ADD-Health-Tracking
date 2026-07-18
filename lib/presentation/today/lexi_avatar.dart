@@ -36,6 +36,7 @@ class _LexiAvatarState extends State<LexiAvatar>
       duration: const Duration(seconds: 4),
       lowerBound: .97,
       upperBound: 1.03,
+      value: 1,
     );
     if (widget.subtleIdleAnimation) {
       _controller.repeat(reverse: true);

@@ -83,8 +83,7 @@ class Executive {
 
     // Auto Quick Wins: if all pending tasks are low-energy AND there are ≤3,
     // swap to Quick Wins mode automatically (spec v1.3 §QW auto-mode).
-    final allLowEnergy =
-        pending.every((t) => t.energy == _quickWinsMaxEnergy);
+    final allLowEnergy = pending.every((t) => t.energy == _quickWinsMaxEnergy);
     if (allLowEnergy && pending.length <= _quickWinsMaxCount) {
       return Plan(
         mode: DayMode.quickWins,

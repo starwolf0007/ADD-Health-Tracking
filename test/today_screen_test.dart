@@ -19,6 +19,7 @@ void main() {
 
     expect(find.text('Your plan, on device'), findsOneWidget);
     expect(find.textContaining('Lexi is offline'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Calendar sync'), 150);
     expect(find.text('Calendar sync'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Morning anchor'), 180);
     expect(find.text('Morning anchor'), findsOneWidget);
@@ -39,6 +40,22 @@ void main() {
         now));
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('Your day has room'), findsOneWidget);
+  });
+
+  testWidgets('date navigation can browse away and return to today',
+      (tester) async {
+    await tester.pumpWidget(_app(_mixedData(lexiAvailable: false), now));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final nextDay = find.byKey(const ValueKey('date-next-day'));
+    await tester.ensureVisible(nextDay);
+    await tester.tap(nextDay);
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Back to Today'), findsOneWidget);
+    await tester.tap(find.text('Back to Today'));
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.text('Back to Today'), findsNothing);
   });
 
   testWidgets('Pixel-sized screenshot layout supports large text',
@@ -123,6 +140,22 @@ void main() {
     expect(repository.task.reentryNote, isNull);
   });
 
+  testWidgets('starting a task shows a visible running timer', (tester) async {
+    final repository = _FakeTaskRepository(_task());
+    await tester.pumpWidget(_interactiveApp(repository, DateTime.now()));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final startButton = find.widgetWithText(FilledButton, 'Start');
+    await tester.ensureVisible(startButton);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(startButton);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(repository.task.status, TaskStatus.inProgress);
+    expect(find.byKey(const ValueKey('active-task-timer')), findsOneWidget);
+    expect(find.text('Running'), findsOneWidget);
+  });
+
   testWidgets('timeline item semantics announce type and phase',
       (tester) async {
     tester.view.physicalSize = const Size(1200, 2400);
@@ -153,6 +186,26 @@ void main() {
       find.bySemanticsLabel(RegExp('Open time, Open time, upcoming')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('timeline task edit control opens the time editor',
+      (tester) async {
+    final repository = _FakeTaskRepository(
+      _task().copyWith(dueDate: DateTime(2026, 7, 10, 14)),
+    );
+    await tester.pumpWidget(_interactiveApp(repository, now));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final edit = find.byKey(const ValueKey('timeline-task-edit-task'));
+    await tester.ensureVisible(edit);
+    await tester.tap(edit);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.byKey(const ValueKey('task-editor-title')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-editor-time')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('task-editor-clear-time')), findsOneWidget);
+    expect(find.byKey(const ValueKey('task-editor-save')), findsOneWidget);
   });
 }
 
@@ -305,13 +358,18 @@ TodayTimelineData _mixedData({required bool lexiAvailable}) {
 
 class _FakeTaskRepository implements TaskRepository {
   Task task;
+  bool deleted = false;
   _FakeTaskRepository(this.task);
 
   @override
   Stream<List<Task>> watchPending() => Stream.value([task]);
 
   @override
-  Stream<List<Task>> watchTodayTimeline() => Stream.value([task]);
+  Stream<List<Task>> watchTimelineForDay(
+    DateTime day, {
+    required bool includeFlexibleTasks,
+  }) =>
+      Stream.value([task]);
 
   @override
   Stream<int> watchCompletedTodayCount() => Stream.value(0);
@@ -324,8 +382,21 @@ class _FakeTaskRepository implements TaskRepository {
       task = task.copyWith(status: TaskStatus.completed);
 
   @override
-  Future<void> updateStatus(String id, TaskStatus status) async =>
-      task = task.copyWith(status: status);
+  Future<void> updateStatus(String id, TaskStatus status) async => task = Task(
+        id: task.id,
+        title: task.title,
+        notes: task.notes,
+        energy: task.energy,
+        status: status,
+        createdAt: task.createdAt,
+        dueDate: task.dueDate,
+        completedAt: task.completedAt,
+        activeStartedAt:
+            status == TaskStatus.inProgress ? DateTime.now() : null,
+        estimatedMinutes: task.estimatedMinutes,
+        reentryNote: task.reentryNote,
+        isQuickWin: task.isQuickWin,
+      );
 
   @override
   Future<void> saveReentryNote(String id, ReentryNote note) async {
@@ -352,8 +423,9 @@ class _FakeTaskRepository implements TaskRepository {
   Future<ReentryNote?> getReentryNote(String id) async => task.reentryNote;
 
   @override
-  Future<Task?> getById(String id) async => id == task.id ? task : null;
+  Future<Task?> getById(String id) async =>
+      id == task.id && !deleted ? task : null;
 
   @override
-  Future<void> delete(String id) async {}
+  Future<void> delete(String id) async => deleted = true;
 }

@@ -25,6 +25,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/platform/daily_reset.dart';
 
 class ForegroundSyncObserver extends WidgetsBindingObserver {
   final ProviderContainer _container;
@@ -59,6 +60,9 @@ class ForegroundSyncObserver extends WidgetsBindingObserver {
     // Use Future.microtask so we don't block the lifecycle callback.
     Future.microtask(() async {
       try {
+        _container.read(currentDayProvider.notifier).refresh();
+        await resetRoutinesIfNewDay(_container);
+        _container.invalidate(todayTimelineProvider);
         await _container.read(googleTasksSyncServiceProvider).flush();
       } catch (_) {
         // Silently swallow — background sync failures are never user-visible.

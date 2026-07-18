@@ -37,6 +37,7 @@ class DriftTaskRepository implements TaskRepository {
       createdAt: row.createdAt,
       dueDate: row.dueDate,
       completedAt: row.completedAt,
+      activeStartedAt: row.activeStartedAt,
       estimatedMinutes: row.estimatedMinutes,
       reentryNote: hasReentry
           ? ReentryNote(
@@ -60,6 +61,7 @@ class DriftTaskRepository implements TaskRepository {
       createdAt: Value(task.createdAt),
       dueDate: Value(task.dueDate),
       completedAt: Value(task.completedAt),
+      activeStartedAt: Value(task.activeStartedAt),
       estimatedMinutes: Value(task.estimatedMinutes),
       reentryLastCompletedStep: Value(task.reentryNote?.lastCompletedStep),
       reentryNextAction: Value(task.reentryNote?.nextAction),
@@ -81,8 +83,13 @@ class DriftTaskRepository implements TaskRepository {
   }
 
   @override
-  Stream<List<Task>> watchTodayTimeline() =>
-      _db.watchTodayTimeline().map((rows) => rows.map(_rowToTask).toList());
+  Stream<List<Task>> watchTimelineForDay(
+    DateTime day, {
+    required bool includeFlexibleTasks,
+  }) =>
+      _db
+          .watchTimelineForDay(day, includeFlexibleTasks: includeFlexibleTasks)
+          .map((rows) => rows.map(_rowToTask).toList());
 
   @override
   Stream<int> watchCompletedTodayCount() {
