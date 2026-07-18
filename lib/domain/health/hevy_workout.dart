@@ -115,11 +115,14 @@ class HevyWorkoutPage {
     required this.workouts,
   });
 
+  /// Pagination metadata is required: defaulting a malformed page to
+  /// `page == pageCount == 1` with no workouts would make it indistinguishable
+  /// from a valid empty first page and silently truncate imports.
   factory HevyWorkoutPage.fromJson(Map<String, dynamic> json) {
     return HevyWorkoutPage(
-      page: (json['page'] as num?)?.toInt() ?? 1,
-      pageCount: (json['page_count'] as num?)?.toInt() ?? 1,
-      workouts: _listOfMaps(json['workouts'])
+      page: _requiredInt(json, 'page'),
+      pageCount: _requiredInt(json, 'page_count'),
+      workouts: _requiredListOfMaps(json, 'workouts')
           .map(HevyWorkout.fromJson)
           .toList(growable: false),
     );
@@ -145,10 +148,27 @@ DateTime? _optionalDateTime(Object? value) {
   return DateTime.tryParse(value)?.toUtc();
 }
 
+int _requiredInt(Map<String, dynamic> json, String key) {
+  final value = json[key];
+  if (value is num) return value.toInt();
+  throw FormatException('Missing or invalid Hevy field: $key');
+}
+
 List<Map<String, dynamic>> _listOfMaps(Object? value) {
   if (value is! List) return const [];
   return value
       .whereType<Map>()
       .map((item) => Map<String, dynamic>.from(item))
       .toList(growable: false);
+}
+
+List<Map<String, dynamic>> _requiredListOfMaps(
+  Map<String, dynamic> json,
+  String key,
+) {
+  final value = json[key];
+  if (value is! List) {
+    throw FormatException('Missing or invalid Hevy field: $key');
+  }
+  return _listOfMaps(value);
 }

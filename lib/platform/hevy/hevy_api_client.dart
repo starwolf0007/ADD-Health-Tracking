@@ -112,10 +112,21 @@ class HevyApiClient {
       );
     }
 
-    final decoded = jsonDecode(response.body);
-    if (decoded is! Map) {
-      throw const HevyApiException(
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(response.body);
+    } on FormatException {
+      // Never include the body: it could echo request details or server
+      // internals into a user-facing message.
+      throw HevyApiException(
         'Hevy returned an unexpected response format.',
+        statusCode: response.statusCode,
+      );
+    }
+    if (decoded is! Map) {
+      throw HevyApiException(
+        'Hevy returned an unexpected response format.',
+        statusCode: response.statusCode,
       );
     }
 
