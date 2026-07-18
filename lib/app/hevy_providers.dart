@@ -1,8 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
+import 'package:neuroflow/app/database_providers.dart';
 import 'package:neuroflow/app/hevy_integration_controller.dart';
-import 'package:neuroflow/app/providers.dart' show databaseProvider;
 import 'package:neuroflow/data/database.dart';
 import 'package:neuroflow/data/hevy_repository.dart';
 import 'package:neuroflow/platform/hevy/hevy_api_client.dart';
@@ -60,11 +60,11 @@ final recentHevyWorkoutsProvider = StreamProvider<List<HevyWorkoutSummary>>((
 
 final hevyIntegrationControllerProvider =
     AsyncNotifierProvider<HevyIntegrationController, HevyIntegrationState>(
-      () => HevyIntegrationController(
-        hevyIntegrationGatewayProvider,
-        importedWorkoutCountProvider,
-      ),
-    );
+  () => HevyIntegrationController(
+    hevyIntegrationGatewayProvider,
+    importedWorkoutCountProvider,
+  ),
+);
 
 class _LiveHevyIntegrationGateway implements HevyIntegrationGateway {
   final HevyCredentialsStore credentials;
