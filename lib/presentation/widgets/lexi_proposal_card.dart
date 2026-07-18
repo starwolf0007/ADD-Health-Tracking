@@ -5,7 +5,7 @@ import 'package:neuroflow/presentation/theme.dart';
 
 class LexiProposalCard extends StatelessWidget {
   final LexiProposal proposal;
-  final VoidCallback onConfirm;
+  final VoidCallback? onConfirm;
   final VoidCallback onEdit;
   final VoidCallback onNotNow;
 

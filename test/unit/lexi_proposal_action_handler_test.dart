@@ -5,15 +5,21 @@ import 'package:neuroflow/data/task_repository.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/intelligence/lexi_response.dart';
+import 'package:neuroflow/platform/notifications/notification_service.dart';
 
 void main() {
   late _TaskRepository repository;
+  late _NotificationService notifications;
   late ProviderContainer container;
 
   setUp(() {
     repository = _TaskRepository(_task());
+    notifications = _NotificationService();
     container = ProviderContainer(
-      overrides: [taskRepositoryProvider.overrideWithValue(repository)],
+      overrides: [
+        taskRepositoryProvider.overrideWithValue(repository),
+        notificationServiceProvider.overrideWithValue(notifications),
+      ],
     );
   });
 
@@ -63,6 +69,34 @@ void main() {
 
     expect(repository.task.status, TaskStatus.pending);
   });
+
+  test('completion cancels the active task notification', () async {
+    await container.read(taskActionControllerProvider).complete('task-1');
+    await Future<void>.delayed(Duration.zero);
+
+    expect(repository.task.status, TaskStatus.completed);
+    expect(notifications.cancelled, isTrue);
+  });
+
+  test('save for later does not double-wrap a status update failure', () async {
+    repository.updateError = StateError('database unavailable');
+
+    TaskActionFailure? failure;
+    try {
+      await container.read(taskActionControllerProvider).saveForLater(
+            'task-1',
+            ReentryNote(
+              nextAction: 'Open the document.',
+              updatedAt: DateTime(2026, 7, 18),
+            ),
+          );
+    } on TaskActionFailure catch (error) {
+      failure = error;
+    }
+
+    expect(failure, isNotNull);
+    expect(failure!.cause, isA<StateError>());
+  });
 }
 
 Task _task() => Task(
@@ -76,12 +110,14 @@ class _TaskRepository implements TaskRepository {
   _TaskRepository(this.task);
 
   Task task;
+  Object? updateError;
 
   @override
   Future<Task?> getById(String id) async => id == task.id ? task : null;
 
   @override
   Future<void> updateStatus(String id, TaskStatus status) async {
+    if (updateError case final error?) throw error;
     task = task.copyWith(
       status: status,
       activeStartedAt: status == TaskStatus.inProgress ? DateTime.now() : null,
@@ -122,4 +158,23 @@ class _TaskRepository implements TaskRepository {
 
   @override
   Future<void> delete(String id) async {}
+}
+
+class _NotificationService implements ActiveTaskNotificationService {
+  bool cancelled = false;
+
+  @override
+  Future<bool?> areNotificationsEnabled() async => true;
+
+  @override
+  Future<void> cancelActiveTaskTimer() async => cancelled = true;
+
+  @override
+  Future<bool?> requestNotificationPermission() async => true;
+
+  @override
+  Future<void> showActiveTaskTimer({
+    required String taskTitle,
+    required DateTime startedAt,
+  }) async {}
 }

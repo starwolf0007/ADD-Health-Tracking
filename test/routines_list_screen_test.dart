@@ -60,6 +60,40 @@ void main() {
       'Brush teeth',
     ]);
   });
+
+  testWidgets('pending step remains visible when routine name is missing',
+      (tester) async {
+    tester.view.physicalSize = const Size(1344, 2992);
+    tester.view.devicePixelRatio = 3;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          routineRepositoryProvider.overrideWithValue(_FakeRoutineRepository())
+        ],
+        child: MaterialApp(
+          theme: AppTheme.dark(),
+          home: const RoutinesListScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.text('Add routine'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Add a step'),
+      'Take medicine',
+    );
+
+    await tester.tap(find.byKey(const ValueKey('routine-save-top')));
+    await tester.pump();
+
+    expect(find.text('Take medicine'), findsOneWidget);
+    expect(
+        find.text('Add a routine name and at least one step.'), findsOneWidget);
+  });
 }
 
 class _FakeRoutineRepository implements RoutineRepository {

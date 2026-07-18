@@ -38,4 +38,34 @@ void main() {
     expect(edited, isTrue);
     expect(deferred, isTrue);
   });
+
+  testWidgets('proposal card disables Confirm while action is unavailable',
+      (tester) async {
+    const proposal = LexiProposal(
+      type: LexiProposalType.startTask,
+      payload: {'taskId': 'task-1'},
+      confirmationPrompt: 'Start the timer?',
+    );
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: const Scaffold(
+          body: LexiProposalCard(
+            proposal: proposal,
+            onConfirm: null,
+            onEdit: _noop,
+            onNotNow: _noop,
+          ),
+        ),
+      ),
+    );
+
+    final button = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, 'Confirm'),
+    );
+    expect(button.onPressed, isNull);
+  });
 }
+
+void _noop() {}

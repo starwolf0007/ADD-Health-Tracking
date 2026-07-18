@@ -11,9 +11,8 @@ import 'package:neuroflow/presentation/lexi_conversation_screen.dart';
 import 'package:neuroflow/presentation/settings_screen.dart';
 import 'package:neuroflow/presentation/theme.dart';
 import 'package:neuroflow/presentation/today/lexi_avatar.dart';
-import 'package:neuroflow/executive/today_timeline.dart';
+import 'package:neuroflow/executive/timeline_logic.dart';
 import 'package:neuroflow/presentation/widgets/capture_sheet.dart';
-import 'package:neuroflow/platform/notifications/notification_service.dart';
 
 class TodayScreen extends ConsumerStatefulWidget {
   final DateTime? now;
@@ -373,7 +372,7 @@ class _ActiveTaskCard extends ConsumerWidget {
                             await actions.start(task.id);
                           }
                           if (!context.mounted) return;
-                          unawaited(_showTimerPermissionHint(context));
+                          unawaited(_showTimerPermissionHint(context, ref));
                         } on TaskActionFailure catch (error) {
                           if (!context.mounted) return;
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -517,8 +516,10 @@ class _ActiveTaskCard extends ConsumerWidget {
     return DateTime(date.year, date.month, date.day, time.hour, time.minute);
   }
 
-  Future<void> _showTimerPermissionHint(BuildContext context) async {
-    final enabled = await NotificationService().areNotificationsEnabled();
+  Future<void> _showTimerPermissionHint(
+      BuildContext context, WidgetRef ref) async {
+    final notifications = ref.read(notificationServiceProvider);
+    final enabled = await notifications.areNotificationsEnabled();
     if (enabled != false || !context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -527,7 +528,7 @@ class _ActiveTaskCard extends ConsumerWidget {
         action: SnackBarAction(
           label: 'Allow',
           onPressed: () => unawaited(
-            NotificationService().requestNotificationPermission(),
+            notifications.requestNotificationPermission(),
           ),
         ),
       ),

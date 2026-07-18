@@ -38,7 +38,24 @@ class _LexiAvatarState extends State<LexiAvatar>
       upperBound: 1.03,
       value: 1,
     );
-    if (widget.subtleIdleAnimation) _controller.repeat(reverse: true);
+    if (widget.subtleIdleAnimation) {
+      _controller.repeat(reverse: true);
+    } else {
+      _controller.value = 1.0;
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant LexiAvatar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.subtleIdleAnimation != oldWidget.subtleIdleAnimation) {
+      if (widget.subtleIdleAnimation) {
+        _controller.repeat(reverse: true);
+      } else {
+        _controller.stop();
+        _controller.value = 1.0;
+      }
+    }
   }
 
   @override

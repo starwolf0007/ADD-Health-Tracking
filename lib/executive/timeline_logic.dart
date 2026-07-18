@@ -1,3 +1,8 @@
+// lib/executive/timeline_logic.dart
+//
+// Today timeline construction and day-summary rules. Pure Dart — no Flutter,
+// no Drift, no Google — depends only on domain.
+
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/domain/task.dart';
 

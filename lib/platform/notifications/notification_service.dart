@@ -11,7 +11,20 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 
-class NotificationService {
+abstract interface class ActiveTaskNotificationService {
+  Future<void> showActiveTaskTimer({
+    required String taskTitle,
+    required DateTime startedAt,
+  });
+
+  Future<void> cancelActiveTaskTimer();
+
+  Future<bool?> areNotificationsEnabled();
+
+  Future<bool?> requestNotificationPermission();
+}
+
+class NotificationService implements ActiveTaskNotificationService {
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
   NotificationService._internal();
@@ -119,6 +132,7 @@ class NotificationService {
   /// Shows a quiet, ongoing notification with Android's native chronometer.
   /// Android updates the elapsed time itself; no Dart timer or foreground
   /// service is required while the app is alive.
+  @override
   Future<void> showActiveTaskTimer({
     required String taskTitle,
     required DateTime startedAt,
@@ -152,6 +166,7 @@ class NotificationService {
     );
   }
 
+  @override
   Future<void> cancelActiveTaskTimer() async {
     if (!_isInitialized) return;
     await _plugin.cancel(id: _idActiveTask);
@@ -159,6 +174,7 @@ class NotificationService {
 
   /// Returns false only when Android explicitly reports notifications disabled.
   /// Null means this platform cannot report the setting.
+  @override
   Future<bool?> areNotificationsEnabled() async {
     if (!_isInitialized) return null;
     try {
@@ -173,6 +189,7 @@ class NotificationService {
     }
   }
 
+  @override
   Future<bool?> requestNotificationPermission() async {
     if (!_isInitialized) return null;
     try {

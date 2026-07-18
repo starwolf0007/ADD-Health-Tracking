@@ -84,8 +84,10 @@ class _RoutineScheduleSheetState extends ConsumerState<_RoutineScheduleSheet> {
     if (_saving) return;
     final pendingStep = _stepController.text.trim();
     if (pendingStep.isNotEmpty) {
-      _steps.add(pendingStep);
-      _stepController.clear();
+      setState(() {
+        _steps.add(pendingStep);
+        _stepController.clear();
+      });
     }
     if (name.isEmpty || _steps.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(

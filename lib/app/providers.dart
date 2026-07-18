@@ -8,7 +8,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-import 'package:neuroflow/data/database.dart';
+import 'package:neuroflow/app/database_providers.dart';
+
+export 'package:neuroflow/app/database_providers.dart';
+export 'package:neuroflow/app/hevy_providers.dart';
+
 import 'package:neuroflow/data/habit_repository.dart';
 import 'package:neuroflow/data/habit_repository_impl.dart';
 import 'package:neuroflow/data/routine_repository.dart';
@@ -43,20 +47,19 @@ import 'package:neuroflow/platform/sync/google_tasks_sync_service.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository_impl.dart';
 import 'package:neuroflow/platform/wear/wear_sync_service.dart';
-import 'package:neuroflow/executive/today_timeline.dart';
+import 'package:neuroflow/executive/timeline_logic.dart';
 
 // ---------------------------------------------------------------------------
 // Platform layer
 // ---------------------------------------------------------------------------
 
-final databaseProvider = Provider<AppDatabase>((ref) {
-  final db = AppDatabase();
-  ref.onDispose(db.close);
-  return db;
-});
-
 final settingsServiceProvider = Provider<SettingsService>((ref) {
   return SettingsService();
+});
+
+final notificationServiceProvider =
+    Provider<ActiveTaskNotificationService>((ref) {
+  return NotificationService();
 });
 
 // ---------------------------------------------------------------------------
@@ -258,8 +261,7 @@ class TodayController extends AsyncNotifier<TodayState> {
   }
 
   Future<void> complete(String taskId) async {
-    await ref.read(taskRepositoryProvider).markComplete(taskId);
-    ref.invalidateSelf();
+    await ref.read(taskActionControllerProvider).complete(taskId);
   }
 
   void snoozeForSession(String taskId) {
@@ -322,8 +324,9 @@ class SelectedDayNotifier extends Notifier<DateTime> {
     state = dateOnly(day);
   }
 
-  void previousDay() => select(state.subtract(const Duration(days: 1)));
-  void nextDay() => select(state.add(const Duration(days: 1)));
+  void previousDay() =>
+      select(DateTime(state.year, state.month, state.day - 1));
+  void nextDay() => select(DateTime(state.year, state.month, state.day + 1));
 
   void goToToday() {
     _followsToday = true;
@@ -405,6 +408,17 @@ class TaskActionController {
   Future<void> resume(String id) => _set(id, TaskStatus.inProgress);
   Future<void> pause(String id) => _set(id, TaskStatus.paused);
 
+  Future<void> complete(String id) async {
+    try {
+      await ref.read(taskRepositoryProvider).markComplete(id);
+      unawaited(_cancelActiveTaskNotification());
+      ref.invalidate(todayControllerProvider);
+      ref.invalidate(todayTimelineProvider);
+    } catch (error) {
+      throw TaskActionFailure('complete this task', error);
+    }
+  }
+
   Future<void> saveForLater(String id, ReentryNote? note) async {
     try {
       if (note != null && !note.isEmpty) {
@@ -412,11 +426,13 @@ class TaskActionController {
       } else {
         await ref.read(taskRepositoryProvider).clearReentryNote(id);
       }
-      await _set(id, TaskStatus.paused);
       ref.invalidate(reentryNoteProvider(id));
     } catch (error) {
       throw TaskActionFailure('save this task for later', error);
     }
+    // Keep the status update outside the note-write catch so an existing
+    // TaskActionFailure is not wrapped a second time.
+    await _set(id, TaskStatus.paused);
   }
 
   Future<void> clearReentry(String id) async {
@@ -455,19 +471,29 @@ class TaskActionController {
   Future<void> _updateActiveTaskNotification(
       Task task, TaskStatus status) async {
     try {
+      final notifications = ref.read(notificationServiceProvider);
       if (status == TaskStatus.inProgress) {
-        await NotificationService().showActiveTaskTimer(
+        await notifications.showActiveTaskTimer(
           taskTitle: task.title,
           startedAt: DateTime.now(),
         );
       } else {
-        await NotificationService().cancelActiveTaskTimer();
+        await notifications.cancelActiveTaskTimer();
       }
     } catch (error, stackTrace) {
       // Notification permission or OS notification failures must never
       // prevent the deterministic task state from updating locally.
       // Keep a dogfooding trace instead of silently discarding the failure.
       debugPrint('Could not update active task notification: $error');
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+
+  Future<void> _cancelActiveTaskNotification() async {
+    try {
+      await ref.read(notificationServiceProvider).cancelActiveTaskTimer();
+    } catch (error, stackTrace) {
+      debugPrint('Could not cancel active task notification: $error');
       debugPrintStack(stackTrace: stackTrace);
     }
   }

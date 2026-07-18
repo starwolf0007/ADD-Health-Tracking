@@ -1,0 +1,149 @@
+name: Stale Branch Report
+
+# Runs automatically every Monday. Finds branches with no commits in 14+
+# days and reports them in one tracking issue (updated in place, not
+# re-created each run) plus a comment on any open PR for that branch.
+#
+# Exemptions:
+#   - `main` is always exempt.
+#   - A branch's PR can carry the `no-stale` label to opt out (for
+#     intentionally long-paused work you don't want nagged about).
+#
+# This exists because branch cleanup kept being something that had to be
+# manually noticed and requested — see docs/ for the history. The goal is
+# for staleness to surface on its own instead.
+
+on:
+  schedule:
+    - cron: '0 15 * * 1' # Monday, 15:00 UTC
+  workflow_dispatch: {} # manual "run now" button in the Actions tab, for testing
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  report-stale-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Find and report stale branches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const DAYS_THRESHOLD = 14;
+            const EXEMPT_BRANCHES = new Set(['main']);
+            const EXEMPT_PR_LABEL = 'no-stale';
+            const TRACKING_MARKER = '<!-- stale-branch-report -->';
+
+            const { owner, repo } = context.repo;
+            const now = Date.now();
+
+            const branches = await github.paginate(
+              github.rest.repos.listBranches,
+              { owner, repo, per_page: 100 }
+            );
+
+            const openPRs = await github.paginate(
+              github.rest.pulls.list,
+              { owner, repo, state: 'open', per_page: 100 }
+            );
+            const prByBranch = new Map(openPRs.map(pr => [pr.head.ref, pr]));
+
+            const stale = [];
+
+            for (const branch of branches) {
+              if (EXEMPT_BRANCHES.has(branch.name)) continue;
+
+              const pr = prByBranch.get(branch.name);
+              if (pr && pr.labels.some(l => l.name === EXEMPT_PR_LABEL)) continue;
+
+              const { data: commit } = await github.rest.repos.getCommit({
+                owner, repo, ref: branch.commit.sha,
+              });
+              const commitDate = new Date(commit.commit.committer.date);
+              const daysOld = Math.floor((now - commitDate.getTime()) / 86400000);
+
+              if (daysOld >= DAYS_THRESHOLD) {
+                stale.push({
+                  name: branch.name,
+                  daysOld,
+                  lastCommitDate: commitDate.toISOString().slice(0, 10),
+                  sha: branch.commit.sha.slice(0, 7),
+                  pr,
+                });
+              }
+            }
+
+            // --- Find or prepare the single tracking issue ---
+            const existingIssues = await github.paginate(
+              github.rest.issues.listForRepo,
+              { owner, repo, state: 'open', labels: 'stale-branches', per_page: 100 }
+            );
+            const trackingIssue = existingIssues.find(i => i.body?.includes(TRACKING_MARKER));
+
+            if (stale.length === 0) {
+              if (trackingIssue) {
+                await github.rest.issues.createComment({
+                  owner, repo, issue_number: trackingIssue.number,
+                  body: 'All branches are active again — closing this report.',
+                });
+                await github.rest.issues.update({
+                  owner, repo, issue_number: trackingIssue.number, state: 'closed',
+                });
+              }
+              console.log('No stale branches found.');
+              return;
+            }
+
+            const rows = stale
+              .sort((a, b) => b.daysOld - a.daysOld)
+              .map(b => `| \`${b.name}\` | ${b.daysOld} days | ${b.lastCommitDate} | ${b.pr ? `#${b.pr.number}` : '—'} |`)
+              .join('\n');
+
+            const body = [
+              TRACKING_MARKER,
+              '',
+              `**${stale.length} branch(es)** have had no commits in 14+ days as of ${new Date().toISOString().slice(0, 10)}.`,
+              '',
+              '| Branch | Inactive for | Last commit | Open PR |',
+              '|---|---|---|---|',
+              rows,
+              '',
+              'If any of these are done, merge or close them. If one should stay open longer, add the `no-stale` label to its PR to exempt it from future reports.',
+            ].join('\n');
+
+            let issueNumber;
+            if (trackingIssue) {
+              await github.rest.issues.update({
+                owner, repo, issue_number: trackingIssue.number, body,
+              });
+              issueNumber = trackingIssue.number;
+            } else {
+              const created = await github.rest.issues.create({
+                owner, repo,
+                title: '🧹 Stale branch report',
+                body,
+                labels: ['stale-branches'],
+              });
+              issueNumber = created.data.number;
+            }
+
+            // --- Comment directly on any open PR, once per staleness period ---
+            for (const b of stale) {
+              if (!b.pr) continue;
+              const comments = await github.paginate(
+                github.rest.issues.listComments,
+                { owner, repo, issue_number: b.pr.number, per_page: 100 }
+              );
+              const alreadyNotified = comments.some(c =>
+                c.body?.includes(TRACKING_MARKER) &&
+                new Date(c.created_at) > new Date(b.lastCommitDate)
+              );
+              if (alreadyNotified) continue;
+
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: b.pr.number,
+                body: `${TRACKING_MARKER}\nThis branch has had no commits in ${b.daysOld} days. Merge, close, or add the \`no-stale\` label if it should stay open. Full report: #${issueNumber}`,
+              });
+            }
