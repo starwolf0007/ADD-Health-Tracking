@@ -16,6 +16,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:neuroflow/platform/alarms/alarm_scheduler.dart';
 import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/presentation/connected_services_screen.dart';
+import 'package:neuroflow/presentation/health_integrations_screen.dart';
 import 'package:neuroflow/presentation/theme.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -160,6 +161,27 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   onTap: () => Navigator.of(context).push(
                     MaterialPageRoute(builder: (_) => const ConnectedServicesScreen()),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                ListTile(
+                  leading: const Icon(Icons.fitness_center_outlined,
+                      color: AppColors.accent),
+                  title: const Text('Health Integrations',
+                      style: AppTextStyles.bodyMedium),
+                  subtitle: const Text('Hevy connection and imported workouts',
+                      style: AppTextStyles.bodySmall),
+                  trailing: const Icon(Icons.chevron_right,
+                      size: 20, color: AppColors.textMuted),
+                  tileColor: AppColors.surface,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute(
+                      settings: const RouteSettings(
+                          name: HealthIntegrationsScreen.routeName),
+                      builder: (_) => const HealthIntegrationsScreen(),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 32),
