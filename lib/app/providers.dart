@@ -4,6 +4,7 @@
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
 
 import 'package:neuroflow/data/database.dart';
 import 'package:neuroflow/data/habit_repository.dart';
@@ -33,6 +34,8 @@ import 'package:neuroflow/platform/google/google_service_manager.dart';
 import 'package:neuroflow/platform/google/google_api_factory.dart';
 import 'package:neuroflow/platform/sync/google_sync_engine_impl.dart';
 import 'package:neuroflow/platform/settings_service.dart';
+import 'package:neuroflow/platform/hevy/hevy_api_client.dart';
+import 'package:neuroflow/platform/hevy/hevy_credentials_store.dart';
 import 'package:neuroflow/platform/sync/google_tasks_sync_service.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
 import 'package:neuroflow/platform/sync/sync_queue_repository_impl.dart';
@@ -51,6 +54,19 @@ final databaseProvider = Provider<AppDatabase>((ref) {
 
 final settingsServiceProvider = Provider<SettingsService>((ref) {
   return SettingsService();
+});
+
+final hevyCredentialsStoreProvider = Provider<HevyCredentialsStore>((ref) {
+  return const HevyCredentialsStore(FlutterSecureStorage());
+});
+
+final hevyApiClientProvider = Provider<HevyApiClient>((ref) {
+  final client = HevyApiClient(
+    httpClient: http.Client(),
+    credentials: ref.watch(hevyCredentialsStoreProvider),
+  );
+  ref.onDispose(client.close);
+  return client;
 });
 
 // ---------------------------------------------------------------------------
