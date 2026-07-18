@@ -1,19 +1,8 @@
-import 'package:neuroflow/domain/health/hevy_workout.dart';
+import 'package:neuroflow/domain/health/hevy_sync.dart';
 import 'package:neuroflow/platform/hevy/hevy_api_client.dart';
 
-/// Destination boundary for imported workouts.
-///
-/// A Drift implementation can be added without making the API client depend on
-/// local persistence. Upserts must be idempotent using Hevy's workout ID.
-abstract interface class HevyWorkoutSink {
-  Future<void> upsertWorkouts(List<HevyWorkout> workouts);
-}
-
-abstract interface class HevySyncMetadataSink {
-  Future<void> recordSyncStarted(DateTime at);
-  Future<void> recordSyncSucceeded(DateTime at, int imported);
-  Future<void> recordSyncFailed(DateTime at, Object error);
-}
+export 'package:neuroflow/domain/health/hevy_sync.dart'
+    show HevyWorkoutSink, HevySyncMetadataSink;
 
 class HevySyncResult {
   final int imported;

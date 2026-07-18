@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 import 'package:neuroflow/data/database.dart';
+import 'package:neuroflow/domain/health/hevy_sync.dart';
 import 'package:neuroflow/domain/health/hevy_workout.dart';
-import 'package:neuroflow/platform/hevy/hevy_sync_service.dart';
 
 /// Local, read-only cache of workouts imported from Hevy.
 ///
