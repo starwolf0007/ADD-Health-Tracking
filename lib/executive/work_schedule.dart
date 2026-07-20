@@ -3,15 +3,31 @@
 // Deterministic permanent-work schedule resolution. Pure Dart: no Flutter,
 // Drift, Google, or intelligence dependency.
 
-import 'package:neuroflow/executive/timeline_logic.dart';
-
 enum WorkdayOverride { work, skip }
+
+enum ResolvedWorkBlockKind { commuteToWork, work, commuteHome }
 
 class WorkHoliday {
   final DateTime date;
   final String name;
 
   const WorkHoliday(this.date, this.name);
+}
+
+class ResolvedWorkBlock {
+  final String id;
+  final ResolvedWorkBlockKind kind;
+  final String title;
+  final DateTime start;
+  final DateTime end;
+
+  const ResolvedWorkBlock({
+    required this.id,
+    required this.kind,
+    required this.title,
+    required this.start,
+    required this.end,
+  });
 }
 
 class PermanentWorkSchedule {
@@ -47,9 +63,9 @@ class PermanentWorkSchedule {
     this.overrides = const {},
   });
 
-  List<TimelineItem> resolve(DateTime day) {
+  List<ResolvedWorkBlock> resolve(DateTime day) {
     final date = DateTime(day.year, day.month, day.day);
-    final override = overrides[_dateOnly(date)];
+    final override = _overrideFor(date);
 
     if (override == WorkdayOverride.skip) return const [];
     if (override != WorkdayOverride.work) {
@@ -72,39 +88,43 @@ class PermanentWorkSchedule {
       endMinute,
     );
 
-    final items = <TimelineItem>[];
+    final blocks = <ResolvedWorkBlock>[];
     if (commuteBeforeMinutes > 0) {
-      items.add(TimelineItem(
+      blocks.add(ResolvedWorkBlock(
         id: '$id-commute-in-${_key(date)}',
-        type: TimelineItemType.calendarEvent,
+        kind: ResolvedWorkBlockKind.commuteToWork,
         title: 'Commute to work',
-        subtitle: 'Fixed block',
         start: workStart.subtract(Duration(minutes: commuteBeforeMinutes)),
         end: workStart,
       ));
     }
 
-    items.add(TimelineItem(
+    blocks.add(ResolvedWorkBlock(
       id: '$id-work-${_key(date)}',
-      type: TimelineItemType.calendarEvent,
+      kind: ResolvedWorkBlockKind.work,
       title: title,
-      subtitle: 'Fixed block · permanent schedule',
       start: workStart,
       end: workEnd,
     ));
 
     if (commuteAfterMinutes > 0) {
-      items.add(TimelineItem(
+      blocks.add(ResolvedWorkBlock(
         id: '$id-commute-home-${_key(date)}',
-        type: TimelineItemType.calendarEvent,
+        kind: ResolvedWorkBlockKind.commuteHome,
         title: 'Commute home',
-        subtitle: 'Fixed block',
         start: workEnd,
         end: workEnd.add(Duration(minutes: commuteAfterMinutes)),
       ));
     }
 
-    return items;
+    return blocks;
+  }
+
+  WorkdayOverride? _overrideFor(DateTime date) {
+    for (final entry in overrides.entries) {
+      if (_sameDate(entry.key, date)) return entry.value;
+    }
+    return null;
   }
 
   WorkHoliday? _holidayFor(DateTime date) {
@@ -114,9 +134,6 @@ class PermanentWorkSchedule {
     return null;
   }
 }
-
-DateTime _dateOnly(DateTime value) =>
-    DateTime(value.year, value.month, value.day);
 
 bool _sameDate(DateTime a, DateTime b) =>
     a.year == b.year && a.month == b.month && a.day == b.day;
