@@ -5,7 +5,6 @@
 
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/domain/task.dart';
-import 'package:neuroflow/executive/work_schedule.dart';
 
 enum TimelineItemType {
   calendarEvent,
@@ -91,24 +90,8 @@ class TodayTimelineBuilder {
     required List<Task> tasks,
     required List<Routine> routines,
     List<TimelineItem> calendarItems = const [],
-    PermanentWorkSchedule? workSchedule = defaultPgeWorkSchedule,
   }) {
     final items = <TimelineItem>[...calendarItems];
-
-    if (workSchedule != null) {
-      items.addAll(workSchedule.resolve(day).map(
-            (block) => TimelineItem(
-              id: block.id,
-              type: TimelineItemType.calendarEvent,
-              title: block.title,
-              subtitle: block.kind == ResolvedWorkBlockKind.work
-                  ? 'Fixed block · permanent schedule'
-                  : 'Fixed block',
-              start: block.start,
-              end: block.end,
-            ),
-          ));
-    }
 
     for (final routine in routines.where((r) => r.firesOn(day))) {
       final hour = routine.scheduleHour ??

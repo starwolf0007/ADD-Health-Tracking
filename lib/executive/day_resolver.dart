@@ -77,6 +77,14 @@ class InvalidScheduleRule implements Exception {
 }
 
 void validateRule(RuleSpec rule) {
+  if (rule.byDay.isEmpty || rule.byDay.any((day) => day < 1 || day > 7)) {
+    throw InvalidScheduleRule(
+      ruleId: rule.id,
+      field: 'byDay',
+      value: rule.byDay,
+      reason: 'require one or more ISO weekdays in the range 1 through 7',
+    );
+  }
   if (rule.startMinutes < 0 ||
       rule.startMinutes >= rule.endMinutes ||
       rule.endMinutes > 1440) {
@@ -121,8 +129,7 @@ void validateRule(RuleSpec rule) {
   }
 }
 
-String formatDate(DateTime d) =>
-    '${d.year.toString().padLeft(4, '0')}-'
+String formatDate(DateTime d) => '${d.year.toString().padLeft(4, '0')}-'
     '${d.month.toString().padLeft(2, '0')}-'
     '${d.day.toString().padLeft(2, '0')}';
 

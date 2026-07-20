@@ -133,6 +133,27 @@ void main() {
       );
     });
 
+    test('invalid recurrence weekday throws typed failure with rule id', () {
+      const bad = RuleSpec(
+        id: 'bad_weekday',
+        name: 'Bad',
+        byDay: {0, 8},
+        startMinutes: 360,
+        endMinutes: 870,
+      );
+      expect(
+        () => resolveDay(
+          day: DateTime(2026, 7, 20),
+          rules: const [bad],
+          exceptions: const [],
+          holidayCalendars: const {},
+        ),
+        throwsA(isA<InvalidScheduleRule>()
+            .having((error) => error.ruleId, 'ruleId', 'bad_weekday')
+            .having((error) => error.field, 'field', 'byDay')),
+      );
+    });
+
     test('commute spilling past midnight throws with rule id', () {
       const bad = RuleSpec(
         id: 'bad_commute',

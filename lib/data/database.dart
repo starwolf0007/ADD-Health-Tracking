@@ -206,6 +206,45 @@ class HevySyncMetadata extends Table {
 }
 
 // ---------------------------------------------------------------------------
+// Permanent schedule inputs (resolved blocks remain derived, never stored)
+// ---------------------------------------------------------------------------
+
+@DataClassName('HolidayCalendarEntryRow')
+class HolidayCalendarEntries extends Table {
+  TextColumn get calendarId => text()();
+  TextColumn get date => text()(); // ISO-8601 local date: YYYY-MM-DD
+  TextColumn get name => text()();
+
+  @override
+  Set<Column> get primaryKey => {calendarId, date};
+}
+
+@DataClassName('ScheduleRuleRow')
+class ScheduleRules extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get byDay => text()(); // Comma-separated ISO weekdays: 1,2,...,7
+  IntColumn get startMinutes => integer()();
+  IntColumn get endMinutes => integer()();
+  IntColumn get commuteBeforeMin => integer().withDefault(const Constant(0))();
+  IntColumn get commuteAfterMin => integer().withDefault(const Constant(0))();
+  TextColumn get exclusionCalendarId => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+@DataClassName('ScheduleExceptionRow')
+class ScheduleExceptions extends Table {
+  TextColumn get ruleId => text().references(ScheduleRules, #id)();
+  TextColumn get date => text()(); // ISO-8601 local date: YYYY-MM-DD
+  TextColumn get type => text()(); // 'skip' | 'force'
+
+  @override
+  Set<Column> get primaryKey => {ruleId, date};
+}
+
+// ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
 
@@ -222,6 +261,9 @@ class HevySyncMetadata extends Table {
   HevyExercises,
   HevySets,
   HevySyncMetadata,
+  HolidayCalendarEntries,
+  ScheduleRules,
+  ScheduleExceptions,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());
@@ -229,11 +271,14 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
-        onCreate: (m) => m.createAll(),
+        onCreate: (m) async {
+          await m.createAll();
+          await _seedPermanentScheduleInputs();
+        },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
             await m.addColumn(routines, routines.activeDays);
@@ -260,8 +305,92 @@ class AppDatabase extends _$AppDatabase {
               TasksCompanion(activeStartedAt: Value(DateTime.now())),
             );
           }
+          if (from < 6) {
+            await m.createTable(holidayCalendarEntries);
+            await m.createTable(scheduleRules);
+            await m.createTable(scheduleExceptions);
+            await _seedPermanentScheduleInputs();
+          }
         },
       );
+
+  Future<void> _seedPermanentScheduleInputs() => batch((batch) {
+        batch.insertAll(
+          holidayCalendarEntries,
+          [
+            HolidayCalendarEntriesCompanion.insert(
+              calendarId: 'pge_2026',
+              date: '2026-01-01',
+              name: "New Year's Day",
+            ),
+            HolidayCalendarEntriesCompanion.insert(
+              calendarId: 'pge_2026',
+              date: '2026-01-19',
+              name: 'Martin Luther King Jr. Day',
+            ),
+            HolidayCalendarEntriesCompanion.insert(
+              calendarId: 'pge_2026',
+              date: '2026-02-16',
+              name: "Presidents' Day",
+            ),
+            HolidayCalendarEntriesCompanion.insert(
+              calendarId: 'pge_2026',
+              date: '2026-05-25',
+              name: 'Memorial Day',
+            ),
+            HolidayCalendarEntriesCompanion.insert(
+              calendarId: 'pge_2026',
+              date: '2026-06-19',
+              name: 'Juneteenth',
+            ),
+            HolidayCalendarEntriesCompanion.insert(
+              calendarId: 'pge_2026',
+              date: '2026-07-03',
+              name: 'Independence Day (Observed)',
+            ),
+            HolidayCalendarEntriesCompanion.insert(
+              calendarId: 'pge_2026',
+              date: '2026-09-07',
+              name: 'Labor Day',
+            ),
+            HolidayCalendarEntriesCompanion.insert(
+              calendarId: 'pge_2026',
+              date: '2026-11-11',
+              name: 'Veterans Day',
+            ),
+            HolidayCalendarEntriesCompanion.insert(
+              calendarId: 'pge_2026',
+              date: '2026-11-26',
+              name: 'Thanksgiving Holiday',
+            ),
+            HolidayCalendarEntriesCompanion.insert(
+              calendarId: 'pge_2026',
+              date: '2026-11-27',
+              name: 'Thanksgiving Holiday (Day 2)',
+            ),
+            HolidayCalendarEntriesCompanion.insert(
+              calendarId: 'pge_2026',
+              date: '2026-12-25',
+              name: 'Christmas Day',
+            ),
+          ],
+          mode: InsertMode.insertOrIgnore,
+        );
+        batch.insert(
+          scheduleRules,
+          ScheduleRulesCompanion.insert(
+            id: 'rule_work',
+            name: 'PG&E Work Schedule',
+            byDay: '1,2,3,4,5',
+            startMinutes: 360,
+            endMinutes: 870,
+            commuteBeforeMin: const Value(20),
+            commuteAfterMin: const Value(20),
+            exclusionCalendarId: const Value('pge_2026'),
+          ),
+          mode: InsertMode.insertOrIgnore,
+        );
+      });
 
   DateTime _startOfDay(DateTime day) => DateTime(day.year, day.month, day.day);
 
@@ -491,6 +620,27 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> clearDoneSyncOps() =>
       (delete(syncQueue)..where((s) => s.status.equals('done'))).go();
+
+  // ---- Permanent schedule inputs ------------------------------------------
+
+  Future<List<ScheduleRuleRow>> fetchScheduleRules() =>
+      (select(scheduleRules)..orderBy([(r) => OrderingTerm.asc(r.id)])).get();
+
+  Future<List<ScheduleExceptionRow>> fetchScheduleExceptionsForDate(
+    String date,
+  ) =>
+      (select(scheduleExceptions)
+            ..where((entry) => entry.date.equals(date))
+            ..orderBy([(entry) => OrderingTerm.asc(entry.ruleId)]))
+          .get();
+
+  Future<Set<String>> fetchHolidayDates(String calendarId) async {
+    final rows = await (select(holidayCalendarEntries)
+          ..where((entry) => entry.calendarId.equals(calendarId))
+          ..orderBy([(entry) => OrderingTerm.asc(entry.date)]))
+        .get();
+    return rows.map((row) => row.date).toSet();
+  }
 }
 
 LazyDatabase _open() {
