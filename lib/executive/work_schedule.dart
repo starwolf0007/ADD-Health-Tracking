@@ -8,10 +8,15 @@ enum WorkdayOverride { work, skip }
 enum ResolvedWorkBlockKind { commuteToWork, work, commuteHome }
 
 class WorkHoliday {
-  final DateTime date;
+  final int year;
+  final int month;
+  final int day;
   final String name;
 
-  const WorkHoliday(this.date, this.name);
+  const WorkHoliday(this.year, this.month, this.day, this.name);
+
+  bool matches(DateTime value) =>
+      value.year == year && value.month == month && value.day == day;
 }
 
 class ResolvedWorkBlock {
@@ -129,7 +134,7 @@ class PermanentWorkSchedule {
 
   WorkHoliday? _holidayFor(DateTime date) {
     for (final holiday in holidays) {
-      if (_sameDate(holiday.date, date)) return holiday;
+      if (holiday.matches(date)) return holiday;
     }
     return null;
   }
@@ -142,17 +147,17 @@ String _key(DateTime value) =>
     '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
 
 const pgeWorkHolidays2026 = <WorkHoliday>[
-  WorkHoliday(DateTime(2026, 1, 1), "New Year's Day"),
-  WorkHoliday(DateTime(2026, 1, 19), 'Martin Luther King Jr. Day'),
-  WorkHoliday(DateTime(2026, 2, 16), "Presidents' Day"),
-  WorkHoliday(DateTime(2026, 5, 25), 'Memorial Day'),
-  WorkHoliday(DateTime(2026, 6, 19), 'Juneteenth'),
-  WorkHoliday(DateTime(2026, 7, 3), 'Independence Day (Observed)'),
-  WorkHoliday(DateTime(2026, 9, 7), 'Labor Day'),
-  WorkHoliday(DateTime(2026, 11, 11), 'Veterans Day'),
-  WorkHoliday(DateTime(2026, 11, 26), 'Thanksgiving Holiday'),
-  WorkHoliday(DateTime(2026, 11, 27), 'Thanksgiving Holiday (Day 2)'),
-  WorkHoliday(DateTime(2026, 12, 25), 'Christmas Day'),
+  WorkHoliday(2026, 1, 1, "New Year's Day"),
+  WorkHoliday(2026, 1, 19, 'Martin Luther King Jr. Day'),
+  WorkHoliday(2026, 2, 16, "Presidents' Day"),
+  WorkHoliday(2026, 5, 25, 'Memorial Day'),
+  WorkHoliday(2026, 6, 19, 'Juneteenth'),
+  WorkHoliday(2026, 7, 3, 'Independence Day (Observed)'),
+  WorkHoliday(2026, 9, 7, 'Labor Day'),
+  WorkHoliday(2026, 11, 11, 'Veterans Day'),
+  WorkHoliday(2026, 11, 26, 'Thanksgiving Holiday'),
+  WorkHoliday(2026, 11, 27, 'Thanksgiving Holiday (Day 2)'),
+  WorkHoliday(2026, 12, 25, 'Christmas Day'),
 ];
 
 const defaultPgeWorkSchedule = PermanentWorkSchedule(
