@@ -1,13 +1,24 @@
 // Riverpod composition for the Today plan proposal flow.
 // Public surface is the locked interaction contract only.
-// Debug helpers are gated with kDebugMode.
+// Development helpers are gated by an injected pure-Dart capability
+// (no Flutter foundation dependency for gating).
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:neuroflow/domain/day_plan.dart';
 import 'package:neuroflow/executive/day_resolver.dart';
 import 'package:neuroflow/executive/today_plan_state.dart';
+
+/// Pure-Dart development capability. Production default is disabled.
+/// Tests override via ProviderContainer to enable loadScenario / simulateDisruption.
+class TodayPlanDevCapability {
+  final bool enabled;
+
+  const TodayPlanDevCapability({this.enabled = false});
+}
+
+final todayPlanDevCapabilityProvider =
+    Provider<TodayPlanDevCapability>((ref) => const TodayPlanDevCapability());
 
 /// Scenario fixtures for gated debug/test seeding.
 class TodayPlanFixtures {
@@ -181,6 +192,9 @@ class TodayPlanNotifier extends Notifier<TodayPlanState> {
   @override
   TodayPlanState build() => const TodayPlanLoading();
 
+  bool get _devEnabled =>
+      ref.read(todayPlanDevCapabilityProvider).enabled;
+
   // ---- Locked contract surface (safe no-ops outside valid Ready) ----
 
   void acceptDay() => state = transitionAcceptDay(state);
@@ -199,11 +213,11 @@ class TodayPlanNotifier extends Notifier<TodayPlanState> {
 
   void keepDayOpen() => state = transitionKeepDayOpen(state);
 
-  // ---- Debug / test only (release builds are no-ops) ----
+  // ---- Development-only (no-op unless capability enabled) ----
 
   /// Seeds a Ready proposal for the given scenario.
   void loadScenario(MockDayScenario scenario) {
-    if (!kDebugMode) return;
+    if (!_devEnabled) return;
     final base = TodayPlanFixtures.baseAnchors();
     final proposal = TodayPlanFixtures.forScenario(scenario);
     state = buildReady(base: base, proposal: proposal);
@@ -211,10 +225,11 @@ class TodayPlanNotifier extends Notifier<TodayPlanState> {
 
   /// Forces a late-appointment disruption on the current Ready plan.
   void simulateDisruption() {
-    if (!kDebugMode) return;
+    if (!_devEnabled) return;
     final current = state;
     if (current is! TodayPlanReady) return;
-    final disrupted = TodayPlanFixtures.forScenario(MockDayScenario.lateAppointment);
+    final disrupted =
+        TodayPlanFixtures.forScenario(MockDayScenario.lateAppointment);
     state = buildReady(
       base: current.basePlan,
       proposal: disrupted,
@@ -224,7 +239,7 @@ class TodayPlanNotifier extends Notifier<TodayPlanState> {
 
   /// Test-only path to Unavailable without public setters.
   void debugSetUnavailable(InvalidScheduleRule error) {
-    if (!kDebugMode) return;
+    if (!_devEnabled) return;
     final base = switch (state) {
       TodayPlanReady(:final basePlan) => basePlan,
       TodayPlanUnavailable(:final basePlan) => basePlan,

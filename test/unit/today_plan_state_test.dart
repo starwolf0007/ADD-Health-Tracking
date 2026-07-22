@@ -11,7 +11,14 @@ void main() {
   const projection = TodayPlanProjection();
 
   setUp(() {
-    container = ProviderContainer();
+    // Enable development capability so loadScenario / simulateDisruption work.
+    container = ProviderContainer(
+      overrides: [
+        todayPlanDevCapabilityProvider.overrideWithValue(
+          const TodayPlanDevCapability(enabled: true),
+        ),
+      ],
+    );
     addTearDown(container.dispose);
   });
 
@@ -28,15 +35,13 @@ void main() {
 
   void seedNormal() => notifier().loadScenario(MockDayScenario.normalWorkday);
 
-  group('initialization',
-      () {
+  group('initialization', () {
     test('provider starts in Loading', () {
       expect(state(), isA<TodayPlanLoading>());
       expect(state().phase, TodayPlanPhase.loading);
     });
 
-    test('loadScenario seeds Ready with pending selectable blocks',
-        () {
+    test('loadScenario seeds Ready with pending selectable blocks', () {
       seedNormal();
       final s = ready();
       expect(s.outcome, ProposalOutcome.undecided);
@@ -47,10 +52,18 @@ void main() {
       expect(s.decisions['recovery'], ProposalDecision.pending);
       expect(s.decisions.containsKey('shift'), isFalse);
     });
+
+    test('loadScenario is no-op when capability disabled', () {
+      final locked = ProviderContainer();
+      addTearDown(locked.dispose);
+      locked.read(todayPlanProvider.notifier).loadScenario(
+            MockDayScenario.normalWorkday,
+          );
+      expect(locked.read(todayPlanProvider), isA<TodayPlanLoading>());
+    });
   });
 
-  group('Accept Day',
-      () {
+  group('Accept Day', () {
     test('accepts all selectable → accepted', () {
       seedNormal();
       notifier().acceptDay();
@@ -68,10 +81,8 @@ void main() {
     });
   });
 
-  group('Review flow',
-      () {
-    test('partial accept drops unselected selectable blocks',
-        () {
+  group('Review flow', () {
+    test('partial accept drops unselected selectable blocks', () {
       seedNormal();
       notifier().startReview();
       expect(ready().phase, TodayPlanPhase.reviewing);
@@ -97,8 +108,7 @@ void main() {
       expect(s.phase, TodayPlanPhase.accepted);
     });
 
-    test('Done Reviewing with zero selections rejects + restores base',
-        () {
+    test('Done Reviewing with zero selections rejects + restores base', () {
       seedNormal();
       final base = ready().basePlan;
       notifier().startReview();
@@ -108,8 +118,7 @@ void main() {
       expect(s.sessionPlan, base);
     });
 
-    test('partial acceptance → Undo restores review mode and selections',
-        () {
+    test('partial acceptance → Undo restores review mode and selections', () {
       seedNormal();
       notifier().startReview();
       notifier().toggleBlock('gym');
@@ -137,8 +146,7 @@ void main() {
     });
   });
 
-  group('Keep Original / Not Now',
-      () {
+  group('Keep Original / Not Now', () {
     test('Keep Original restores base, rejected', () {
       seedNormal();
       final base = ready().basePlan;
@@ -160,8 +168,7 @@ void main() {
     });
   });
 
-  group('Disruption',
-      () {
+  group('Disruption', () {
     test('simulateDisruption sets needsAttention', () {
       seedNormal();
       notifier().simulateDisruption();
@@ -171,8 +178,7 @@ void main() {
       expect(s.outcome, ProposalOutcome.undecided);
     });
 
-    test('disruption → Keep Original restores base without attention',
-        () {
+    test('disruption → Keep Original restores base without attention', () {
       seedNormal();
       final base = ready().basePlan;
       notifier().simulateDisruption();
@@ -183,11 +189,9 @@ void main() {
       expect(s.sessionPlan, base);
     });
 
-    test('disruption → Undo restores needsAttention and outcome',
-        () {
+    test('disruption → Undo restores needsAttention and outcome', () {
       seedNormal();
       notifier().simulateDisruption();
-      // Accept creates undo of the disrupted ready state
       notifier().acceptDay();
       expect(ready().outcome, ProposalOutcome.accepted);
       notifier().undo();
@@ -198,8 +202,7 @@ void main() {
     });
   });
 
-  group('Undo',
-      () {
+  group('Undo', () {
     test('Undo after Accept restores undecided proposalReady', () {
       seedNormal();
       notifier().acceptDay();
@@ -217,9 +220,8 @@ void main() {
     });
   });
 
-  group('Unavailable',
-      () {
-    test('Keep Day Open clears unavailable, no undo', () {
+  group('Unavailable / Keep Day Open', () {
+    test('Keep Day Open restores real basePlan, no undo', () {
       seedNormal();
       final base = ready().basePlan;
       notifier().debugSetUnavailable(const InvalidScheduleRule(
@@ -229,6 +231,8 @@ void main() {
         reason: 'empty',
       ));
       expect(state().phase, TodayPlanPhase.unavailable);
+      final unavailable = state() as TodayPlanUnavailable;
+      expect(unavailable.basePlan, base);
       notifier().keepDayOpen();
       final s = ready();
       expect(s.phase, TodayPlanPhase.ambient);
@@ -248,10 +252,8 @@ void main() {
     });
   });
 
-  group('Block boundaries',
-      () {
-    test('exact start and end minutes are preserved on load',
-        () {
+  group('Block boundaries', () {
+    test('exact start and end minutes are preserved on load', () {
       seedNormal();
       final gym = ready().sessionPlan.blocks.firstWhere((b) => b.id == 'gym');
       expect(gym.startMinutes, 930);
@@ -263,10 +265,8 @@ void main() {
     });
   });
 
-  group('Safe no-ops on invalid context',
-      () {
-    test('startReview / finishReview / toggle on Loading do nothing',
-        () {
+  group('Safe no-ops on invalid context', () {
+    test('startReview / finishReview / toggle on Loading do nothing', () {
       notifier().startReview();
       notifier().toggleBlock('gym');
       notifier().finishReview();
@@ -276,8 +276,7 @@ void main() {
     });
   });
 
-  group('Lexi projection for each phase',
-      () {
+  group('Lexi projection for each phase', () {
     test('Loading briefing', () {
       final view = projection.project(state());
       expect(view.lexiBriefing, contains('organizing'));
@@ -312,11 +311,11 @@ void main() {
       expect(view.lexiBriefing, contains('Select the individual'));
     });
 
-    test('accepted / partiallyAccepted / rejected / ambient briefings',
-        () {
+    test('accepted / partiallyAccepted / rejected / ambient briefings', () {
       seedNormal();
       notifier().acceptDay();
-      expect(projection.project(state()).lexiBriefing, contains('day plan is set'));
+      expect(
+          projection.project(state()).lexiBriefing, contains('day plan is set'));
 
       seedNormal();
       notifier().startReview();
