@@ -1,10 +1,9 @@
-// Projection helpers: TodayPlanState → display-friendly values.
+// Projection: sealed TodayPlanState → display values + Lexi briefings.
 // Pure Dart. No Flutter imports.
 
 import 'package:neuroflow/domain/day_plan.dart';
 import 'package:neuroflow/executive/today_plan_state.dart';
 
-/// What the timeline should render for the current session.
 class TodayPlanView {
   final TodayPlanPhase phase;
   final List<PlanBlock> visibleBlocks;
@@ -12,6 +11,7 @@ class TodayPlanView {
   final bool showAcceptReviewActions;
   final bool showDoneReviewing;
   final bool showKeepDayOpen;
+  final String lexiBriefing;
 
   const TodayPlanView({
     required this.phase,
@@ -20,6 +20,7 @@ class TodayPlanView {
     required this.showAcceptReviewActions,
     required this.showDoneReviewing,
     required this.showKeepDayOpen,
+    required this.lexiBriefing,
   });
 }
 
@@ -28,20 +29,26 @@ class TodayPlanProjection {
 
   TodayPlanView project(TodayPlanState state) {
     final phase = state.phase;
-    final blocks = state.sessionPlan?.blocks ?? const <PlanBlock>[];
+    final blocks = switch (state) {
+      TodayPlanReady(:final sessionPlan) => sessionPlan.blocks,
+      _ => const <PlanBlock>[],
+    };
+    final canUndo = state is TodayPlanReady &&
+        state.undoSnapshot != null &&
+        phase != TodayPlanPhase.reviewing;
 
     return TodayPlanView(
       phase: phase,
       visibleBlocks: blocks,
-      canUndo: state.undoSnapshot != null && phase != TodayPlanPhase.reviewing,
+      canUndo: canUndo,
       showAcceptReviewActions: phase == TodayPlanPhase.proposalReady ||
           phase == TodayPlanPhase.requiresAttention,
       showDoneReviewing: phase == TodayPlanPhase.reviewing,
       showKeepDayOpen: phase == TodayPlanPhase.unavailable,
+      lexiBriefing: statusBriefing(state),
     );
   }
 
-  /// Human-readable Lexi-style status line (deterministic; no AI).
   String statusBriefing(TodayPlanState state) {
     switch (state.phase) {
       case TodayPlanPhase.loading:

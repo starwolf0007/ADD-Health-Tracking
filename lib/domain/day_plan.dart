@@ -28,6 +28,14 @@ enum PlanBlockKind {
   commute,
 }
 
+/// Dev / test scenarios used by gated loadScenario.
+enum MockDayScenario {
+  normalWorkday,
+  overloadedDay,
+  lowEnergyDay,
+  lateAppointment,
+}
+
 /// One timed block inside a [DayPlan].
 class PlanBlock {
   final String id;
@@ -53,27 +61,16 @@ class PlanBlock {
   bool get isSelectable =>
       !isLocked && decision != ProposalDecision.notApplicable;
 
-  PlanBlock copyWith({
-    String? id,
-    String? title,
-    int? startMinutes,
-    int? endMinutes,
-    PlanBlockKind? kind,
-    String? explanation,
-    bool? isLocked,
-    ProposalDecision? decision,
-  }) {
-    return PlanBlock(
-      id: id ?? this.id,
-      title: title ?? this.title,
-      startMinutes: startMinutes ?? this.startMinutes,
-      endMinutes: endMinutes ?? this.endMinutes,
-      kind: kind ?? this.kind,
-      explanation: explanation ?? this.explanation,
-      isLocked: isLocked ?? this.isLocked,
-      decision: decision ?? this.decision,
-    );
-  }
+  PlanBlock withDecision(ProposalDecision decision) => PlanBlock(
+        id: id,
+        title: title,
+        startMinutes: startMinutes,
+        endMinutes: endMinutes,
+        kind: kind,
+        explanation: explanation,
+        isLocked: isLocked,
+        decision: decision,
+      );
 
   @override
   bool operator ==(Object other) =>
@@ -107,29 +104,27 @@ class DayPlan {
 
   const DayPlan({required this.blocks});
 
-  DayPlan copyWith({List<PlanBlock>? blocks}) =>
-      DayPlan(blocks: blocks ?? this.blocks);
-
   DayPlan withDecisions(Map<String, ProposalDecision> decisions) {
     return DayPlan(
-      blocks: blocks
-          .map(
-            (b) => decisions.containsKey(b.id)
-                ? b.copyWith(decision: decisions[b.id])
-                : b,
-          )
-          .toList(),
+      blocks: [
+        for (final b in blocks)
+          if (decisions.containsKey(b.id))
+            b.withDecision(decisions[b.id]!)
+          else
+            b,
+      ],
     );
   }
 
-  /// Blocks that remain after a partial/full accept (locked + accepted).
+  /// Locked/non-selectable blocks + accepted selectable blocks only.
   DayPlan keptAfterAccept(Map<String, ProposalDecision> decisions) {
     return DayPlan(
-      blocks: blocks.where((b) {
-        if (!b.isSelectable) return true;
-        final d = decisions[b.id] ?? b.decision;
-        return d == ProposalDecision.accepted;
-      }).toList(),
+      blocks: [
+        for (final b in blocks)
+          if (!b.isSelectable ||
+              (decisions[b.id] ?? b.decision) == ProposalDecision.accepted)
+            b.withDecision(decisions[b.id] ?? b.decision),
+      ],
     );
   }
 
