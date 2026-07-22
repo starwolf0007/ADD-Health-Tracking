@@ -1,7 +1,6 @@
 // Riverpod composition for the Today plan proposal flow.
 // Public surface is the locked interaction contract only.
-// Development helpers are gated by an injected pure-Dart capability
-// (no Flutter foundation dependency for gating).
+// Initialization via injected seed; debug methods gated by pure-Dart capability.
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -10,7 +9,6 @@ import 'package:neuroflow/executive/day_resolver.dart';
 import 'package:neuroflow/executive/today_plan_state.dart';
 
 /// Pure-Dart development capability. Production default is disabled.
-/// Tests override via ProviderContainer to enable loadScenario / simulateDisruption.
 class TodayPlanDevCapability {
   final bool enabled;
 
@@ -20,7 +18,41 @@ class TodayPlanDevCapability {
 final todayPlanDevCapabilityProvider =
     Provider<TodayPlanDevCapability>((ref) => const TodayPlanDevCapability());
 
-/// Scenario fixtures for gated debug/test seeding.
+/// Injected seed for provider initialization (tests override this).
+sealed class TodayPlanSeed {
+  const TodayPlanSeed();
+}
+
+final class TodayPlanSeedLoading extends TodayPlanSeed {
+  const TodayPlanSeedLoading();
+}
+
+final class TodayPlanSeedUnavailable extends TodayPlanSeed {
+  final InvalidScheduleRule error;
+  final DayPlan? basePlan;
+
+  const TodayPlanSeedUnavailable({
+    required this.error,
+    this.basePlan,
+  });
+}
+
+final class TodayPlanSeedReady extends TodayPlanSeed {
+  final DayPlan basePlan;
+  final DayPlan proposal;
+  final bool needsAttention;
+
+  const TodayPlanSeedReady({
+    required this.basePlan,
+    required this.proposal,
+    this.needsAttention = false,
+  });
+}
+
+final todayPlanSeedProvider =
+    Provider<TodayPlanSeed>((ref) => const TodayPlanSeedLoading());
+
+/// Scenario fixtures for gated seeding.
 class TodayPlanFixtures {
   const TodayPlanFixtures._();
 
@@ -190,7 +222,20 @@ class TodayPlanFixtures {
 
 class TodayPlanNotifier extends Notifier<TodayPlanState> {
   @override
-  TodayPlanState build() => const TodayPlanLoading();
+  TodayPlanState build() {
+    final seed = ref.watch(todayPlanSeedProvider);
+    return switch (seed) {
+      TodayPlanSeedLoading() => const TodayPlanLoading(),
+      TodayPlanSeedUnavailable(:final error, :final basePlan) =>
+          TodayPlanUnavailable(error: error, basePlan: basePlan),
+      TodayPlanSeedReady(:final basePlan, :final proposal, :final needsAttention) =>
+          buildReady(
+            base: basePlan,
+            proposal: proposal,
+            needsAttention: needsAttention,
+          ),
+    };
+  }
 
   bool get _devEnabled =>
       ref.read(todayPlanDevCapabilityProvider).enabled;
@@ -215,7 +260,6 @@ class TodayPlanNotifier extends Notifier<TodayPlanState> {
 
   // ---- Development-only (no-op unless capability enabled) ----
 
-  /// Seeds a Ready proposal for the given scenario.
   void loadScenario(MockDayScenario scenario) {
     if (!_devEnabled) return;
     final base = TodayPlanFixtures.baseAnchors();
@@ -223,7 +267,6 @@ class TodayPlanNotifier extends Notifier<TodayPlanState> {
     state = buildReady(base: base, proposal: proposal);
   }
 
-  /// Forces a late-appointment disruption on the current Ready plan.
   void simulateDisruption() {
     if (!_devEnabled) return;
     final current = state;
@@ -235,17 +278,6 @@ class TodayPlanNotifier extends Notifier<TodayPlanState> {
       proposal: disrupted,
       needsAttention: true,
     );
-  }
-
-  /// Test-only path to Unavailable without public setters.
-  void debugSetUnavailable(InvalidScheduleRule error) {
-    if (!_devEnabled) return;
-    final base = switch (state) {
-      TodayPlanReady(:final basePlan) => basePlan,
-      TodayPlanUnavailable(:final basePlan) => basePlan,
-      _ => null,
-    };
-    state = TodayPlanUnavailable(error: error, basePlan: base);
   }
 }
 
