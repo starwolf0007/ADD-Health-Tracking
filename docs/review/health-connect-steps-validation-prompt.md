@@ -1,7 +1,8 @@
 # Multi-AI Validation Prompt — Health Connect Steps Slice
 
 You are reviewing NeuroFlow's proposed Health Connect Steps vertical slice.
-Treat this as an architecture and implementation review, not a writing exercise.
+Treat this as an implementation-fact validation, not an invitation to reopen
+settled architecture.
 
 ## Repository and branch
 
@@ -18,6 +19,7 @@ Read these files before giving conclusions:
 - `docs/reference/reference-matrix.md`
 - `docs/reference/template.md`
 - `docs/reference/architecture/google-health-connect.md`
+- `docs/adr/ADR-007-health-connect-ingestion-boundary.md`
 - `lib/domain/health/health_enums.dart`
 - `lib/domain/health/health_transaction.dart`
 - `lib/health/data/health_write_guard.dart`
@@ -30,58 +32,97 @@ Read these files before giving conclusions:
 3. One upstream `StepsRecord` produces one `HealthTransaction`.
 4. Overlapping watch and phone records remain separate.
 5. No aggregation, deduplication, preferred-provider selection, or interval merging occurs during ingestion.
-6. Kotlin returns plain transport values only; Android SDK objects do not cross the MethodChannel.
+6. Kotlin returns plain transport values only; Android SDK objects and integer constants do not cross the MethodChannel.
 7. Dart performs strict parsing and canonical mapping.
 8. Existing `generateHealthEvidenceId()` and existing domain contracts must be reused.
-9. Every produced transaction must pass `requirePhase1Transaction()`.
+9. Every produced transaction must pass `HealthWriteGuard.requirePhase1Transaction()`.
 10. Drift persistence, change tokens, WorkManager, background sync, UI, and other record types are outside this slice.
+11. The Steps v1 wire contract is frozen; incompatible changes require a transport-version increment.
+
+## Frozen HealthConnect Steps Transport v1
+
+```yaml
+status: "ok" | "unavailable" | "permission_denied" | "failed"
+records:
+  - externalId: String
+    recordType: "steps"
+    count: Long
+    startEpochMs: Long
+    endEpochMs: Long
+    startZoneOffsetSeconds: Int?
+    endZoneOffsetSeconds: Int?
+    sourceAppId: String
+    lastModifiedEpochMs: Long
+    clientRecordId: String?
+    clientRecordVersion: Long?
+    recordingMethod: "automatic" | "active" | "manual" | "unknown"
+```
+
+Contract rules:
+
+- `records` is always present and is always a list.
+- `ok` plus an empty list is a successful zero-record read.
+- Other statuses return an empty records list.
+- Unknown statuses fail closed as `failed` in Dart.
+- Native exception text, stack traces, and class names do not cross the channel.
+- Missing or blank `sourceAppId` is malformed provenance; it does not default to a fabricated source.
+- Kotlin translates Android recording-method constants into the four stable strings.
+- Dart maps `automatic` and `active` to `deviceMeasured`, `manual` to `userEntered`, and `unknown` to `importedUnknown`.
+- No field may be renamed, removed, repurposed, or overloaded without incrementing the transport version.
 
 ## Proposed Commit B scope
 
 Validate a design containing:
 
-- bounded `readRecords<StepsRecord>()` Kotlin reader
+- bounded and fully paged `readRecords<StepsRecord>()` Kotlin reader
 - one transport map per native record
-- stable wire keys and primitive values
+- the closed result envelope above
 - source package, timestamps, offsets, last-modified metadata, client metadata, recording method, and count
-- lifecycle-safe MethodChannel result handling
+- lifecycle-safe MethodChannel result handling inside the existing `HealthConnectBridge.kt`
 - strict Dart parser with safe reason codes
 - one `HealthSourceRecordDraft` and one `HealthSpanDraft` per record
 - one `HealthTransaction` per record
-- deterministic identity generated in Dart
-- overlap, malformed-payload, deterministic-ID, and repository-guard tests
+- deterministic identity generated in Dart with `generateHealthEvidenceId()`
+- an explicit mapper comment that `transactionId == sourceRecordId` is a Steps-slice decision, not a universal series-record rule
+- overlap, malformed-payload, deterministic-ID, result-envelope, and repository-guard tests
 
 ## Questions you must answer
 
-### Architecture
+### Architecture conformance
 
 - Does this preserve the existing one-source-record transaction invariant?
 - Does any proposed layer accidentally aggregate, flatten, or reinterpret evidence?
-- Are responsibilities correctly divided among Kotlin transport, Dart parsing, domain mapping, repository validation, and later derived analytics?
+- Does the implementation reuse the real constructors, enum names, identity function, and static write guard from the branch?
 - Is any new abstraction redundant with an existing repository contract?
 
-### Health Connect correctness
+### Health Connect 1.1.0 correctness
 
-- Verify the pinned `connect-client:1.1.0` APIs and exact metadata/recording-method constants.
-- Verify whether bounded `readRecords` paging is required and how the page token should be handled.
-- Verify interval-boundary semantics and whether the proposed naming `startInclusive` / `endExclusive` is accurate.
+- Verify the pinned `connect-client:1.1.0` APIs and exact recording-method constants.
+- Verify the exact constant-to-wire-string mapping; do not infer it from names alone.
+- Verify bounded `readRecords` paging behavior and the exact page-token loop.
+- Verify interval-boundary semantics and recommend accurate Kotlin/Dart argument names.
 - Verify all transported field types across Kotlin and Flutter MethodChannel serialization.
+- Verify `Metadata.id`, `DataOrigin.packageName`, last-modified time, client record metadata, and zone-offset availability for `StepsRecord`.
 
 ### Lifecycle and failure behavior
 
+- Does the Steps method mirror the existing permission-result ownership pattern?
 - Could engine or activity detachment strand a pending Dart Future?
 - Could any result receive a duplicate or late reply?
-- Is returning an empty list for native failure sufficiently distinguishable from a valid empty read, or should the wire contract expose a closed status without leaking exception details?
+- Does every native outcome produce exactly one closed result envelope?
+- Are permission revocation, platform unavailability, security exceptions, and unexpected read failures mapped to the correct closed status without leaking details?
 - Are cancellation and coroutine ownership correct?
 
 ### Dart/domain correctness
 
-- Does mapping use the real constructors and enum names in the branch?
+- Does the parser distinguish successful empty reads from failures?
+- Does an unknown or malformed status fail closed?
 - Is `transactionId` identity correct and stable across repeated ingestion runs?
 - Is the source-record ID distinct from span evidence ID for a clear reason?
-- Is local-date derivation correct when offsets are null or differ between start and end?
-- Should malformed records be individually rejected while valid siblings continue?
+- Is local-date derivation deterministic when offsets are null or differ between start and end?
+- Are malformed records individually rejected while valid siblings continue?
 - Are rejection reason codes safe to log and free of health values and external identifiers?
+- Are both `automatic` and `active` correctly classified as `deviceMeasured` rather than `sourceEstimated`?
 
 ### Tests
 
@@ -91,11 +132,15 @@ Require tests proving:
 - no counts are summed
 - IDs differ across distinct origins/records
 - the same upstream record yields stable IDs across runs
-- malformed provenance, counts, ranges, timestamps, map keys, and offsets are rejected
+- missing external ID, blank provenance, negative count, invalid timestamps, reversed ranges, malformed map entries, invalid offsets, and unknown keys are handled according to the strict parser contract
 - valid siblings survive a malformed record
-- null offsets remain null
+- null offsets remain null and differing start/end offsets are preserved independently
+- `ok` plus empty records remains distinguishable from `failed`
+- unknown statuses fail closed
+- recording-method values map exactly as frozen
+- paging gathers all pages without duplication or truncation
 - engine detachment completes pending reads exactly once
-- every valid transaction passes `requirePhase1Transaction()`
+- every valid transaction passes `HealthWriteGuard.requirePhase1Transaction()`
 
 ## Output format
 
