@@ -32,6 +32,7 @@ transport would destroy provenance and make later reconciliation impossible.
 
 ## Alternatives Considered
 
+- Use Health Connect `aggregate()` for Steps, as Google's raw-read guidance recommends for cumulative records to avoid multi-source double counting — deliberately rejected for NeuroFlow's evidence-ingestion boundary because aggregation discards the independent source records and provenance required for later reconciliation. Aggregation remains appropriate only as a downstream derived operation.
 - Aggregate Steps totals in Kotlin — rejected because source-level evidence and provenance would be unrecoverable.
 - Transport Android SDK objects or raw constants — rejected because it couples the Dart domain to Android implementation details.
 - Build a parallel Health Connect DTO/domain hierarchy — rejected because existing `HealthSourceRecordDraft`, `HealthSpanDraft`, and `HealthTransaction` contracts already define the canonical boundary.
