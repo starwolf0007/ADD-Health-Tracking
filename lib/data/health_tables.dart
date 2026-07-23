@@ -13,42 +13,7 @@
 // - Lexi and Presentation must not query raw health tables directly.
 
 import 'package:drift/drift.dart';
-
-enum SensitivityClass { routine, sensitive, medical }
-
-enum MeasurementStatus { valid, partial, unavailable, invalid, deleted }
-
-enum RecordingMethod {
-  deviceMeasured,
-  userEntered,
-  sourceEstimated,
-  sourceDerived,
-  importedUnknown,
-}
-
-enum QualityLabel { unknown, low, moderate, high }
-
-enum RetentionPolicy { standard, limited, untilUserDeletes, medicalVaultPolicy }
-
-enum IngestionStatus {
-  pending,
-  running,
-  succeeded,
-  partiallySucceeded,
-  failed,
-  cancelled,
-}
-
-enum IngestionTrigger {
-  initialImport,
-  foregroundRefresh,
-  backgroundRefresh,
-  permissionRestored,
-  manualRetry,
-  renormalization,
-}
-
-enum ContextIntensity { unknown, low, moderate, high }
+import 'package:neuroflow/domain/health/health_enums.dart';
 
 class HealthSources extends Table {
   TextColumn get id => text()();
