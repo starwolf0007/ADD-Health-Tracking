@@ -44,6 +44,7 @@ class HealthConnectBridge :
     private val permissionContract =
         PermissionController.createRequestPermissionResultContract()
     private var pendingPermissionResult: MethodChannel.Result? = null
+    private val pendingGrantedPermissionResults = mutableSetOf<MethodChannel.Result>()
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         pluginBinding = binding
@@ -55,6 +56,7 @@ class HealthConnectBridge :
         channel.setMethodCallHandler(null)
         pendingPermissionResult?.success(emptyList<String>())
         pendingPermissionResult = null
+        completePendingGrantedPermissionResults()
         scope.cancel()
     }
 
@@ -98,12 +100,23 @@ class HealthConnectBridge :
     }
 
     private fun getGrantedPermissions(result: MethodChannel.Result) {
+        pendingGrantedPermissionResults.add(result)
         scope.launch {
             val granted = safelyGetGrantedPermissions()
             withContext(Dispatchers.Main) {
-                result.success(toWirePermissionKeys(granted))
+                // Engine detach completes and removes every pending result first.
+                // Only the owner that successfully removes this result may reply.
+                if (pendingGrantedPermissionResults.remove(result)) {
+                    result.success(toWirePermissionKeys(granted))
+                }
             }
         }
+    }
+
+    private fun completePendingGrantedPermissionResults() {
+        val pending = pendingGrantedPermissionResults.toList()
+        pendingGrantedPermissionResults.clear()
+        pending.forEach { it.success(emptyList<String>()) }
     }
 
     private fun requestPermissions(result: MethodChannel.Result) {
@@ -171,13 +184,16 @@ class HealthConnectBridge :
         private const val CHANNEL = "neuroflow/health_connect"
         private const val PERMISSION_REQUEST_CODE = 42017
 
-        private const val STATUS_AVAILABLE = "available"
-        private const val STATUS_SDK_UNAVAILABLE = "sdkUnavailable"
-        private const val STATUS_PROVIDER_UPDATE_REQUIRED = "providerUpdateRequired"
-        private const val STATUS_UNSUPPORTED = "unsupported"
+        internal const val STATUS_AVAILABLE = "available"
+        internal const val STATUS_SDK_UNAVAILABLE = "sdkUnavailable"
+        internal const val STATUS_PROVIDER_UPDATE_REQUIRED = "providerUpdateRequired"
+        internal const val STATUS_UNSUPPORTED = "unsupported"
+
+        internal val STEPS_READ_PERMISSION: String =
+            HealthPermission.getReadPermission(StepsRecord::class)
 
         internal val REQUIRED_PERMISSIONS: Set<String> = setOf(
-            HealthPermission.getReadPermission(StepsRecord::class),
+            STEPS_READ_PERMISSION,
             HealthPermission.getReadPermission(HeartRateRecord::class),
             HealthPermission.getReadPermission(RestingHeartRateRecord::class),
             HealthPermission.getReadPermission(SleepSessionRecord::class),
@@ -186,7 +202,7 @@ class HealthConnectBridge :
         )
 
         private val PERMISSION_KEY_BY_VALUE: Map<String, String> = mapOf(
-            HealthPermission.getReadPermission(StepsRecord::class) to "steps",
+            STEPS_READ_PERMISSION to "steps",
             HealthPermission.getReadPermission(HeartRateRecord::class) to "heartRate",
             HealthPermission.getReadPermission(RestingHeartRateRecord::class) to
                 "restingHeartRate",
