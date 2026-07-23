@@ -1,6 +1,5 @@
 package com.neuroflow.healthconnect
 
-import android.app.Activity
 import android.content.Intent
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
