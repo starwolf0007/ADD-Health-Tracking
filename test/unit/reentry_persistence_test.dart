@@ -44,7 +44,7 @@ void main() {
     expect(restored?.nextAction, 'Write the first paragraph');
     expect(restored?.returnAt, returnAt);
     expect(restored?.updatedAt, updatedAt);
-    expect(database.schemaVersion, 6);
+    expect(database.schemaVersion, 7);
 
     await repository.clearReentryNote(task.id);
     expect(await repository.getReentryNote(task.id), isNull);
