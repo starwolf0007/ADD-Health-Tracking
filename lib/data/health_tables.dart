@@ -1,3 +1,17 @@
+// Phase-1 Health Intelligence evidence schema.
+//
+// Locked constraints:
+// - These tables accept routine and sensitive health evidence only. Medical
+//   records belong in the future encrypted medical vault and must be rejected
+//   by the repository boundary before any write reaches Drift.
+// - Missing data remains missing. Do not synthesize absent samples or coerce
+//   unavailable measurements to zero.
+// - Imported evidence and rebuildable NeuroFlow-derived analytics are separate.
+// - Raw source payloads live at source-record level, not on every sample.
+// - HealthTimeSeries samples are immutable children of HealthSeries. Corrections
+//   supersede or invalidate the parent series; samples are never partly deleted.
+// - Lexi and Presentation must not query raw health tables directly.
+
 import 'package:drift/drift.dart';
 
 enum SensitivityClass { routine, sensitive, medical }
@@ -193,6 +207,7 @@ class HealthSeries extends Table {
   TextColumn get normalizerVersion => text()();
   DateTimeColumn get ingestedAtUtc => dateTime()();
   DateTimeColumn get deletedAtUtc => dateTime().nullable()();
+  TextColumn get supersedesSeriesId => text().nullable()();
   IntColumn get retentionPolicy => intEnum<RetentionPolicy>()();
 
   @override
