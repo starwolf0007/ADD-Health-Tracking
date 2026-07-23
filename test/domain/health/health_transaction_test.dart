@@ -8,15 +8,33 @@ void main() {
 
   HealthSourceRecordDraft sourceRecord({
     SensitivityClass sensitivity = SensitivityClass.routine,
+    String sourceId = 'health-connect',
+    String? supersedesSourceRecordId,
   }) =>
       HealthSourceRecordDraft(
         id: 'source-record-hash',
-        sourceId: 'health-connect',
+        sourceId: sourceId,
         sourceRecordType: 'heart_rate',
         startedAtUtc: start,
         endedAtUtc: end,
         localDate: '2026-07-23',
         sensitivity: sensitivity,
+        normalizationSchemaVersion: 1,
+        normalizerVersion: 'health_connect_v1',
+        supersedesSourceRecordId: supersedesSourceRecordId,
+      );
+
+  HealthEventDraft event({String? sourceRecordId = 'source-record-hash'}) =>
+      HealthEventDraft(
+        evidenceId: 'event-1',
+        sourceRecordId: sourceRecordId,
+        conceptType: 'resting_heart_rate',
+        eventTimestampUtc: start,
+        localDate: '2026-07-23',
+        measurementStatus: MeasurementStatus.valid,
+        recordingMethod: RecordingMethod.deviceMeasured,
+        qualityLabel: QualityLabel.high,
+        sensitivity: SensitivityClass.routine,
         normalizationSchemaVersion: 1,
         normalizerVersion: 'health_connect_v1',
       );
@@ -67,23 +85,90 @@ void main() {
       sourceRecord: sourceRecord(),
     );
 
+    expect(() => transaction.events.add(event()), throwsUnsupportedError);
+  });
+
+  test('normalized evidence requires a source record', () {
     expect(
-      () => transaction.events.add(
-        HealthEventDraft(
-          evidenceId: 'event-1',
-          sourceRecordId: 'source-record-hash',
-          conceptType: 'resting_heart_rate',
-          eventTimestampUtc: start,
-          localDate: '2026-07-23',
-          measurementStatus: MeasurementStatus.valid,
-          recordingMethod: RecordingMethod.deviceMeasured,
-          qualityLabel: QualityLabel.high,
-          sensitivity: SensitivityClass.routine,
-          normalizationSchemaVersion: 1,
-          normalizerVersion: 'health_connect_v1',
+      () => HealthTransaction(
+        transactionId: 'transaction-1',
+        capturedAtUtc: start,
+        events: [event(sourceRecordId: null)],
+      ),
+      throwsA(
+        isA<InvalidHealthDraft>().having(
+          (error) => error.reasonCode,
+          'reasonCode',
+          'missing_source_record_for_normalized_evidence',
         ),
       ),
-      throwsUnsupportedError,
+    );
+  });
+
+  test('context source must match transaction source', () {
+    expect(
+      () => HealthTransaction(
+        transactionId: 'transaction-1',
+        capturedAtUtc: start,
+        sourceRecord: sourceRecord(),
+        contextEvents: [
+          HealthContextEventDraft(
+            id: 'context-1',
+            eventType: 'illness',
+            startTimestampUtc: start,
+            localDate: '2026-07-23',
+            intensity: ContextIntensity.low,
+            sourceId: 'different-source',
+            sensitivity: SensitivityClass.sensitive,
+          ),
+        ],
+      ),
+      throwsA(
+        isA<InvalidHealthDraft>().having(
+          (error) => error.reasonCode,
+          'reasonCode',
+          'context_source_mismatch',
+        ),
+      ),
+    );
+  });
+
+  test('tombstone source must match transaction source', () {
+    expect(
+      () => HealthTransaction(
+        transactionId: 'transaction-1',
+        capturedAtUtc: start,
+        sourceRecord: sourceRecord(),
+        tombstones: [
+          HealthTombstoneDraft(
+            id: 'tombstone-1',
+            sourceId: 'different-source',
+            externalId: 'external-1',
+            conceptType: 'heart_rate',
+            observedDeletedAtUtc: start,
+          ),
+        ],
+      ),
+      throwsA(
+        isA<InvalidHealthDraft>().having(
+          (error) => error.reasonCode,
+          'reasonCode',
+          'tombstone_source_mismatch',
+        ),
+      ),
+    );
+  });
+
+  test('source record rejects self-supersession', () {
+    expect(
+      () => sourceRecord(supersedesSourceRecordId: 'source-record-hash'),
+      throwsA(
+        isA<InvalidHealthDraft>().having(
+          (error) => error.reasonCode,
+          'reasonCode',
+          'self_supersession_not_allowed',
+        ),
+      ),
     );
   });
 
@@ -129,7 +214,7 @@ void main() {
     );
   });
 
-  test('medical detection traverses nested samples', () {
+  test('medical detection traverses the source record', () {
     final transaction = HealthTransaction(
       transactionId: 'transaction-1',
       capturedAtUtc: start,
