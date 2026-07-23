@@ -2,12 +2,6 @@
 //
 // The system of record (§12.3): local Drift/SQLite, source of truth.
 // Google services are mirrors, never masters.
-//
-// v2 unified schema — eight tables:
-//   Tasks, Habits, HabitCheckIns, Routines, RoutineSteps  (Phase-1 core)
-//   Notes                                                  (v2 capture hub)
-//   MoodLogs                                               (v2 §6 trigger — §2.8 ON-DEVICE ONLY)
-//   SyncQueue                                              (Google Tasks mirror)
 
 import 'dart:io';
 
@@ -16,19 +10,17 @@ import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-part 'database.g.dart';
+import 'health_tables.dart';
 
-// ---------------------------------------------------------------------------
-// Tables
-// ---------------------------------------------------------------------------
+part 'database.g.dart';
 
 @DataClassName('TaskRow')
 class Tasks extends Table {
   TextColumn get id => text()();
   TextColumn get title => text()();
   TextColumn get notes => text().nullable()();
-  TextColumn get energy => text()(); // 'low' | 'medium' | 'high'
-  TextColumn get status => text()(); // 'pending' | 'completed' | 'skipped'
+  TextColumn get energy => text()();
+  TextColumn get status => text()();
   DateTimeColumn get createdAt => dateTime()();
   DateTimeColumn get dueDate => dateTime().nullable()();
   BoolColumn get isQuickWin => boolean().withDefault(const Constant(false))();
@@ -74,11 +66,10 @@ class HabitCheckIns extends Table {
 class Routines extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
-  TextColumn get anchor => text()(); // RoutineAnchor.name
+  TextColumn get anchor => text()();
   IntColumn get scheduleHour => integer().nullable()();
   IntColumn get scheduleMinute => integer().nullable()();
   BoolColumn get isActive => boolean().withDefault(const Constant(true))();
-  // Which weekdays this routine fires (Mon=1 … Sun=7). "12345" = weekdays.
   TextColumn get activeDays => text().nullable()();
   DateTimeColumn get createdAt => dateTime()();
 
@@ -116,7 +107,7 @@ class Notes extends Table {
 @DataClassName('MoodLogRow')
 class MoodLogs extends Table {
   TextColumn get id => text()();
-  IntColumn get level => integer()(); // MoodLevel.score, 1..5
+  IntColumn get level => integer()();
   TextColumn get note => text().nullable()();
   DateTimeColumn get loggedAt => dateTime()();
 
@@ -127,8 +118,7 @@ class MoodLogs extends Table {
 @DataClassName('SyncQueueData')
 class SyncQueue extends Table {
   TextColumn get id => text()();
-  TextColumn get operation =>
-      text()(); // 'create' | 'update' | 'complete' | 'delete'
+  TextColumn get operation => text()();
   TextColumn get taskId => text()();
   TextColumn get taskTitle => text().nullable()();
   TextColumn get taskNotes => text().nullable()();
@@ -141,13 +131,9 @@ class SyncQueue extends Table {
   Set<Column> get primaryKey => {id};
 }
 
-// ---------------------------------------------------------------------------
-// Hevy cache (read-only import mirror — Hevy remains the source of truth)
-// ---------------------------------------------------------------------------
-
 @DataClassName('HevyWorkoutRow')
 class HevyWorkouts extends Table {
-  TextColumn get id => text()(); // stable Hevy workout ID = upsert key
+  TextColumn get id => text()();
   TextColumn get title => text()();
   TextColumn get description => text().nullable()();
   DateTimeColumn get startTime => dateTime()();
@@ -162,7 +148,7 @@ class HevyWorkouts extends Table {
 
 @DataClassName('HevyExerciseRow')
 class HevyExercises extends Table {
-  TextColumn get id => text()(); // '<workoutId>:<position>'
+  TextColumn get id => text()();
   TextColumn get workoutId => text().references(HevyWorkouts, #id)();
   IntColumn get position => integer()();
   TextColumn get title => text()();
@@ -176,7 +162,7 @@ class HevyExercises extends Table {
 
 @DataClassName('HevySetRow')
 class HevySets extends Table {
-  TextColumn get id => text()(); // '<exerciseId>:<position>'
+  TextColumn get id => text()();
   TextColumn get exerciseId => text().references(HevyExercises, #id)();
   IntColumn get position => integer()();
   TextColumn get type => text()();
@@ -194,25 +180,20 @@ class HevySets extends Table {
 
 @DataClassName('HevySyncMetadataRow')
 class HevySyncMetadata extends Table {
-  TextColumn get id => text()(); // single row keyed 'hevy'
+  TextColumn get id => text()();
   DateTimeColumn get lastAttemptAt => dateTime().nullable()();
   DateTimeColumn get lastSuccessAt => dateTime().nullable()();
-  TextColumn get lastError =>
-      text().nullable()(); // failure type only, never bodies
+  TextColumn get lastError => text().nullable()();
   IntColumn get lastImportedCount => integer().nullable()();
 
   @override
   Set<Column> get primaryKey => {id};
 }
 
-// ---------------------------------------------------------------------------
-// Permanent schedule inputs (resolved blocks remain derived, never stored)
-// ---------------------------------------------------------------------------
-
 @DataClassName('HolidayCalendarEntryRow')
 class HolidayCalendarEntries extends Table {
   TextColumn get calendarId => text()();
-  TextColumn get date => text()(); // ISO-8601 local date: YYYY-MM-DD
+  TextColumn get date => text()();
   TextColumn get name => text()();
 
   @override
@@ -223,7 +204,7 @@ class HolidayCalendarEntries extends Table {
 class ScheduleRules extends Table {
   TextColumn get id => text()();
   TextColumn get name => text()();
-  TextColumn get byDay => text()(); // Comma-separated ISO weekdays: 1,2,...,7
+  TextColumn get byDay => text()();
   IntColumn get startMinutes => integer()();
   IntColumn get endMinutes => integer()();
   IntColumn get commuteBeforeMin => integer().withDefault(const Constant(0))();
@@ -237,16 +218,12 @@ class ScheduleRules extends Table {
 @DataClassName('ScheduleExceptionRow')
 class ScheduleExceptions extends Table {
   TextColumn get ruleId => text().references(ScheduleRules, #id)();
-  TextColumn get date => text()(); // ISO-8601 local date: YYYY-MM-DD
-  TextColumn get type => text()(); // 'skip' | 'force'
+  TextColumn get date => text()();
+  TextColumn get type => text()();
 
   @override
   Set<Column> get primaryKey => {ruleId, date};
 }
-
-// ---------------------------------------------------------------------------
-// Database
-// ---------------------------------------------------------------------------
 
 @DriftDatabase(tables: [
   Tasks,
@@ -264,6 +241,19 @@ class ScheduleExceptions extends Table {
   HolidayCalendarEntries,
   ScheduleRules,
   ScheduleExceptions,
+  HealthSources,
+  HealthDevices,
+  HealthSourceRecords,
+  HealthEvents,
+  HealthSpans,
+  HealthSeries,
+  HealthTimeSeries,
+  HealthContextEvents,
+  HealthDataCoverage,
+  HealthIngestionRuns,
+  HealthIngestionCheckpoints,
+  HealthTombstones,
+  HealthPermissions,
 ])
 class AppDatabase extends _$AppDatabase {
   AppDatabase() : super(_open());
@@ -271,12 +261,13 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 7;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) async {
           await m.createAll();
+          await _createHealthIndexes();
           await _seedPermanentScheduleInputs();
         },
         onUpgrade: (m, from, to) async {
@@ -311,8 +302,46 @@ class AppDatabase extends _$AppDatabase {
             await m.createTable(scheduleExceptions);
             await _seedPermanentScheduleInputs();
           }
+          if (from < 7) {
+            await m.createTable(healthSources);
+            await m.createTable(healthDevices);
+            await m.createTable(healthSourceRecords);
+            await m.createTable(healthEvents);
+            await m.createTable(healthSpans);
+            await m.createTable(healthSeries);
+            await m.createTable(healthTimeSeries);
+            await m.createTable(healthContextEvents);
+            await m.createTable(healthDataCoverage);
+            await m.createTable(healthIngestionRuns);
+            await m.createTable(healthIngestionCheckpoints);
+            await m.createTable(healthTombstones);
+            await m.createTable(healthPermissions);
+            await _createHealthIndexes();
+          }
         },
       );
+
+  Future<void> _createHealthIndexes() async {
+    const statements = <String>[
+      'CREATE INDEX IF NOT EXISTS idx_health_source_records_type_time ON health_source_records(source_record_type, started_at_utc)',
+      'CREATE UNIQUE INDEX IF NOT EXISTS idx_health_source_records_external ON health_source_records(source_id, source_app_id, external_id) WHERE external_id IS NOT NULL',
+      'CREATE INDEX IF NOT EXISTS idx_health_events_concept_time ON health_events(concept_type, event_timestamp_utc)',
+      'CREATE INDEX IF NOT EXISTS idx_health_events_local_date ON health_events(concept_type, local_date)',
+      'CREATE INDEX IF NOT EXISTS idx_health_spans_concept_start ON health_spans(concept_type, start_timestamp_utc)',
+      'CREATE INDEX IF NOT EXISTS idx_health_spans_concept_end ON health_spans(concept_type, end_timestamp_utc)',
+      'CREATE INDEX IF NOT EXISTS idx_health_spans_local_date ON health_spans(concept_type, local_date)',
+      'CREATE INDEX IF NOT EXISTS idx_health_series_concept_start ON health_series(concept_type, start_timestamp_utc)',
+      'CREATE INDEX IF NOT EXISTS idx_health_samples_concept_time ON health_time_series(concept_type, timestamp_utc)',
+      'CREATE INDEX IF NOT EXISTS idx_health_samples_series_time ON health_time_series(series_id, timestamp_utc)',
+      'CREATE INDEX IF NOT EXISTS idx_health_samples_local_date ON health_time_series(concept_type, local_date)',
+      'CREATE INDEX IF NOT EXISTS idx_health_context_type_time ON health_context_events(event_type, start_timestamp_utc)',
+      'CREATE INDEX IF NOT EXISTS idx_health_coverage_concept_window ON health_data_coverage(concept_type, window_start_utc, window_end_utc)',
+      'CREATE INDEX IF NOT EXISTS idx_health_tombstones_source_external ON health_tombstones(source_id, source_app_id, external_id)',
+    ];
+    for (final statement in statements) {
+      await customStatement(statement);
+    }
+  }
 
   Future<void> _seedPermanentScheduleInputs() => batch((batch) {
         batch.insertAll(
@@ -393,10 +422,7 @@ class AppDatabase extends _$AppDatabase {
       });
 
   DateTime _startOfDay(DateTime day) => DateTime(day.year, day.month, day.day);
-
   DateTime get _startOfToday => _startOfDay(DateTime.now());
-
-  // ---- Tasks --------------------------------------------------------------
 
   Future<void> upsertTask(TasksCompanion entry) =>
       into(tasks).insertOnConflictUpdate(entry);
@@ -457,7 +483,6 @@ class AppDatabase extends _$AppDatabase {
             status == 'inProgress' ? Value(DateTime.now()) : const Value(null),
       ),
     );
-
     if (rowsUpdated == 0) {
       throw Exception('Task with id $id not found or could not be updated');
     }
@@ -497,8 +522,6 @@ class AppDatabase extends _$AppDatabase {
     return query.watch().map((rows) => rows.length);
   }
 
-  // ---- Habits ---------------------------------------------------------------
-
   Future<void> upsertHabit(HabitsCompanion entry) =>
       into(habits).insertOnConflictUpdate(entry);
 
@@ -531,8 +554,6 @@ class AppDatabase extends _$AppDatabase {
             (c) => c.habitId.equals(habitId) & c.date.equals(_startOfToday)))
       .go();
 
-  // ---- Routines -------------------------------------------------------------
-
   Future<void> upsertRoutine(RoutinesCompanion entry) =>
       into(routines).insertOnConflictUpdate(entry);
 
@@ -561,8 +582,6 @@ class AppDatabase extends _$AppDatabase {
             ..orderBy([(s) => OrderingTerm.asc(s.position)]))
           .get();
 
-  // ---- Notes -----------------------------------------------------------
-
   Future<void> upsertNote(NotesCompanion entry) =>
       into(notes).insertOnConflictUpdate(entry);
 
@@ -576,8 +595,6 @@ class AppDatabase extends _$AppDatabase {
         ]))
       .watch();
 
-  // ---- MoodLogs ------------------------------------
-
   Future<void> insertMoodLog(MoodLogsCompanion entry) =>
       into(moodLogs).insert(entry);
 
@@ -586,8 +603,6 @@ class AppDatabase extends _$AppDatabase {
         ..orderBy([(m) => OrderingTerm.desc(m.loggedAt)])
         ..limit(1))
       .watchSingleOrNull();
-
-  // ---- Sync Queue -----------------------------------------------------------
 
   Future<void> enqueueSyncOp(SyncQueueCompanion op) =>
       into(syncQueue).insert(op);
@@ -620,8 +635,6 @@ class AppDatabase extends _$AppDatabase {
 
   Future<void> clearDoneSyncOps() =>
       (delete(syncQueue)..where((s) => s.status.equals('done'))).go();
-
-  // ---- Permanent schedule inputs ------------------------------------------
 
   Future<List<ScheduleRuleRow>> fetchScheduleRules() =>
       (select(scheduleRules)..orderBy([(r) => OrderingTerm.asc(r.id)])).get();
