@@ -37,4 +37,46 @@ void main() {
       );
     });
   });
+
+  group('HealthConnectReadPermission.setFromWireValue', () {
+    test('maps the complete supported read-only permission set', () {
+      expect(
+        HealthConnectReadPermission.setFromWireValue(const [
+          'steps',
+          'heartRate',
+          'restingHeartRate',
+          'sleep',
+          'exercise',
+          'weight',
+        ]),
+        HealthConnectReadPermission.values.toSet(),
+      );
+    });
+
+    test('ignores unknown entries and duplicates', () {
+      expect(
+        HealthConnectReadPermission.setFromWireValue(const [
+          'steps',
+          'futurePermission',
+          'steps',
+        ]),
+        const {HealthConnectReadPermission.steps},
+      );
+    });
+
+    test('fails closed for malformed payloads', () {
+      expect(
+        HealthConnectReadPermission.setFromWireValue(null),
+        isEmpty,
+      );
+      expect(
+        HealthConnectReadPermission.setFromWireValue('steps'),
+        isEmpty,
+      );
+      expect(
+        HealthConnectReadPermission.setFromWireValue(const [1, null]),
+        isEmpty,
+      );
+    });
+  });
 }
