@@ -2,6 +2,7 @@ package com.neuroflow.healthconnect
 
 import androidx.health.connect.client.HealthConnectClient
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HealthConnectBridgeTest {
@@ -61,5 +62,21 @@ class HealthConnectBridgeTest {
             setOf(HealthConnectBridge.STEPS_READ_PERMISSION),
             HealthConnectBridge.REQUIRED_PERMISSIONS,
         )
+    }
+
+    @Test
+    fun `only ok envelope may carry records`() {
+        val record = mapOf<String, Any?>("externalId" to "one")
+        val ok = HealthConnectBridge.readEnvelope(
+            HealthConnectBridge.READ_OK,
+            listOf(record),
+        )
+        val failed = HealthConnectBridge.readEnvelope(
+            HealthConnectBridge.READ_FAILED,
+            listOf(record),
+        )
+
+        assertEquals(listOf(record), ok["records"])
+        assertTrue((failed["records"] as List<*>).isEmpty())
     }
 }
