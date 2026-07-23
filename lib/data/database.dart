@@ -7,7 +7,6 @@ import 'dart:io';
 
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
-import 'package:neuroflow/domain/health/health_enums.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -370,6 +369,11 @@ class AppDatabase extends _$AppDatabase {
             ),
             HolidayCalendarEntriesCompanion.insert(
               calendarId: 'pge_2026',
+              date: '2026-06-19',
+              name: 'Juneteenth',
+            ),
+            HolidayCalendarEntriesCompanion.insert(
+              calendarId: 'pge_2026',
               date: '2026-07-03',
               name: 'Independence Day (Observed)',
             ),
@@ -386,17 +390,12 @@ class AppDatabase extends _$AppDatabase {
             HolidayCalendarEntriesCompanion.insert(
               calendarId: 'pge_2026',
               date: '2026-11-26',
-              name: 'Thanksgiving Day',
+              name: 'Thanksgiving Holiday',
             ),
             HolidayCalendarEntriesCompanion.insert(
               calendarId: 'pge_2026',
               date: '2026-11-27',
-              name: 'Day After Thanksgiving',
-            ),
-            HolidayCalendarEntriesCompanion.insert(
-              calendarId: 'pge_2026',
-              date: '2026-12-24',
-              name: 'Christmas Eve',
+              name: 'Thanksgiving Holiday (Day 2)',
             ),
             HolidayCalendarEntriesCompanion.insert(
               calendarId: 'pge_2026',
@@ -410,7 +409,7 @@ class AppDatabase extends _$AppDatabase {
           scheduleRules,
           ScheduleRulesCompanion.insert(
             id: 'rule_work',
-            name: 'PG&E Workday',
+            name: 'PG&E Work Schedule',
             byDay: '1,2,3,4,5',
             startMinutes: 360,
             endMinutes: 870,
@@ -422,24 +421,245 @@ class AppDatabase extends _$AppDatabase {
         );
       });
 
+  DateTime _startOfDay(DateTime day) => DateTime(day.year, day.month, day.day);
+  DateTime get _startOfToday => _startOfDay(DateTime.now());
+
+  Future<void> upsertTask(TasksCompanion entry) =>
+      into(tasks).insertOnConflictUpdate(entry);
+
+  Future<void> markComplete(String id) =>
+      (update(tasks)..where((t) => t.id.equals(id))).write(
+        TasksCompanion(
+          status: const Value('completed'),
+          completedAt: Value(DateTime.now()),
+          activeStartedAt: const Value(null),
+        ),
+      );
+
+  Future<void> deleteTask(String id) =>
+      (delete(tasks)..where((t) => t.id.equals(id))).go();
+
+  Stream<List<TaskRow>> watchPendingByEnergyAsc() {
+    return (select(tasks)
+          ..where((t) =>
+              t.status.isIn(['pending', 'inProgress', 'paused', 'blocked']))
+          ..orderBy([(t) => OrderingTerm.asc(t.energy)]))
+        .watch();
+  }
+
+  Stream<List<TaskRow>> watchTimelineForDay(
+    DateTime day, {
+    required bool includeFlexibleTasks,
+  }) {
+    final start = _startOfDay(day);
+    final tomorrow = DateTime(start.year, start.month, start.day + 1);
+    final scheduledForDay = tasks.dueDate.isBiggerOrEqualValue(start) &
+        tasks.dueDate.isSmallerThanValue(tomorrow);
+    final completedOnDay = tasks.status.equals('completed') &
+        tasks.completedAt.isBiggerOrEqualValue(start) &
+        tasks.completedAt.isSmallerThanValue(tomorrow);
+    final flexibleForToday = includeFlexibleTasks
+        ? tasks.dueDate.isNull() & tasks.status.isNotIn(['completed'])
+        : const Constant(false);
+    return (select(tasks)
+          ..where((t) =>
+              t.status.isNotIn(['skipped']) &
+              (scheduledForDay | completedOnDay | flexibleForToday))
+          ..orderBy([
+            (t) => OrderingTerm.asc(t.dueDate),
+            (t) => OrderingTerm.asc(t.createdAt),
+          ]))
+        .watch();
+  }
+
+  Future<void> updateTaskStatus(String id, String status) async {
+    final rowsUpdated =
+        await (update(tasks)..where((t) => t.id.equals(id))).write(
+      TasksCompanion(
+        status: Value(status),
+        completedAt:
+            status == 'completed' ? Value(DateTime.now()) : const Value(null),
+        activeStartedAt:
+            status == 'inProgress' ? Value(DateTime.now()) : const Value(null),
+      ),
+    );
+    if (rowsUpdated == 0) {
+      throw Exception('Task with id $id not found or could not be updated');
+    }
+  }
+
+  Future<void> saveTaskReentry({
+    required String taskId,
+    String? lastCompletedStep,
+    String? nextAction,
+    DateTime? returnAt,
+    required DateTime updatedAt,
+  }) =>
+      (update(tasks)..where((t) => t.id.equals(taskId))).write(
+        TasksCompanion(
+          reentryLastCompletedStep: Value(lastCompletedStep),
+          reentryNextAction: Value(nextAction),
+          reentryReturnAt: Value(returnAt),
+          reentryUpdatedAt: Value(updatedAt),
+        ),
+      );
+
+  Future<void> clearTaskReentry(String taskId) =>
+      (update(tasks)..where((t) => t.id.equals(taskId))).write(
+        const TasksCompanion(
+          reentryLastCompletedStep: Value(null),
+          reentryNextAction: Value(null),
+          reentryReturnAt: Value(null),
+          reentryUpdatedAt: Value(null),
+        ),
+      );
+
+  Stream<int> watchCompletedTodayCount() {
+    final query = select(tasks)
+      ..where((t) =>
+          t.status.equals('completed') &
+          t.completedAt.isBiggerOrEqualValue(_startOfToday));
+    return query.watch().map((rows) => rows.length);
+  }
+
+  Future<void> upsertHabit(HabitsCompanion entry) =>
+      into(habits).insertOnConflictUpdate(entry);
+
+  Future<void> archiveHabit(String id) =>
+      (update(habits)..where((h) => h.id.equals(id)))
+          .write(const HabitsCompanion(isActive: Value(false)));
+
+  Future<void> deleteHabit(String id) => transaction(() async {
+        await (delete(habitCheckIns)..where((c) => c.habitId.equals(id))).go();
+        await (delete(habits)..where((h) => h.id.equals(id))).go();
+      });
+
+  Stream<List<HabitRow>> watchActiveHabits() =>
+      (select(habits)..where((h) => h.isActive.equals(true))).watch();
+
+  Future<List<HabitCheckInRow>> fetchRecentCheckIns(String habitId) {
+    final since = _startOfToday.subtract(const Duration(days: 30));
+    return (select(habitCheckIns)
+          ..where((c) =>
+              c.habitId.equals(habitId) & c.date.isBiggerOrEqualValue(since))
+          ..orderBy([(c) => OrderingTerm.desc(c.date)]))
+        .get();
+  }
+
+  Future<void> upsertCheckIn(HabitCheckInsCompanion entry) =>
+      into(habitCheckIns).insertOnConflictUpdate(entry);
+
+  Future<void> deleteCheckInForToday(String habitId) => (delete(habitCheckIns)
+        ..where(
+            (c) => c.habitId.equals(habitId) & c.date.equals(_startOfToday)))
+      .go();
+
+  Future<void> upsertRoutine(RoutinesCompanion entry) =>
+      into(routines).insertOnConflictUpdate(entry);
+
+  Future<void> upsertStep(RoutineStepsCompanion entry) =>
+      into(routineSteps).insertOnConflictUpdate(entry);
+
+  Future<void> markStepComplete(String stepId, bool isComplete) =>
+      (update(routineSteps)..where((s) => s.id.equals(stepId)))
+          .write(RoutineStepsCompanion(isComplete: Value(isComplete)));
+
+  Future<void> resetRoutineSteps(String routineId) =>
+      (update(routineSteps)..where((s) => s.routineId.equals(routineId)))
+          .write(const RoutineStepsCompanion(isComplete: Value(false)));
+
+  Future<void> deleteRoutine(String id) => transaction(() async {
+        await (delete(routineSteps)..where((s) => s.routineId.equals(id))).go();
+        await (delete(routines)..where((r) => r.id.equals(id))).go();
+      });
+
+  Stream<List<RoutineRow>> watchActiveRoutines() =>
+      (select(routines)..where((r) => r.isActive.equals(true))).watch();
+
+  Future<List<RoutineStepRow>> fetchStepsForRoutine(String routineId) =>
+      (select(routineSteps)
+            ..where((s) => s.routineId.equals(routineId))
+            ..orderBy([(s) => OrderingTerm.asc(s.position)]))
+          .get();
+
+  Future<void> upsertNote(NotesCompanion entry) =>
+      into(notes).insertOnConflictUpdate(entry);
+
+  Future<void> deleteNote(String id) =>
+      (delete(notes)..where((n) => n.id.equals(id))).go();
+
+  Stream<List<NoteRow>> watchNotes() => (select(notes)
+        ..orderBy([
+          (n) => OrderingTerm.desc(n.pinned),
+          (n) => OrderingTerm.desc(n.updatedAt),
+        ]))
+      .watch();
+
+  Future<void> insertMoodLog(MoodLogsCompanion entry) =>
+      into(moodLogs).insert(entry);
+
+  Stream<MoodLogRow?> watchTodayLatestMood() => (select(moodLogs)
+        ..where((m) => m.loggedAt.isBiggerOrEqualValue(_startOfToday))
+        ..orderBy([(m) => OrderingTerm.desc(m.loggedAt)])
+        ..limit(1))
+      .watchSingleOrNull();
+
+  Future<void> enqueueSyncOp(SyncQueueCompanion op) =>
+      into(syncQueue).insert(op);
+
+  Future<List<SyncQueueData>> fetchPendingSyncOps({int limit = 50}) {
+    return (select(syncQueue)
+          ..where((s) => s.status.equals('pending'))
+          ..orderBy([(s) => OrderingTerm.asc(s.createdAt)])
+          ..limit(limit))
+        .get();
+  }
+
+  Future<void> markSyncOpDone(String opId) =>
+      (update(syncQueue)..where((s) => s.id.equals(opId)))
+          .write(const SyncQueueCompanion(status: Value('done')));
+
+  Future<void> incrementSyncRetry(String opId) async {
+    final op = await (select(syncQueue)..where((s) => s.id.equals(opId)))
+        .getSingleOrNull();
+    if (op == null) return;
+    final newCount = op.retryCount + 1;
+    final newStatus = newCount >= 5 ? 'failed' : 'pending';
+    await (update(syncQueue)..where((s) => s.id.equals(opId))).write(
+      SyncQueueCompanion(
+        retryCount: Value(newCount),
+        status: Value(newStatus),
+      ),
+    );
+  }
+
+  Future<void> clearDoneSyncOps() =>
+      (delete(syncQueue)..where((s) => s.status.equals('done'))).go();
+
   Future<List<ScheduleRuleRow>> fetchScheduleRules() =>
-      select(scheduleRules).get();
+      (select(scheduleRules)..orderBy([(r) => OrderingTerm.asc(r.id)])).get();
 
   Future<List<ScheduleExceptionRow>> fetchScheduleExceptionsForDate(
     String date,
   ) =>
-      (select(scheduleExceptions)..where((row) => row.date.equals(date))).get();
+      (select(scheduleExceptions)
+            ..where((entry) => entry.date.equals(date))
+            ..orderBy([(entry) => OrderingTerm.asc(entry.ruleId)]))
+          .get();
 
-  Future<List<String>> fetchHolidayDates(String calendarId) async {
+  Future<Set<String>> fetchHolidayDates(String calendarId) async {
     final rows = await (select(holidayCalendarEntries)
-          ..where((row) => row.calendarId.equals(calendarId)))
+          ..where((entry) => entry.calendarId.equals(calendarId))
+          ..orderBy([(entry) => OrderingTerm.asc(entry.date)]))
         .get();
-    return rows.map((row) => row.date).toList(growable: false);
+    return rows.map((row) => row.date).toSet();
   }
 }
 
-LazyDatabase _open() => LazyDatabase(() async {
-      final dir = await getApplicationDocumentsDirectory();
-      final file = File(p.join(dir.path, 'neuroflow.sqlite'));
-      return NativeDatabase.createInBackground(file);
-    });
+LazyDatabase _open() {
+  return LazyDatabase(() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File(p.join(dir.path, 'neuroflow.sqlite'));
+    return NativeDatabase.createInBackground(file);
+  });
+}
