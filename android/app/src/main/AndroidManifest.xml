@@ -15,6 +15,7 @@
     • WAKE_LOCK                  — keeps CPU awake while WorkManager runs
     • INTERNET                   — future Google Tasks sync (Phase 2)
     • ACCESS_NETWORK_STATE       — check connectivity before syncing
+    • READ_* health permissions  — read-only Health Connect Phase 1.5 adapter
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -35,6 +36,19 @@
     <!-- Network: future Google Tasks sync (Phase 2 — safe to include now) -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+
+    <!-- Health Connect: Phase 1.5 is intentionally read-only. -->
+    <uses-permission android:name="android.permission.health.READ_STEPS"/>
+    <uses-permission android:name="android.permission.health.READ_HEART_RATE"/>
+    <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE"/>
+    <uses-permission android:name="android.permission.health.READ_SLEEP"/>
+    <uses-permission android:name="android.permission.health.READ_EXERCISE"/>
+    <uses-permission android:name="android.permission.health.READ_WEIGHT"/>
+
+    <!-- Health Connect provider discovery for Android 13 and earlier. -->
+    <queries>
+        <package android:name="com.google.android.apps.healthdata"/>
+    </queries>
 
     <!--
       NOTE: We intentionally do NOT request SCHEDULE_EXACT_ALARM.
@@ -67,6 +81,27 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- Health Connect privacy/rationale surface for Android 13 and earlier. -->
+        <activity
+            android:name=".healthconnect.PermissionsRationaleActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Health Connect privacy/rationale surface for Android 14 and later. -->
+        <activity-alias
+            android:name=".healthconnect.ViewPermissionUsageActivity"
+            android:exported="true"
+            android:targetActivity=".healthconnect.PermissionsRationaleActivity"
+            android:permission="android.permission.START_VIEW_PERMISSION_USAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW_PERMISSION_USAGE"/>
+                <category android:name="android.intent.category.HEALTH_PERMISSIONS"/>
+            </intent-filter>
+        </activity-alias>
 
         <!-- Flutter embedding version — required -->
         <meta-data
