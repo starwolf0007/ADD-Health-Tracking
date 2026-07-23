@@ -47,13 +47,16 @@ class PermissionsRationaleActivity : Activity() {
                 setPadding(0, dp(24), 0, dp(24))
             })
 
-            addView(Button(context).apply {
-                text = "Close"
-                setOnClickListener { finish() }
-            }, ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-            ))
+            addView(
+                Button(context).apply {
+                    text = "Close"
+                    setOnClickListener { finish() }
+                },
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                ),
+            )
         }
 
         setContentView(ScrollView(this).apply { addView(content) })
