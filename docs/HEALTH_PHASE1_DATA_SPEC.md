@@ -1,10 +1,12 @@
 # NeuroFlow Health Intelligence — Phase 1 Data Specification
 
 **Status:** Canonical implementation baseline  
-**Governing doctrine:** Approved 17-point Health Intelligence Doctrine  
+**Governing doctrine:** Approved Health Intelligence Doctrine  
 **Scope:** Local evidence ingestion and trust UI only. No causal explanations, hypothesis graph, Body Age, medical vault, Home Assistant, cloud synchronization, or Lexi access to raw health data.
 
-## 1. Architectural placement
+## 1. Purpose and architectural placement
+
+NeuroFlow Health is an n-of-1 learning system built on user-owned evidence. Phase 1 establishes trustworthy capture, provenance, ownership, and data-quality visibility before NeuroFlow is allowed to interpret health evidence.
 
 Health Intelligence is a domain module parallel to the Executive Engine. It uses repositories over Drift tables. The Executive Engine and Lexi may not read raw health repositories.
 
@@ -30,7 +32,7 @@ Platform
 └── Health Connect adapters and Android permissions
 ```
 
-## 2. Locked storage decisions
+## 2. Locked storage and security decisions
 
 - Drift / SQLite on the Pixel is the Phase 1 authority.
 - Health Connect and vendor APIs are ingestion buses, never masters.
@@ -39,12 +41,25 @@ Platform
 - Missing observations are never converted to zero.
 - NeuroFlow-derived or imputed values do not enter Phase 1 evidence tables.
 - Every external-facing record has a stable NeuroFlow text identifier in addition to any internal SQLite row id.
+- Lexi receives no raw time-series, source payloads, medical documents, or unrestricted graph state.
+- Routine and sensitive health data remain local-first. Sensitive export requires explicit confirmation and production export should support encryption.
+- Medical-tier content is rejected by Phase 1 repositories. The future medical vault must use isolated encrypted-at-rest storage because device loss is part of the threat model even without a backend.
 
-## 3. Adopted refinement: source records separated from normalized evidence
+## 3. Source records separated from normalized evidence
 
-A raw `health_source_records` table is added above the three normalized evidence shapes. This is the strongest addition from the Grok review.
+A near-raw `health_source_records` table sits above the normalized evidence shapes. One source record may produce multiple normalized facts without duplicating the raw payload.
 
-One source record can produce multiple normalized facts. For example, a Health Connect sleep record can normalize into a sleep span plus several sleep-stage spans and summary events without duplicating the raw payload.
+Example:
+
+```text
+Health Connect sleep record
+          ↓
+health_source_records
+          ↓
+sleep session span
+sleep-stage spans
+sleep summary events
+```
 
 ### `health_source_records`
 
@@ -71,8 +86,6 @@ One source record can produce multiple normalized facts. For example, a Health C
 - `deleted_at_utc` INTEGER nullable
 - `supersedes_source_record_id` TEXT nullable
 
-Unique partial identity where an external id exists:
-
 ```sql
 CREATE UNIQUE INDEX idx_health_source_record_external
 ON health_source_records(source_id, source_app_id, external_id)
@@ -81,7 +94,7 @@ WHERE external_id IS NOT NULL;
 
 ## 4. Domain classifications
 
-Recording origin, availability, and quality remain separate concepts.
+Recording origin, availability, and quality are separate concepts.
 
 ```dart
 enum SensitivityClass {
@@ -116,9 +129,11 @@ enum QualityLabel {
 
 `imputed` and `neuroFlowDerived` are intentionally absent. They belong in later rebuildable analytical-artifact tables.
 
+A generic numeric confidence score is not canonical unless its calculation is explicitly defined. Use `QualityLabel`, source quality metadata, and mathematically defined completeness ratios.
+
 ## 5. Normalized evidence shapes
 
-The three-shape design is retained because it avoids nullable-column chaos and keeps high-frequency SQLite queries efficient.
+The three-shape design avoids nullable-column chaos and keeps high-frequency SQLite queries efficient.
 
 ### `health_events`
 
@@ -167,7 +182,7 @@ Contains:
 - interval boundaries and offsets
 - sample count and optional expected sample count
 - completeness and quality
-- raw payload only once at series / source-record level
+- raw payload only once at source-record or series level
 
 ### `health_time_series`
 
@@ -184,13 +199,13 @@ Lean sample rows:
 - measurement status, recording method, quality, sensitivity
 - validation flags and normalization version
 
-Synthetic rows must never be generated merely to represent a missing sample.
+Synthetic rows must never be generated merely to represent a missing sample. Missingness is represented through observation gaps, source-reported unavailable states, series completeness, and coverage summaries.
 
 ## 6. First-class contextual events
 
-The app should support a minimal manual context capture flow in Phase 1 because context is essential to later analysis and is often unavailable from sensors.
+Phase 1 includes minimal manual context capture because later analysis needs context unavailable from sensors.
 
-Context uses the same evidence/provenance rules but receives a dedicated semantic table or repository contract, `health_context_events`, to avoid mixing user narrative with high-volume measurement queries.
+Context uses the same evidence and provenance rules but receives a dedicated table or repository contract, `health_context_events`, to avoid mixing user narrative with high-volume measurement queries.
 
 Starter controlled types:
 
@@ -208,15 +223,15 @@ Required fields:
 - stable id
 - start and optional end time
 - local offsets and date
-- optional intensity enum: unknown / low / moderate / high
+- optional intensity: unknown / low / moderate / high
 - optional short note
 - manual source and user-entered recording method
 - sensitivity class
 - created and modified timestamps
 
-This UI must remain low-friction and optional.
+The capture UI must remain optional, low-friction, and tolerant of incomplete entries.
 
-## 7. Controlled concept registry and units
+## 7. Controlled concept registry and canonical units
 
 Concept types are stored as text for extensibility but may only be written through a code-controlled registry. Adapters cannot invent strings.
 
@@ -247,11 +262,11 @@ Starter concepts include:
 - `nutrition.alcohol`
 - `nutrition.water`
 
-Canonical unit conversion belongs in versioned deterministic code, not a user-editable database table in Phase 1. Source units remain in the raw payload.
+Canonical unit conversion belongs in versioned deterministic Dart code, not a user-editable database table. Source units remain in retained source metadata or raw payloads.
 
 ## 8. Coverage cache
 
-Adopt `health_data_coverage` as a rebuildable materialized cache. It is not ground truth.
+Adopt `health_data_coverage` as a rebuildable materialized cache, never ground truth.
 
 - id
 - concept type
@@ -264,9 +279,11 @@ Adopt `health_data_coverage` as a rebuildable materialized cache. It is not grou
 - calculation version
 - calculated timestamp
 
-This powers trust statements such as “Sleep duration is available for 27 of the last 30 nights.”
+This powers trust statements such as: “Sleep duration is available for 27 of the last 30 nights.”
 
-## 9. Provenance and update rules
+No analytics feature may assume complete data without checking an applicable coverage artifact.
+
+## 9. Provenance, updates, deduplication, and deletion
 
 Deduplication order:
 
@@ -276,9 +293,18 @@ Deduplication order:
 4. Never automatically collapse similar records from different origins.
 5. Never average presumed duplicates.
 
-Source updates create a new immutable source-record version or supersede the prior normalized evidence according to the adapter contract. Imported evidence must remain auditable.
+Source updates create a new immutable source-record version or supersede prior normalized evidence according to the adapter contract. Imported evidence remains auditable.
 
-A dedicated `deduplication_log` table is not required in Phase 1. Ingestion-run counters, source-record identity, supersession links, and optional record-link rows provide the required audit trail without creating an unbounded duplicate log.
+A dedicated `deduplication_log` is not required in Phase 1. Ingestion-run counters, source identity, supersession links, tombstones, and optional record-link rows provide the audit trail.
+
+### Deletion and future dependency invalidation
+
+- A source deletion creates a tombstone and marks or supersedes affected normalized evidence according to retention policy.
+- Deleting or withdrawing consent for source evidence must remove it from active coverage calculations and exports.
+- Phase 1 has no hypothesis graph, but deletion events must be emitted through a repository-level invalidation contract.
+- Future analytical artifacts and hypothesis edges must record their source evidence identifiers.
+- When source evidence is deleted, corrected, or consent is withdrawn, dependent analytical artifacts must be invalidated and recomputed or retired. They may never remain active silently.
+- User deletion must not be defeated by append-only audit design. Minimal tombstone metadata may remain only when required to prevent accidental re-import, and must not preserve deleted health values.
 
 ## 10. Required support tables
 
@@ -310,12 +336,13 @@ Required indexes include:
 - context: `(event_type, start_timestamp_utc)`
 - local-day paths: `(concept_type, local_date)` where used
 - unique source-record identity partial indexes
+- source-record linkage indexes on normalized evidence
 
 Additional indexes require measured query-plan evidence rather than speculation.
 
-## 12. Export requirement
+## 12. Export and ownership
 
-Phase 1 must provide user-controlled export of:
+Phase 1 provides user-controlled export of:
 
 - source registry
 - normalized evidence
@@ -323,7 +350,9 @@ Phase 1 must provide user-controlled export of:
 - coverage summaries
 - optionally retained raw payloads
 
-Sensitive export requires explicit confirmation and should support encrypted output before it is treated as production-ready. Medical-class export remains out of scope until the separate vault exists.
+Sensitive export requires explicit confirmation. Production-sensitive exports should support encrypted output. Medical-class export remains out of scope until the isolated vault exists.
+
+Exports must distinguish active, superseded, invalid, and deleted evidence. Deleted health values must not leak into normal exports.
 
 ## 13. Phase 1 exclusions
 
@@ -337,8 +366,27 @@ Do not add:
 - Home Assistant entities
 - cloud synchronization tables
 - raw-data access for Lexi
+- model inference or causal-language generation
 
-## 14. First vertical slice
+The evidence-tier language envelope is part of the governing doctrine, but a production LLM validator is not required until an insight-generation path exists. Phase 1 should define deterministic evidence-tier enums and template contracts so the safeguard is not retrofitted later.
+
+## 14. Definition of done
+
+Phase 1 is not verified until:
+
+- `dart run build_runner build --delete-conflicting-outputs` succeeds
+- `flutter analyze` succeeds
+- the full automated test suite succeeds
+- schema snapshot and migration tests cover the existing database upgrade to the health schema version
+- repeated ingestion is idempotent
+- source updates and deletions reconcile correctly
+- missing data is never coerced to zero or interpreted as a negative event
+- no ingestion code assumes complete coverage
+- timezone, DST, revoked-permission, interrupted-transaction, and malformed-record tests pass
+- repositories prevent Presentation, Executive, and Lexi from reading raw Drift health tables directly
+- diagnostic logs redact health values and raw payloads
+
+## 15. First vertical slice
 
 Import through Health Connect:
 
@@ -354,19 +402,20 @@ Then verify:
 - canonical units are deterministic
 - raw payload is retained once where permitted
 - source updates supersede correctly
-- deletions create tombstones
+- deletions create tombstones and emit invalidation events
 - revoked permissions do not delete already imported evidence
 - coverage UI reports missing and partial data honestly
 
-## 15. Implementation order
+## 16. Implementation order
 
 1. Add enums and controlled concept registry.
 2. Add source, device, source-record, evidence-shape, ingestion, permission, tombstone, and coverage tables.
-3. Increment the existing AppDatabase schema version and implement a forward-only migration.
+3. Increment the existing `AppDatabase` schema version from 6 to 7 and implement a forward-only migration.
 4. Add schema snapshots and migration tests before introducing another schema version.
 5. Build repository boundaries; Presentation never reads Drift tables directly.
-6. Build the narrow Health Connect adapter slice.
-7. Add trust / coverage UI and minimal context capture.
-8. Add explicit user export.
+6. Define the evidence invalidation event contract used now for deletion and later by analytical artifacts.
+7. Build the narrow Health Connect adapter slice.
+8. Add trust / coverage UI and minimal context capture.
+9. Add explicit user export.
 
-This specification is conservative by design. Phase 1 proves trustworthy capture, ownership, and provenance before NeuroFlow is allowed to interpret health evidence.
+This specification is conservative by design. Phase 1 proves trustworthy capture, ownership, provenance, deletion behavior, and security boundaries before NeuroFlow is allowed to interpret health evidence.
