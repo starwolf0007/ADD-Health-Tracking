@@ -34,24 +34,25 @@ class HealthConnectBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
     }
 
     private fun getAvailability(): String = try {
-        when (HealthConnectClient.getSdkStatus(binding.applicationContext)) {
+        mapSdkStatus(HealthConnectClient.getSdkStatus(binding.applicationContext))
+    } catch (_: Exception) {
+        // Never expose native exception classes or messages across the channel.
+        STATUS_UNSUPPORTED
+    }
+
+    companion object {
+        private const val CHANNEL = "neuroflow/health_connect"
+        internal const val STATUS_AVAILABLE = "available"
+        internal const val STATUS_SDK_UNAVAILABLE = "sdkUnavailable"
+        internal const val STATUS_PROVIDER_UPDATE_REQUIRED = "providerUpdateRequired"
+        internal const val STATUS_UNSUPPORTED = "unsupported"
+
+        internal fun mapSdkStatus(status: Int): String = when (status) {
             HealthConnectClient.SDK_AVAILABLE -> STATUS_AVAILABLE
             HealthConnectClient.SDK_UNAVAILABLE_PROVIDER_UPDATE_REQUIRED ->
                 STATUS_PROVIDER_UPDATE_REQUIRED
             HealthConnectClient.SDK_UNAVAILABLE -> STATUS_SDK_UNAVAILABLE
             else -> STATUS_UNSUPPORTED
         }
-    } catch (_: UnsupportedOperationException) {
-        STATUS_UNSUPPORTED
-    } catch (_: IllegalStateException) {
-        STATUS_SDK_UNAVAILABLE
-    }
-
-    companion object {
-        private const val CHANNEL = "neuroflow/health_connect"
-        private const val STATUS_AVAILABLE = "available"
-        private const val STATUS_SDK_UNAVAILABLE = "sdkUnavailable"
-        private const val STATUS_PROVIDER_UPDATE_REQUIRED = "providerUpdateRequired"
-        private const val STATUS_UNSUPPORTED = "unsupported"
     }
 }
