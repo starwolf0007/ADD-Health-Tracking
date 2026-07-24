@@ -15,7 +15,7 @@
     • WAKE_LOCK                  — keeps CPU awake while WorkManager runs
     • INTERNET                   — future Google Tasks sync (Phase 2)
     • ACCESS_NETWORK_STATE       — check connectivity before syncing
-    • READ_* health permissions  — read-only Health Connect Phase 1.5 adapter
+    • READ_STEPS                 — read-only Health Connect Steps scaffold
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
@@ -37,13 +37,8 @@
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
 
-    <!-- Health Connect: Phase 1.5 is intentionally read-only. -->
+    <!-- Health Connect: the current scaffold requests read-only Steps access only. -->
     <uses-permission android:name="android.permission.health.READ_STEPS"/>
-    <uses-permission android:name="android.permission.health.READ_HEART_RATE"/>
-    <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE"/>
-    <uses-permission android:name="android.permission.health.READ_SLEEP"/>
-    <uses-permission android:name="android.permission.health.READ_EXERCISE"/>
-    <uses-permission android:name="android.permission.health.READ_WEIGHT"/>
 
     <!-- Health Connect provider discovery for Android 13 and earlier. -->
     <queries>

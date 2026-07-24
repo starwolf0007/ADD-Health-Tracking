@@ -27,6 +27,20 @@ Health Connect is NeuroFlow's first health-data sensor bus. The adapter must
 preserve platform evidence and provenance without allowing Android SDK types or
 provider-specific behavior to become part of NeuroFlow's domain model.
 
+## Implementation status
+
+Implemented now:
+
+- Health Connect dependency, availability mapping, and permission scaffold.
+- Steps-only permission declaration and request.
+
+Frozen for the next Steps implementation slice:
+
+- Bounded and fully paged Steps reads.
+- The Steps Transport v1 result envelope.
+- Strict Dart parsing and mapping.
+- Transaction construction and validation.
+
 ## Patterns NeuroFlow should adopt
 
 - Stable, fail-closed availability mapping.
@@ -54,7 +68,9 @@ Android Health Connect SDK objects and constants must not cross the platform
 boundary. Native code emits plain transport values; Dart owns canonical parsing
 and normalization.
 
-## First implementation slice
+## Frozen Steps implementation slice
+
+The next implementation slice follows this accepted flow:
 
 ```text
 HealthConnectClient

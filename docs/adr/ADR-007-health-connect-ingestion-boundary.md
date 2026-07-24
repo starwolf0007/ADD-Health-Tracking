@@ -30,6 +30,25 @@ transport would destroy provenance and make later reconciliation impossible.
 - Native failures map to a closed status (`unavailable`, `permission_denied`, or `failed`) with an always-present records list and no native exception details.
 - Recording methods cross the wire as `automatic`, `active`, `manual`, or `unknown`. Dart maps both automatic and active records to `RecordingMethod.deviceMeasured`.
 
+## Implementation status
+
+### Implemented in PR #22
+
+- Health Connect client dependency.
+- Platform availability mapping.
+- Permission inspection and request lifecycle.
+- Steps-only permission declaration and rationale surface.
+- Stable Dart-facing availability and permission scaffold models.
+
+### Accepted but not yet implemented
+
+- Bounded and fully paged `readRecords<StepsRecord>()`.
+- The closed Steps Transport v1 read-result envelope.
+- Kotlin record-to-transport mapping.
+- Strict Dart ingestion parsing and normalization.
+- One-record-to-one-transaction construction.
+- Persistence, change tokens, background sync, UI, and additional data types.
+
 ## Alternatives Considered
 
 - Use Health Connect `aggregate()` for Steps, as Google's raw-read guidance recommends for cumulative records to avoid multi-source double counting — deliberately rejected for NeuroFlow's evidence-ingestion boundary because aggregation discards the independent source records and provenance required for later reconciliation. Aggregation remains appropriate only as a downstream derived operation.
