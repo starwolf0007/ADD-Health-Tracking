@@ -1,6 +1,6 @@
 import 'package:flutter/services.dart';
 
-import 'health_connect_models.dart';
+import 'package:neuroflow/platform/health_connect/health_connect_models.dart';
 
 abstract interface class HealthConnectPlatform {
   Future<HealthConnectAvailability> getAvailability();
