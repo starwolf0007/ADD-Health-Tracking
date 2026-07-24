@@ -40,13 +40,16 @@ transport would destroy provenance and make later reconciliation impossible.
 - Steps-only permission declaration and rationale surface.
 - Stable Dart-facing availability and permission scaffold models.
 
-### Accepted but not yet implemented
+### Implemented in PR #24
 
 - Bounded and fully paged `readRecords<StepsRecord>()`.
 - The closed Steps Transport v1 read-result envelope.
 - Kotlin record-to-transport mapping.
 - Strict Dart ingestion parsing and normalization.
-- One-record-to-one-transaction construction.
+- One-record-to-one-transaction construction and validation.
+
+### Accepted but not yet implemented
+
 - Persistence, change tokens, background sync, UI, and additional data types.
 
 ## Alternatives Considered
