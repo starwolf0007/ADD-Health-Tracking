@@ -54,4 +54,12 @@ class HealthConnectBridgeTest {
             bridge.toWirePermissionKeys(setOf("future.permission")),
         )
     }
+
+    @Test
+    fun `requires only read Steps permission`() {
+        assertEquals(
+            setOf(HealthConnectBridge.STEPS_READ_PERMISSION),
+            HealthConnectBridge.REQUIRED_PERMISSIONS,
+        )
+    }
 }

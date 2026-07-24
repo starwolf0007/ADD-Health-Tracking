@@ -34,14 +34,12 @@ class PermissionsRationaleActivity : Activity() {
 
             addView(TextView(context).apply {
                 text = """
-                    NeuroFlow requests read-only access to steps, heart rate,
-                    resting heart rate, sleep, exercise sessions, and weight.
+                    NeuroFlow requests read-only access to Steps.
 
-                    This information is used locally to help you understand your
-                    routines, energy, sleep, and activity patterns. NeuroFlow does
-                    not modify or delete data in Health Connect.
+                    Steps are used locally to support activity and routine insights.
+                    NeuroFlow does not modify or delete data in Health Connect.
 
-                    Access can be changed or revoked at any time in Health Connect.
+                    Access can be revoked at any time in Health Connect.
                 """.trimIndent()
                 textSize = 17f
                 setPadding(0, dp(24), 0, dp(24))

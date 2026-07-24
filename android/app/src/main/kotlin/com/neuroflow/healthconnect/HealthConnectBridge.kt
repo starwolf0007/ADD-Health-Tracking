@@ -4,12 +4,7 @@ import android.content.Intent
 import androidx.health.connect.client.HealthConnectClient
 import androidx.health.connect.client.PermissionController
 import androidx.health.connect.client.permission.HealthPermission
-import androidx.health.connect.client.records.ExerciseSessionRecord
-import androidx.health.connect.client.records.HeartRateRecord
-import androidx.health.connect.client.records.RestingHeartRateRecord
-import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.StepsRecord
-import androidx.health.connect.client.records.WeightRecord
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.embedding.engine.plugins.activity.ActivityAware
 import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
@@ -192,23 +187,11 @@ class HealthConnectBridge :
         internal val STEPS_READ_PERMISSION: String =
             HealthPermission.getReadPermission(StepsRecord::class)
 
-        internal val REQUIRED_PERMISSIONS: Set<String> = setOf(
-            STEPS_READ_PERMISSION,
-            HealthPermission.getReadPermission(HeartRateRecord::class),
-            HealthPermission.getReadPermission(RestingHeartRateRecord::class),
-            HealthPermission.getReadPermission(SleepSessionRecord::class),
-            HealthPermission.getReadPermission(ExerciseSessionRecord::class),
-            HealthPermission.getReadPermission(WeightRecord::class),
-        )
+        internal val REQUIRED_PERMISSIONS: Set<String> =
+            setOf(STEPS_READ_PERMISSION)
 
         private val PERMISSION_KEY_BY_VALUE: Map<String, String> = mapOf(
             STEPS_READ_PERMISSION to "steps",
-            HealthPermission.getReadPermission(HeartRateRecord::class) to "heartRate",
-            HealthPermission.getReadPermission(RestingHeartRateRecord::class) to
-                "restingHeartRate",
-            HealthPermission.getReadPermission(SleepSessionRecord::class) to "sleep",
-            HealthPermission.getReadPermission(ExerciseSessionRecord::class) to "exercise",
-            HealthPermission.getReadPermission(WeightRecord::class) to "weight",
         )
     }
 }

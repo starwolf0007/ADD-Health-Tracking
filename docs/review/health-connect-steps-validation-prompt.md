@@ -4,12 +4,10 @@ You are reviewing NeuroFlow's proposed Health Connect Steps vertical slice.
 Treat this as an implementation-fact validation, not an invitation to reopen
 settled architecture.
 
-## Repository and branch
+## Repository state under review
 
 - Repository: `starwolf0007/ADD-Health-Tracking`
-- Review branch: `review/health-connect-steps-draft`
-- Parent branch: `feature/health-connect-adapter`
-- Related PR: #22
+- Review the current Health Connect Steps implementation slice.
 
 ## Required context
 
@@ -23,7 +21,7 @@ Read these files before giving conclusions:
 - `lib/domain/health/health_enums.dart`
 - `lib/domain/health/health_transaction.dart`
 - `lib/health/data/health_write_guard.dart`
-- the current `HealthConnectBridge.kt` on the parent branch
+- the current `HealthConnectBridge.kt` in the repository state under review
 
 ## Locked doctrine
 
@@ -70,7 +68,7 @@ Contract rules:
 - Dart maps `automatic` and `active` to `deviceMeasured`, `manual` to `userEntered`, and `unknown` to `importedUnknown`.
 - No field may be renamed, removed, repurposed, or overloaded without incrementing the transport version.
 
-## Proposed Commit B scope
+## Required implementation scope
 
 Validate a design containing:
 
