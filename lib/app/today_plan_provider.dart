@@ -273,11 +273,7 @@ class TodayPlanNotifier extends Notifier<TodayPlanState> {
     if (current is! TodayPlanReady) return;
     final disrupted =
         TodayPlanFixtures.forScenario(MockDayScenario.lateAppointment);
-    state = buildReady(
-      base: current.basePlan,
-      proposal: disrupted,
-      needsAttention: true,
-    );
+    state = transitionSimulateDisruption(current, disrupted);
   }
 }
 

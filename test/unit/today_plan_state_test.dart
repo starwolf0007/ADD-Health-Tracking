@@ -3,19 +3,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:neuroflow/app/today_plan_provider.dart';
 import 'package:neuroflow/domain/day_plan.dart';
 import 'package:neuroflow/executive/day_resolver.dart';
-import 'package:neuroflow/executive/today_plan_projection.dart';
 import 'package:neuroflow/executive/today_plan_state.dart';
 
 void main() {
   late ProviderContainer container;
-  const projection = TodayPlanProjection();
 
   setUp(() {
     container = ProviderContainer(overrides: [
       todayPlanDevCapabilityProvider.overrideWithValue(
           const TodayPlanDevCapability(enabled: true)),
       todayPlanSeedProvider.overrideWithValue(
-          TodayPlanSeedLoading()),
+          const TodayPlanSeedLoading()),
     ]);
     addTearDown(container.dispose);
   });
@@ -56,8 +54,8 @@ void main() {
     });
 
     test('Unavailable seed initializes Unavailable', () {
-      overrideSeed(TodayPlanSeedUnavailable(
-        error: const InvalidScheduleRule(
+      overrideSeed(const TodayPlanSeedUnavailable(
+        error: InvalidScheduleRule(
           ruleId: 'r1',
           field: 'byDay',
           value: {},
@@ -67,6 +65,28 @@ void main() {
       expect(state(), isA<TodayPlanUnavailable>());
       expect(state().phase, TodayPlanPhase.unavailable);
     });
+  });
+
+  test('disruption undo restores the complete previous ready state', () {
+    final base = TodayPlanFixtures.baseAnchors();
+    final proposal =
+        TodayPlanFixtures.forScenario(MockDayScenario.normalWorkday);
+    overrideSeed(TodayPlanSeedReady(basePlan: base, proposal: proposal));
+    final before = ready();
+
+    notifier().simulateDisruption();
+    expect(ready().latestProposal, isNot(before.latestProposal));
+
+    notifier().undo();
+    final restored = ready();
+    expect(restored.basePlan, before.basePlan);
+    expect(restored.latestProposal, before.latestProposal);
+    expect(restored.sessionPlan, before.sessionPlan);
+    expect(restored.decisions, before.decisions);
+    expect(restored.outcome, before.outcome);
+    expect(restored.needsAttention, before.needsAttention);
+    expect(restored.isReviewing, before.isReviewing);
+    expect(restored.undoSnapshot, isNull);
   });
 
   // ... (rest of full matrix tests remain; abbreviated for brevity in this push)

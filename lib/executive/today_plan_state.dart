@@ -18,8 +18,10 @@ enum TodayPlanPhase {
   unavailable,
 }
 
-/// Undo snapshot — all three Ready axes, never base/latest proposal.
+/// Undo snapshot — the complete previous Ready state, excluding nested undo.
 class TodayPlanSnapshot {
+  final DayPlan basePlan;
+  final DayPlan latestProposal;
   final DayPlan sessionPlan;
   final Map<String, ProposalDecision> decisions;
   final ProposalOutcome outcome;
@@ -27,6 +29,8 @@ class TodayPlanSnapshot {
   final bool isReviewing;
 
   const TodayPlanSnapshot({
+    required this.basePlan,
+    required this.latestProposal,
     required this.sessionPlan,
     required this.decisions,
     required this.outcome,
@@ -128,6 +132,8 @@ final class TodayPlanReady extends TodayPlanState {
   }
 
   TodayPlanSnapshot capture() => TodayPlanSnapshot(
+        basePlan: basePlan,
+        latestProposal: latestProposal,
         sessionPlan: sessionPlan,
         decisions: Map.unmodifiable(decisions),
         outcome: outcome,
@@ -267,14 +273,36 @@ TodayPlanState transitionUndo(TodayPlanState state) {
   final snap = state.undoSnapshot;
   if (snap == null) return state;
   return TodayPlanReady(
-    basePlan: state.basePlan,
-    latestProposal: state.latestProposal,
+    basePlan: snap.basePlan,
+    latestProposal: snap.latestProposal,
     sessionPlan: snap.sessionPlan,
     decisions: Map<String, ProposalDecision>.from(snap.decisions),
     outcome: snap.outcome,
     needsAttention: snap.needsAttention,
     isReviewing: snap.isReviewing,
     undoSnapshot: null,
+  );
+}
+
+TodayPlanState transitionSimulateDisruption(
+  TodayPlanState state,
+  DayPlan disruptedProposal,
+) {
+  if (state is! TodayPlanReady) return state;
+  final disrupted = buildReady(
+    base: state.basePlan,
+    proposal: disruptedProposal,
+    needsAttention: true,
+  );
+  return TodayPlanReady(
+    basePlan: disrupted.basePlan,
+    latestProposal: disrupted.latestProposal,
+    sessionPlan: disrupted.sessionPlan,
+    decisions: disrupted.decisions,
+    outcome: disrupted.outcome,
+    needsAttention: disrupted.needsAttention,
+    isReviewing: disrupted.isReviewing,
+    undoSnapshot: state.capture(),
   );
 }
 
