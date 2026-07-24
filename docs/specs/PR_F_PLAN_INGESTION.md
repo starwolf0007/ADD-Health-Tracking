@@ -1,7 +1,7 @@
 # PR F: Plan Ingestion — Coach PDF/Excel → Hevy Workout Templates
 
 **Status:** Approved architecture — BLOCKED on PR E (Verified)
-**Reviewed by:** Claude, ChatGPT, Grok, Gemini (three-way convergence, 2026-07)
+**Reviewed by:** Claude, ChatGPT, Grok, Gemini (multi-model convergence, 2026-07)
 **Supersedes:** none
 **Depends on:** PR B–E (Hevy cache hardening, incremental sync, analytics projections) merged and Verified
 
@@ -72,6 +72,8 @@ Thresholds are configuration, versioned with the ruleset, and covered by tests. 
 
 **Location:** `docs/skills/plan_ingestion_rules.md` (human-readable policy and edge cases)
 **Optional companion:** `assets/plan_ingestion/plan_ingestion_rules.yaml` (machine-readable aliases/defaults, if runtime needs strict determinism)
+
+> These paths are the intended homes for the ruleset; the files themselves are authored by the implementation PR, not this architecture-only document. Until then the references are forward-looking targets, not existing files.
 
 Requirements:
 
@@ -199,3 +201,14 @@ Automatic promotion is explicitly rejected for v1: one coach-specific synonym or
 - Whether the YAML machine-readable companion is needed at v1, or markdown-plus-code suffices
 - Whether the local override table is user-scoped only, or also plan-scoped (same name meaning different things across two coaches)
 - Fuzzy-match threshold value — needs calibration against a real sample of coach plans before locking
+
+### Raised in review (2026-07, PR #25) — must be resolved before implementation
+
+These surfaced during PR review and are recorded here rather than silently resolved; each needs a concrete decision in the implementation PR.
+
+- **Write-side idempotency, not just transport.** PR B–E is read-direction only (`HevySyncService.importAll()` performs GETs and local upserts); it provides no outbound de-duplication. If Hevy accepts a routine-creation POST but the response is lost, a locally-derived intent key (§7) alone cannot tell a retry from a first write. The write executor needs an explicit write-side idempotency/reconciliation contract (e.g. read-back reconciliation or a Hevy-side identity) before the §10 "zero duplicate Hevy objects" guarantee holds.
+- **Exercise-template catalog source.** Stage 3 (name → Hevy template ID) has no candidate source for exercises absent from imported history and the canonical aliases; routing to review does not help if the reviewer has no valid template IDs to choose from. Specify how the write boundary fetches, caches, and refreshes the account's available exercise templates before candidate generation.
+- **Load-unit normalization.** Hevy stores weight as `weight_kg`; a unitless canonical `load` can silently produce the wrong prescribed weight for lb/mixed/unitless coach files. Normalized loads must carry a source unit + conversion rule, and missing/conflicting units must route through review (§3) rather than auto-resolve.
+- **Bind overrides and writes to the connected Hevy account.** Plan/override/write-command identity (§6, §7) carries no Hevy account identifier, so a mapping approved under account A could be reused when writing to account B after an API-key swap. Persist a verified Hevy user ID with overrides, plans, and write commands, and reject or segregate records when the connected account changes.
+- **Approval-field placement/nullability.** `approvedAtUtc` / `approvedBy` (§6) cannot be schema-level non-nullable on a draft that is parsed-but-awaiting-review without fabricating approval data. Keep parse-time provenance non-nullable on the draft, but locate the approval-only fields on the `ApprovedMesocycle` record where non-nullability is validly enforceable.
+- **Review surface must be able to resolve.** The minimal review UI (§9) currently offers only approve/reject/note; that cannot perform the "human resolves ambiguity" transition (§8) for multi-candidate, unknown-exercise, or unparseable-notation entries. It must also include candidate selection, exercise lookup, and field-correction so an approved plan never admits an unresolved item.
