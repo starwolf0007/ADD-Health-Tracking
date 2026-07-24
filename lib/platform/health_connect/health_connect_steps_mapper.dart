@@ -1,8 +1,7 @@
 import 'package:neuroflow/domain/health/health_enums.dart';
 import 'package:neuroflow/domain/health/health_transaction.dart';
 import 'package:neuroflow/health/data/health_write_guard.dart';
-
-import 'health_connect_steps_transport.dart';
+import 'package:neuroflow/platform/health_connect/health_connect_steps_transport.dart';
 
 abstract final class HealthConnectStepsMapper {
   static const _sourceId = 'health_connect';

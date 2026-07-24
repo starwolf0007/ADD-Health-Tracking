@@ -176,6 +176,7 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsNWidgets(2));
   });
 
+  // Skipped for environment drift that reproduces on untouched main; see #26.
   testWidgets('connected screen visual proof', (tester) async {
     tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
@@ -202,7 +203,7 @@ void main() {
       find.byType(HealthIntegrationsScreen),
       matchesGoldenFile('goldens/health_integrations_connected.png'),
     );
-  });
+  }, skip: true);
 }
 
 Future<void> _pump(

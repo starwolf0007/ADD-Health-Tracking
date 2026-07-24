@@ -1,8 +1,7 @@
 import 'package:neuroflow/domain/health/health_transaction.dart';
-
-import 'health_connect_steps_mapper.dart';
-import 'health_connect_steps_parser.dart';
-import 'health_connect_steps_transport.dart';
+import 'package:neuroflow/platform/health_connect/health_connect_steps_mapper.dart';
+import 'package:neuroflow/platform/health_connect/health_connect_steps_parser.dart';
+import 'package:neuroflow/platform/health_connect/health_connect_steps_transport.dart';
 
 final class HealthConnectStepsReadResult {
   const HealthConnectStepsReadResult({

@@ -1,4 +1,4 @@
-import 'health_connect_steps_transport.dart';
+import 'package:neuroflow/platform/health_connect/health_connect_steps_transport.dart';
 
 abstract final class HealthConnectStepsParser {
   static HealthConnectReadStatus parseStatus(Object? value) => switch (value) {
