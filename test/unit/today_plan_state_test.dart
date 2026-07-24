@@ -31,9 +31,6 @@ void main() {
     return s as TodayPlanReady;
   }
 
-  void seedNormal() =>
-      container.read(todayPlanSeedProvider.notifier) /* wait, Provider not Notifier */;
-
   // Override seed for tests
   void overrideSeed(TodayPlanSeed seed) {
     container = ProviderContainer(overrides: [
