@@ -3,6 +3,22 @@
 Written for Copilot and any other IDE-resident agent with a real compiler. Most
 of it applies to any AI collaborator on this repo.
 
+> ## ⚠️ Three rules in this file are currently contradicted by shipped code
+>
+> They are **open architectural decisions**, not bugs to fix on sight and not
+> TODOs. The code and the doctrine disagree, and that disagreement is deliberately
+> left visible until someone resolves it on purpose.
+>
+> | Rule | Status | Tracked in |
+> |---|---|---|
+> | Quick Wins never derived from task-list composition | 🔴 **Live** on the Today screen | [#30](https://github.com/starwolf0007/ADD-Health-Tracking/issues/30) |
+> | No binary streaks | 🟡 In the domain model, not yet user-visible | [#31](https://github.com/starwolf0007/ADD-Health-Tracking/issues/31) |
+> | No raw numbers in the UI | 🟢 Dormant — widget is not mounted | [#32](https://github.com/starwolf0007/ADD-Health-Tracking/issues/32) |
+>
+> Each is annotated in full under [Things to avoid](#things-to-avoid--regressions-we-already-made-once).
+> **Do not resolve one as a side effect of unrelated work** — neither by changing
+> the code nor by softening the rule to match it. Take it to the issue.
+
 ## Why this file exists
 
 For a long stretch, this project was built by four chat-based AI assistants
@@ -96,7 +112,8 @@ the rule. Raise it and get a decision.
 - **No binary streaks.** Habit progress should come from a completion rate over a
   window plus a monthly skip budget (forgiveness mechanic), never a
   consecutive-day counter that resets to zero on a miss.
-  > ⚠️ **Open conflict.** `Habit.currentStreak` and `Habit.longestStreak` in
+  > ⚠️ **Open conflict — [#31](https://github.com/starwolf0007/ADD-Health-Tracking/issues/31).**
+  > `Habit.currentStreak` and `Habit.longestStreak` in
   > `lib/domain/habit.dart` are exactly that counter — `currentStreak` breaks on
   > the first incomplete check-in. No `completionRate30d` or skip budget exists
   > anywhere in `lib/`. The behavior is covered by `test/unit/habit_test.dart`,
@@ -105,7 +122,8 @@ the rule. Raise it and get a decision.
 - **No raw numbers, percentages, or scores visible in the UI** (Goodhart's Law,
   spec §13). Internal metrics drive copy and visuals, never a literal number on
   screen.
-  > ⚠️ **Open conflict, currently dormant.** `_StreakBadge` in
+  > ⚠️ **Open conflict, currently dormant — [#32](https://github.com/starwolf0007/ADD-Health-Tracking/issues/32).**
+  > `_StreakBadge` in
   > `lib/presentation/habits_widget.dart` renders the streak count as literal
   > text. Nothing renders today — `HabitsWidget` is not instantiated by any
   > screen — but the violation lands the moment it is wired in.
@@ -115,7 +133,8 @@ the rule. Raise it and get a decision.
   from Bryan's actual state (mood, sleep, inferred engagement, resting HR), never
   from what happens to be in the task list — deciding from list composition
   inverts the entire point of the feature.
-  > ⚠️ **Open conflict, live.** `Executive.evaluate()` in
+  > ⚠️ **Open conflict, live — [#30](https://github.com/starwolf0007/ADD-Health-Tracking/issues/30).**
+  > `Executive.evaluate()` in
   > `lib/executive/planner.dart` enters Quick Wins when every pending task is
   > low-energy and there are three or fewer — task-list composition, precisely
   > the inversion this rule names. It is live: `lib/app/providers.dart` feeds its
@@ -211,5 +230,8 @@ Checked against the repo, not asserted:
   not added in `MainActivity`, and `wear/` is not in
   `android/settings.gradle.kts`. The `neuroflow/alarms` and `neuroflow/wear`
   channels have no live native handler.
-- **Open doctrine conflicts:** the three flagged above. Unresolved, owner
-  decision required.
+- **Open doctrine conflicts:** the three flagged above, tracked in
+  [#30](https://github.com/starwolf0007/ADD-Health-Tracking/issues/30),
+  [#31](https://github.com/starwolf0007/ADD-Health-Tracking/issues/31), and
+  [#32](https://github.com/starwolf0007/ADD-Health-Tracking/issues/32).
+  Unresolved; owner decision required.
