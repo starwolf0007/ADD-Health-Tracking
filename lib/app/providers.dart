@@ -15,11 +15,13 @@ export 'package:neuroflow/app/hevy_providers.dart';
 
 import 'package:neuroflow/data/habit_repository.dart';
 import 'package:neuroflow/data/habit_repository_impl.dart';
+import 'package:neuroflow/data/mood_repository_impl.dart';
 import 'package:neuroflow/data/routine_repository.dart';
 import 'package:neuroflow/data/routine_repository_impl.dart';
 import 'package:neuroflow/data/task_repository.dart';
 import 'package:neuroflow/data/task_repository_impl.dart';
 import 'package:neuroflow/domain/habit.dart';
+import 'package:neuroflow/domain/mood_repository.dart';
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/domain/task.dart';
@@ -155,6 +157,11 @@ final habitRepositoryProvider = Provider<HabitRepository>((ref) {
 
 final executiveProvider = Provider<Executive>((ref) => Executive());
 
+/// On-device mood check-in store (§2.8 — never synced).
+final moodRepositoryProvider = Provider<MoodRepository>((ref) {
+  return DriftMoodRepository(ref.watch(databaseProvider));
+});
+
 // ---------------------------------------------------------------------------
 // AI advisor tier (§14)
 // ---------------------------------------------------------------------------
@@ -232,7 +239,12 @@ class TodayController extends AsyncNotifier<TodayState> {
   Future<TodayState> build() async {
     final pending =
         await ref.watch(taskRepositoryProvider).watchPending().first;
-    final state = await _computeState(pending);
+    final todayMood =
+        await ref.watch(moodRepositoryProvider).watchTodayLatest().first;
+    final state = await _computeState(
+      pending,
+      DayCapacity(latestMood: todayMood?.level),
+    );
 
     // Push to watch after state change
     await ref.read(wearSyncServiceProvider).pushPrimaryTask(state);
@@ -240,7 +252,10 @@ class TodayController extends AsyncNotifier<TodayState> {
     return state;
   }
 
-  Future<TodayState> _computeState(List<Task> pending) async {
+  Future<TodayState> _computeState(
+    List<Task> pending,
+    DayCapacity capacity,
+  ) async {
     final executive = ref.read(executiveProvider);
     final advisor = ref.read(planAdvisorProvider);
 
@@ -248,7 +263,7 @@ class TodayController extends AsyncNotifier<TodayState> {
         ? pending
         : pending.where((t) => !_snoozedIds.contains(t.id)).toList();
 
-    final raw = executive.evaluate(active);
+    final raw = executive.evaluate(active, capacity: capacity);
     final refined = await advisor.refine(raw, active);
 
     return TodayState(
