@@ -23,7 +23,7 @@ jobs:
 
       - name: No stray markdown files at repo root
         run: |
-          allowed="README.md CLAUDE.md"
+          allowed="README.md CLAUDE.md AGENTS.md"
           stray=""
           for f in *.md; do
             [ -e "$f" ] || continue
