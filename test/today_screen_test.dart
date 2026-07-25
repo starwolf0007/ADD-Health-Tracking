@@ -243,6 +243,9 @@ Widget _interactiveApp(_FakeTaskRepository repository, DateTime now) {
       taskRepositoryProvider.overrideWithValue(repository),
       advisorTierProvider.overrideWith(() => AdvisorTierNotifier()),
       displayNameProvider.overrideWith((ref) async => 'Bryan'),
+      // As in _app: the check-in strip watches this, and without an override
+      // it opens the real Drift database, whose timers outlive the test.
+      todayMoodProvider.overrideWith((ref) => Stream.value(null)),
       todayTimelineProvider.overrideWith((ref) async {
         final task = await repository.getById('task');
         return TodayTimelineData(
