@@ -13,6 +13,7 @@ import 'package:neuroflow/presentation/theme.dart';
 import 'package:neuroflow/presentation/today/lexi_avatar.dart';
 import 'package:neuroflow/executive/timeline_logic.dart';
 import 'package:neuroflow/presentation/widgets/capture_sheet.dart';
+import 'package:neuroflow/presentation/widgets/mood_check_in.dart';
 
 class TodayScreen extends ConsumerStatefulWidget {
   final DateTime? now;
@@ -138,6 +139,12 @@ class _TodayTimelineBody extends ConsumerWidget {
             selectedDay: viewedDay,
             isViewingToday: isViewingToday,
           ),
+          // Only on today — a check-in is about how this day is going, and
+          // the signal it feeds (§6) only ever reshapes today.
+          if (isViewingToday) ...[
+            const SizedBox(height: AppSpace.md),
+            const MoodCheckInStrip(),
+          ],
           const SizedBox(height: AppSpace.md),
           _DaySummaryCard(data: data),
           if (!data.hasCalendarPermission) ...[

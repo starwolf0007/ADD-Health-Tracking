@@ -21,6 +21,7 @@ import 'package:neuroflow/data/routine_repository_impl.dart';
 import 'package:neuroflow/data/task_repository.dart';
 import 'package:neuroflow/data/task_repository_impl.dart';
 import 'package:neuroflow/domain/habit.dart';
+import 'package:neuroflow/domain/mood.dart';
 import 'package:neuroflow/domain/mood_repository.dart';
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
@@ -160,6 +161,14 @@ final executiveProvider = Provider<Executive>((ref) => Executive());
 /// On-device mood check-in store (§2.8 — never synced).
 final moodRepositoryProvider = Provider<MoodRepository>((ref) {
   return DriftMoodRepository(ref.watch(databaseProvider));
+});
+
+/// Today's most recent check-in, watched live so the check-in surface reflects
+/// a new entry immediately. [TodayController] reads the same signal once per
+/// build and therefore needs invalidating after a write — see the check-in
+/// widget.
+final todayMoodProvider = StreamProvider<MoodLog?>((ref) {
+  return ref.watch(moodRepositoryProvider).watchTodayLatest();
 });
 
 // ---------------------------------------------------------------------------

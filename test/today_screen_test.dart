@@ -226,6 +226,9 @@ Widget _app(TodayTimelineData data, DateTime now) {
     overrides: [
       todayTimelineProvider.overrideWith((ref) async => data),
       displayNameProvider.overrideWith((ref) async => 'Bryan'),
+      // The check-in strip watches this; without an override it would build
+      // the real Drift database.
+      todayMoodProvider.overrideWith((ref) => Stream.value(null)),
     ],
     child: MaterialApp(
       theme: AppTheme.dark(),
