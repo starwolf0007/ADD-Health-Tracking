@@ -11,7 +11,8 @@ of it applies to any AI collaborator on this repo.
 >
 > | Rule | Status | Tracked in |
 > |---|---|---|
-> | Quick Wins never derived from task-list composition | 🔴 **Live** on the Today screen | [#30](https://github.com/starwolf0007/ADD-Health-Tracking/issues/30) |
+> | Quick Wins never derived from task-list composition | ✅ **Resolved** — entry now comes from the mood signal | [#30](https://github.com/starwolf0007/ADD-Health-Tracking/issues/30) |
+> | Quick Wins is never a stored flag | 🟡 `isQuickWin` is still a persisted column, but nothing reads it | [#34](https://github.com/starwolf0007/ADD-Health-Tracking/issues/34) |
 > | No binary streaks | 🟡 In the domain model, not yet user-visible | [#31](https://github.com/starwolf0007/ADD-Health-Tracking/issues/31) |
 > | No raw numbers in the UI | 🟢 Dormant — widget is not mounted | [#32](https://github.com/starwolf0007/ADD-Health-Tracking/issues/32) |
 >
@@ -129,19 +130,24 @@ the rule. Raise it and get a decision.
   > screen — but the violation lands the moment it is wired in.
 
 - **Quick Wins mode is derived state, never a stored flag.** `isQuickWin` or any
-  equivalent must never be a persisted boolean on a Task. It should be computed
-  from Bryan's actual state (mood, sleep, inferred engagement, resting HR), never
-  from what happens to be in the task list — deciding from list composition
-  inverts the entire point of the feature.
-  > ⚠️ **Open conflict, live — [#30](https://github.com/starwolf0007/ADD-Health-Tracking/issues/30).**
-  > `Executive.evaluate()` in
-  > `lib/executive/planner.dart` enters Quick Wins when every pending task is
-  > low-energy and there are three or fewer — task-list composition, precisely
-  > the inversion this rule names. It is live: `lib/app/providers.dart` feeds its
-  > output straight into `TodayState.mode`, and `test/unit/executive_test.dart`
-  > locks the behavior in. The `DeterministicPlanner.shouldEnterQuickWins()` this
-  > rule used to cite does not exist in `lib/`; the user-state inputs it names
-  > are not plumbed. Correctly derived state, wrong derivation.
+  equivalent must never be a persisted boolean on a Task. It is computed from
+  Bryan's actual state (mood today; sleep, inferred engagement, and resting HR
+  as they become available), never from what happens to be in the task list —
+  deciding from list composition inverts the entire point of the feature. Entry
+  lives in `DayCapacity` in `lib/executive/planner.dart`; add new signals there,
+  never to the task-list inspection.
+  > ✅ **Entry resolved — [#30](https://github.com/starwolf0007/ADD-Health-Tracking/issues/30).**
+  > `Executive.evaluate()` now takes a `DayCapacity` and enters Quick Wins from
+  > the mood check-in (`MoodLevel.triggersQuickWins`), per spec §6. Task energy
+  > and estimated effort decide only *which* tasks the reshaped Today shows,
+  > capped at three. Note the mode is currently dormant in the running app:
+  > nothing writes a mood yet, tracked in
+  > [#35](https://github.com/starwolf0007/ADD-Health-Tracking/issues/35).
+  >
+  > ⚠️ **Stored-flag half still open — [#34](https://github.com/starwolf0007/ADD-Health-Tracking/issues/34).**
+  > `isQuickWin` remains a persisted boolean column on `Tasks`, which this rule
+  > also forbids. It is dead data — the planner never reads it — but it is still
+  > written at capture time and can go stale against a task's energy.
 
 - **Capture stays one input, one button.** No additional fields, selectors, or
   decisions in the quick-add flow — that is the one interaction this app protects
@@ -230,8 +236,13 @@ Checked against the repo, not asserted:
   not added in `MainActivity`, and `wear/` is not in
   `android/settings.gradle.kts`. The `neuroflow/alarms` and `neuroflow/wear`
   channels have no live native handler.
-- **Open doctrine conflicts:** the three flagged above, tracked in
-  [#30](https://github.com/starwolf0007/ADD-Health-Tracking/issues/30),
-  [#31](https://github.com/starwolf0007/ADD-Health-Tracking/issues/31), and
-  [#32](https://github.com/starwolf0007/ADD-Health-Tracking/issues/32).
+- **Quick Wins entry:** resolved in
+  [#30](https://github.com/starwolf0007/ADD-Health-Tracking/issues/30) — derived
+  from the mood check-in via `DayCapacity`. Dormant until a check-in surface
+  exists ([#35](https://github.com/starwolf0007/ADD-Health-Tracking/issues/35)).
+- **Open doctrine conflicts:** the stored `isQuickWin` flag
+  ([#34](https://github.com/starwolf0007/ADD-Health-Tracking/issues/34)), binary
+  streaks ([#31](https://github.com/starwolf0007/ADD-Health-Tracking/issues/31)),
+  and the dormant numeric badge
+  ([#32](https://github.com/starwolf0007/ADD-Health-Tracking/issues/32)).
   Unresolved; owner decision required.
