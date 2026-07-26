@@ -123,15 +123,24 @@ This makes it possible to explain why a given routine was generated a particular
 
 ## 7. Idempotency
 
-PR B–E guarantees idempotent *transport*. PR F still needs its own **intent identity**, or an edited-and-reapproved plan becomes indistinguishable from a retry.
+The write direction **cannot assume idempotent transport.** PR B–E is read-direction only — `HevySyncService.importAll()` performs GETs and idempotent *local* upserts — so it provides no outbound de-duplication. If Hevy accepts a routine-creation request but the response is lost, a naive retry creates a duplicate. PR F therefore owns write-side idempotency itself, in two layers.
 
-Idempotency key derives from:
+**1. Intent identity (local).** Every outbound write carries a deterministic intent key:
 
 ```
 planId + mesocycleWeek + sessionIndex + approvedRevision
 ```
 
-`planId` derives deterministically from `sourceFileHash`, so re-ingesting the identical file produces the identical plan identity.
+`planId` derives deterministically from `sourceFileHash`, so re-ingesting the identical file produces the identical plan identity, and an edited-and-reapproved plan (new `approvedRevision`) is distinguishable from a retry rather than colliding with it.
+
+**2. Remote reconciliation (Hevy-side).** The intent key is also persisted as a stable, machine-readable marker on the created Hevy object (embedded in a reserved namespace within the routine's notes/title), so it can be recovered by read-back. Before creating, the write executor reconciles the intent key against existing Hevy objects:
+
+- **match found** → the write already succeeded; adopt the existing object, create nothing;
+- **no match** → create, then record the returned remote object identity locally.
+
+This makes create operations effectively idempotent even though Hevy exposes no transport-level idempotency token. The local key alone is necessary but not sufficient — without the reconciliation step it cannot survive a lost response — so **both** layers are required before the §10 "zero duplicate Hevy objects" guarantee holds.
+
+> Retiring or updating the routine produced by a superseded `approvedRevision` reuses this same remote-object identity; the concrete update/delete/supersession policy is tracked in §12.
 
 ---
 
@@ -206,7 +215,7 @@ Automatic promotion is explicitly rejected for v1: one coach-specific synonym or
 
 These surfaced during PR review and are recorded here rather than silently resolved; each needs a concrete decision in the implementation PR.
 
-- **Write-side idempotency, not just transport.** PR B–E is read-direction only (`HevySyncService.importAll()` performs GETs and local upserts); it provides no outbound de-duplication. If Hevy accepts a routine-creation POST but the response is lost, a locally-derived intent key (§7) alone cannot tell a retry from a first write. The write executor needs an explicit write-side idempotency/reconciliation contract (e.g. read-back reconciliation or a Hevy-side identity) before the §10 "zero duplicate Hevy objects" guarantee holds.
+- ~~**Write-side idempotency, not just transport.**~~ **Resolved in §7** — the transport-idempotency assumption was corrected and §7 now defines a two-layer contract (local intent identity + Hevy-side read-back reconciliation). The remaining remote-object *supersession* policy is still open (see below).
 - **Exercise-template catalog source.** Stage 3 (name → Hevy template ID) has no candidate source for exercises absent from imported history and the canonical aliases; routing to review does not help if the reviewer has no valid template IDs to choose from. Specify how the write boundary fetches, caches, and refreshes the account's available exercise templates before candidate generation.
 - **Load-unit normalization.** Hevy stores weight as `weight_kg`; a unitless canonical `load` can silently produce the wrong prescribed weight for lb/mixed/unitless coach files. Normalized loads must carry a source unit + conversion rule, and missing/conflicting units must route through review (§3) rather than auto-resolve.
 - **Bind overrides and writes to the connected Hevy account.** Plan/override/write-command identity (§6, §7) carries no Hevy account identifier, so a mapping approved under account A could be reused when writing to account B after an API-key swap. Persist a verified Hevy user ID with overrides, plans, and write commands, and reject or segregate records when the connected account changes.
