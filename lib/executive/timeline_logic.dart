@@ -120,11 +120,8 @@ class TodayTimelineBuilder {
       ));
     }
 
-    for (var index = 0; index < tasks.length; index++) {
-      final task = tasks[index];
-      final start = task.dueDate ??
-          DateTime(day.year, day.month, day.day, 9)
-              .add(Duration(minutes: index * 45));
+    for (final task in tasks) {
+      final start = task.dueDate;
       items.add(TimelineItem(
         id: 'task-${task.id}',
         type: task.dueDate == null
@@ -133,7 +130,7 @@ class TodayTimelineBuilder {
         title: task.title,
         subtitle: task.notes,
         start: start,
-        end: start.add(const Duration(minutes: 30)),
+        end: start?.add(const Duration(minutes: 30)),
         task: task,
         isCompleted: task.isCompleted,
         isPaused: task.status == TaskStatus.paused,

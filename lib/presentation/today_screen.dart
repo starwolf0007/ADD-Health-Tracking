@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -106,7 +108,13 @@ class _TodayTimelineBody extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final recommended = data.recommendedTask;
-    final markerIndex = data.items.indexWhere(
+    final dayItems = data.items
+        .where((item) => item.type != TimelineItemType.flexibleBlock)
+        .toList();
+    final flexibleItems = data.items
+        .where((item) => item.type == TimelineItemType.flexibleBlock)
+        .toList();
+    final markerIndex = dayItems.indexWhere(
       (item) => item.phaseAt(now) != TimelinePhase.past,
     );
     return RefreshIndicator(
@@ -135,13 +143,23 @@ class _TodayTimelineBody extends ConsumerWidget {
           if (data.items.isEmpty)
             const _EmptyDayState()
           else ...[
-            for (var index = 0; index < data.items.length; index++) ...[
+            if (dayItems.isEmpty)
+              const Text('Nothing scheduled yet.',
+                  style: AppTextStyles.bodySmall),
+            for (var index = 0; index < dayItems.length; index++) ...[
               if (index == markerIndex)
                 _CurrentTimeMarker(key: currentKey, now: now),
-              _TimelineRow(item: data.items[index], now: now),
+              _TimelineRow(item: dayItems[index], now: now),
             ],
-            if (markerIndex == -1)
+            if (markerIndex == -1 && dayItems.isNotEmpty)
               _CurrentTimeMarker(key: currentKey, now: now),
+          ],
+          if (flexibleItems.isNotEmpty) ...[
+            const SizedBox(height: AppSpace.xl),
+            const Text('Flexible tasks', style: AppTextStyles.titleMedium),
+            const SizedBox(height: AppSpace.md),
+            for (final item in flexibleItems)
+              _TimelineRow(item: item, now: now),
           ],
         ],
       ),
@@ -149,20 +167,25 @@ class _TodayTimelineBody extends ConsumerWidget {
   }
 }
 
-class _DaySummaryCard extends StatelessWidget {
+class _DaySummaryCard extends ConsumerWidget {
   final TodayTimelineData data;
   const _DaySummaryCard({required this.data});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Semantics(
       button: true,
       label: 'Open Lexi conversation',
       child: InkWell(
         borderRadius: BorderRadius.circular(AppSpace.radiusCard),
-        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => const LexiConversationScreen(),
-        )),
+        onTap: () {
+          unawaited(ref
+              .read(todayControllerProvider.notifier)
+              .requestLexiRefinement());
+          Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) => const LexiConversationScreen(),
+          ));
+        },
         child: Container(
           padding: const EdgeInsets.all(AppSpace.lg),
           decoration: BoxDecoration(

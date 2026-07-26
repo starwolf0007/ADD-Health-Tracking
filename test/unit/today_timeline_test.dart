@@ -75,6 +75,26 @@ void main() {
     ]);
   });
 
+  test('keeps unscheduled tasks untimed', () {
+    final task = Task(
+      id: 'flexible',
+      title: 'Write update',
+      energy: EnergyLevel.medium,
+      createdAt: day,
+    );
+
+    final items = const TodayTimelineBuilder().build(
+      day: day,
+      tasks: [task],
+      routines: const [],
+    );
+    final flexible = items.single;
+
+    expect(flexible.type, TimelineItemType.flexibleBlock);
+    expect(flexible.start, isNull);
+    expect(flexible.end, isNull);
+  });
+
   test('deterministic summary does not require Lexi', () {
     final data = TodayTimelineData(
       items: [

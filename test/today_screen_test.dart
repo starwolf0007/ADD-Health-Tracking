@@ -25,6 +25,7 @@ void main() {
     await tester.scrollUntilVisible(
         find.text('Flexible writing block').last, 180);
     expect(find.text('Flexible writing block'), findsWidgets);
+    expect(find.text('Flexible tasks'), findsOneWidget);
     expect(find.text('Not now'), findsOneWidget);
   });
 
@@ -171,7 +172,7 @@ Future<void> _openSaveDialog(WidgetTester tester) async {
 Widget _app(TodayTimelineData data, DateTime now) {
   return ProviderScope(
     overrides: [
-      todayTimelineProvider.overrideWith((ref) async => data),
+      todayTimelineProvider.overrideWith((ref) => Stream.value(data)),
       displayNameProvider.overrideWith((ref) async => 'Bryan'),
     ],
     child: MaterialApp(
@@ -187,15 +188,14 @@ Widget _interactiveApp(_FakeTaskRepository repository, DateTime now) {
       taskRepositoryProvider.overrideWithValue(repository),
       advisorTierProvider.overrideWith(() => AdvisorTierNotifier()),
       displayNameProvider.overrideWith((ref) async => 'Bryan'),
-      todayTimelineProvider.overrideWith((ref) async {
+      todayTimelineProvider.overrideWith((ref) async* {
         final task = await repository.getById('task');
-        return TodayTimelineData(
+        yield TodayTimelineData(
           items: [
             TimelineItem(
               id: 'task',
               type: TimelineItemType.flexibleBlock,
               title: task!.title,
-              start: DateTime(2026, 7, 10, 13),
               task: task,
               isPaused: task.status == TaskStatus.paused,
             ),
@@ -293,7 +293,6 @@ TodayTimelineData _mixedData({required bool lexiAvailable}) {
         id: 'flex',
         type: TimelineItemType.flexibleBlock,
         title: task.title,
-        start: DateTime(2026, 7, 10, 14),
         task: task,
       ),
     ],

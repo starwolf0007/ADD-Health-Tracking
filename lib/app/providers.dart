@@ -223,7 +223,9 @@ class TodayController extends AsyncNotifier<TodayState> {
   Future<TodayState> build() async {
     final pending =
         await ref.watch(taskRepositoryProvider).watchPending().first;
-    final state = await _computeState(pending);
+    // Deterministic plan only — Lexi refinement is opt-in via
+    // requestLexiRefinement(), never invoked automatically on load.
+    final state = await _computeState(pending, refine: false);
 
     // Push to watch after state change
     await ref.read(wearSyncServiceProvider).pushPrimaryTask(state);
@@ -231,16 +233,19 @@ class TodayController extends AsyncNotifier<TodayState> {
     return state;
   }
 
-  Future<TodayState> _computeState(List<Task> pending) async {
+  Future<TodayState> _computeState(
+    List<Task> pending, {
+    required bool refine,
+  }) async {
     final executive = ref.read(executiveProvider);
-    final advisor = ref.read(planAdvisorProvider);
 
     final active = _snoozedIds.isEmpty
         ? pending
         : pending.where((t) => !_snoozedIds.contains(t.id)).toList();
 
     final raw = executive.evaluate(active);
-    final refined = await advisor.refine(raw, active);
+    final refined =
+        refine ? await ref.read(planAdvisorProvider).refine(raw, active) : raw;
 
     return TodayState(
       mode: refined.mode,
@@ -259,6 +264,18 @@ class TodayController extends AsyncNotifier<TodayState> {
   void snoozeForSession(String taskId) {
     _snoozedIds.add(taskId);
     ref.invalidateSelf();
+  }
+
+  /// Explicit, user-initiated Lexi refinement of the current plan's reason.
+  /// Never called automatically — Lexi is an optional enhancer (ADR-001).
+  Future<void> requestLexiRefinement() async {
+    try {
+      final pending =
+          await ref.read(taskRepositoryProvider).watchPending().first;
+      state = AsyncData(await _computeState(pending, refine: true));
+    } catch (_) {
+      // Lexi is optional. Keep the deterministic plan on any failure.
+    }
   }
 }
 
@@ -281,26 +298,29 @@ final todayCalendarSourceProvider = Provider<TodayCalendarSource>(
   (ref) => const NoCalendarSource(),
 );
 
-final todayTimelineProvider = FutureProvider<TodayTimelineData>((ref) async {
-  final tasks =
-      await ref.watch(taskRepositoryProvider).watchTodayTimeline().first;
+final todayTimelineProvider = StreamProvider<TodayTimelineData>((ref) {
+  final taskRepo = ref.watch(taskRepositoryProvider);
   final routines =
-      await ref.watch(routineRepositoryProvider).watchActive().first;
+      ref.watch(activeRoutinesProvider).value ?? const <Routine>[];
   final calendar = ref.watch(todayCalendarSourceProvider);
-  final now = DateTime.now();
-  final calendarItems = await calendar.load(now);
   final recommended = ref.watch(todayControllerProvider).value?.primaryTask;
-  return TodayTimelineData(
-    items: const TodayTimelineBuilder().build(
-      day: now,
-      tasks: tasks,
-      routines: routines,
-      calendarItems: calendarItems,
-    ),
-    recommendedTask: recommended,
-    hasCalendarPermission: calendar.hasPermission,
-    lexiAvailable: ref.watch(advisorTierProvider) != AdvisorTier.none,
-  );
+  final lexiAvailable = ref.watch(advisorTierProvider) != AdvisorTier.none;
+
+  return taskRepo.watchTodayTimeline().asyncMap((tasks) async {
+    final now = DateTime.now();
+    final calendarItems = await calendar.load(now);
+    return TodayTimelineData(
+      items: const TodayTimelineBuilder().build(
+        day: now,
+        tasks: tasks,
+        routines: routines,
+        calendarItems: calendarItems,
+      ),
+      recommendedTask: recommended,
+      hasCalendarPermission: calendar.hasPermission,
+      lexiAvailable: lexiAvailable,
+    );
+  });
 });
 
 /// Latest task-action failure, for the UI to surface (e.g. as a SnackBar).
@@ -343,9 +363,15 @@ class TaskActionController {
   }
 
   Future<void> clearReentry(String id) async {
-    await ref.read(taskRepositoryProvider).clearReentryNote(id);
-    ref.invalidate(reentryNoteProvider(id));
-    ref.invalidate(todayTimelineProvider);
+    try {
+      await ref.read(taskRepositoryProvider).clearReentryNote(id);
+      ref.invalidate(reentryNoteProvider(id));
+      ref.invalidate(todayTimelineProvider);
+    } catch (_) {
+      ref
+          .read(taskActionErrorProvider.notifier)
+          .set('Could not clear your note. Please try again.');
+    }
   }
 
   void notNow(String id) {
