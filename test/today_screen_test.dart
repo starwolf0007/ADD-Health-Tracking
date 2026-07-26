@@ -3,10 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/data/task_repository.dart';
+import 'package:neuroflow/domain/mood.dart';
+import 'package:neuroflow/domain/mood_repository.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/presentation/theme.dart';
+import 'package:neuroflow/executive/planner.dart';
 import 'package:neuroflow/executive/timeline_logic.dart';
+import 'package:neuroflow/platform/wear/wear_sync_service.dart';
 import 'package:neuroflow/presentation/today_screen.dart';
 
 void main() {
@@ -38,6 +42,45 @@ void main() {
     expect(find.text('Flexible tasks'), findsOneWidget);
   });
 
+  testWidgets(
+      'tapping the day summary card triggers Lexi refinement and shows the refined reason',
+      (tester) async {
+    final repository = _FakeTaskRepository(_task());
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          taskRepositoryProvider.overrideWithValue(repository),
+          moodRepositoryProvider.overrideWithValue(const _FakeMoodRepository()),
+          planAdvisorProvider.overrideWithValue(const _FixedReasonAdvisor()),
+          wearSyncServiceProvider.overrideWithValue(_FakeWearSyncService()),
+          todayTimelineProvider
+              .overrideWith((ref) async => _mixedData(lexiAvailable: true)),
+          displayNameProvider.overrideWith((ref) async => 'Bryan'),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.dark(),
+          home: TodayScreen(now: now),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+
+    // Deterministic-only on load (PR #39 intent) — the Lexi-refined reason
+    // must not appear yet.
+    expect(find.text('LEXI REFINED REASON MARKER'), findsNothing);
+
+    final card = find.text('Tap to talk with Lexi');
+    await tester.ensureVisible(card);
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(card);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    // Tapping the day summary card is the explicit user action that opts
+    // into Lexi refinement (ADR-001); it must actually reach
+    // TodayController.requestLexiRefinement() and surface the result.
+    expect(find.text('LEXI REFINED REASON MARKER'), findsOneWidget);
+  });
+
   testWidgets('shows an empty day state', (tester) async {
     await tester.pumpWidget(_app(
         const TodayTimelineData(
@@ -49,6 +92,32 @@ void main() {
         now));
     await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('Your day has room'), findsOneWidget);
+  });
+
+  testWidgets('Lexi card tap requests one opt-in refinement', (tester) async {
+    final controller = _RecordingTodayController();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          todayControllerProvider.overrideWith(() => controller),
+          todayTimelineProvider.overrideWith(
+            (ref) async => _mixedData(lexiAvailable: true),
+          ),
+          displayNameProvider.overrideWith((ref) async => 'Bryan'),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.dark(),
+          home: TodayScreen(now: now),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 500));
+
+    await tester.ensureVisible(find.text('A calm look ahead'));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.tap(find.text('A calm look ahead'));
+
+    expect(controller.refinementRequests, 1);
   });
 
   testWidgets('date navigation can browse away and return to today',
@@ -437,4 +506,45 @@ class _FakeTaskRepository implements TaskRepository {
 
   @override
   Future<void> delete(String id) async => deleted = true;
+}
+
+class _RecordingTodayController extends TodayController {
+  int refinementRequests = 0;
+
+  @override
+  Future<TodayState> build() async => const TodayState(isLoading: false);
+
+  @override
+  Future<void> requestLexiRefinement() async {
+    refinementRequests++;
+  }
+}
+
+class _FakeMoodRepository implements MoodRepository {
+  const _FakeMoodRepository();
+
+  @override
+  Stream<MoodLog?> watchTodayLatest() => Stream.value(null);
+
+  @override
+  Future<void> log(MoodLog entry) async {}
+}
+
+class _FixedReasonAdvisor implements PlanAdvisor {
+  const _FixedReasonAdvisor();
+
+  @override
+  Future<Plan> refine(Plan plan, List<Task> allPending) async {
+    return Plan(
+      mode: plan.mode,
+      primaryTask: plan.primaryTask,
+      quickWins: plan.quickWins,
+      reason: 'LEXI REFINED REASON MARKER',
+    );
+  }
+}
+
+class _FakeWearSyncService extends WearSyncService {
+  @override
+  Future<void> pushPrimaryTask(TodayState state) async {}
 }
