@@ -19,14 +19,23 @@ void main() {
 
     expect(find.text('Your plan, on device'), findsOneWidget);
     expect(find.textContaining('Lexi is offline'), findsOneWidget);
+    // Recommended-task card renders at the top, visible without scrolling —
+    // check it here before scrolling down scrolls it out of the ListView's
+    // built range.
+    expect(find.text('Not now'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Calendar sync'), 150);
     expect(find.text('Calendar sync'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Morning anchor'), 180);
     expect(find.text('Morning anchor'), findsOneWidget);
-    await tester.scrollUntilVisible(
-        find.text('Flexible writing block').last, 180);
+    // Scroll on the section heading, not the task title: "Flexible writing
+    // block" also appears in the recommended-task card near the top (same
+    // fixture task is both the day's recommendation and the lone flexible
+    // block), so scrolling to `.last` of that text can be satisfied by the
+    // already-visible card without ever scrolling the flexible-items
+    // section into the ListView's built range.
+    await tester.scrollUntilVisible(find.text('Flexible tasks'), 180);
     expect(find.text('Flexible writing block'), findsWidgets);
-    expect(find.text('Not now'), findsOneWidget);
+    expect(find.text('Flexible tasks'), findsOneWidget);
   });
 
   testWidgets('shows an empty day state', (tester) async {

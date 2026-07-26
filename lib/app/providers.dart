@@ -59,8 +59,9 @@ final settingsServiceProvider = Provider<SettingsService>((ref) {
   return SettingsService();
 });
 
-final notificationServiceProvider =
-    Provider<ActiveTaskNotificationService>((ref) {
+final notificationServiceProvider = Provider<ActiveTaskNotificationService>((
+  ref,
+) {
   return NotificationService();
 });
 
@@ -72,20 +73,22 @@ final googleAuthRepositoryProvider = Provider<GoogleAuthRepository>((ref) {
   return GoogleAuthRepositoryImpl();
 });
 
-final googleAccountRepositoryProvider =
-    Provider<GoogleAccountRepository>((ref) {
+final googleAccountRepositoryProvider = Provider<GoogleAccountRepository>((
+  ref,
+) {
   return GoogleAccountRepositoryImpl(const FlutterSecureStorage());
 });
 
-final googlePermissionManagerProvider =
-    Provider<GooglePermissionManager>((ref) {
+final googlePermissionManagerProvider = Provider<GooglePermissionManager>((
+  ref,
+) {
   return GooglePermissionManagerImpl();
 });
 
 final connectedServicesRepositoryProvider =
     Provider<ConnectedServicesRepository>((ref) {
-  return ConnectedServicesRepositoryImpl(const FlutterSecureStorage());
-});
+      return ConnectedServicesRepositoryImpl(const FlutterSecureStorage());
+    });
 
 final googleServiceManagerProvider = Provider<GoogleServiceManager>((ref) {
   final authRepo = ref.watch(googleAuthRepositoryProvider);
@@ -103,8 +106,9 @@ final googleAccountProvider = StreamProvider<GoogleAccount?>((ref) {
 });
 
 /// Stream of the global Google connection state.
-final googleConnectionStateProvider =
-    StreamProvider<GoogleConnectionState>((ref) {
+final googleConnectionStateProvider = StreamProvider<GoogleConnectionState>((
+  ref,
+) {
   return ref.watch(googleServiceManagerProvider).connectionState;
 });
 
@@ -166,11 +170,7 @@ final moodRepositoryProvider = Provider<MoodRepository>((ref) {
 // AI advisor tier (§14)
 // ---------------------------------------------------------------------------
 
-enum AdvisorTier {
-  none,
-  lexi,
-  cloud,
-}
+enum AdvisorTier { none, lexi, cloud }
 
 class AdvisorTierNotifier extends Notifier<AdvisorTier> {
   @override
@@ -232,18 +232,35 @@ class TodayState {
   }
 }
 
+class _LexiRefinementFailure implements Exception {
+  final Object cause;
+
+  const _LexiRefinementFailure(this.cause);
+
+  @override
+  String toString() =>
+      "Lexi couldn't refine this plan. Your original plan is still available.";
+}
+
 class TodayController extends AsyncNotifier<TodayState> {
   final Set<String> _snoozedIds = {};
 
   @override
   Future<TodayState> build() async {
-    final pending =
-        await ref.watch(taskRepositoryProvider).watchPending().first;
-    final todayMood =
-        await ref.watch(moodRepositoryProvider).watchTodayLatest().first;
+    final pending = await ref
+        .watch(taskRepositoryProvider)
+        .watchPending()
+        .first;
+    final todayMood = await ref
+        .watch(moodRepositoryProvider)
+        .watchTodayLatest()
+        .first;
+    // Deterministic plan only — Lexi refinement is opt-in via
+    // requestLexiRefinement(), never invoked automatically on load.
     final state = await _computeState(
       pending,
       DayCapacity(latestMood: todayMood?.level),
+      refine: false,
     );
 
     // Push to watch after state change
@@ -254,17 +271,19 @@ class TodayController extends AsyncNotifier<TodayState> {
 
   Future<TodayState> _computeState(
     List<Task> pending,
-    DayCapacity capacity,
-  ) async {
+    DayCapacity capacity, {
+    required bool refine,
+  }) async {
     final executive = ref.read(executiveProvider);
-    final advisor = ref.read(planAdvisorProvider);
 
     final active = _snoozedIds.isEmpty
         ? pending
         : pending.where((t) => !_snoozedIds.contains(t.id)).toList();
 
     final raw = executive.evaluate(active, capacity: capacity);
-    final refined = await advisor.refine(raw, active);
+    final refined = refine
+        ? await ref.read(planAdvisorProvider).refine(raw, active)
+        : raw;
 
     return TodayState(
       mode: refined.mode,
@@ -282,6 +301,31 @@ class TodayController extends AsyncNotifier<TodayState> {
   void snoozeForSession(String taskId) {
     _snoozedIds.add(taskId);
     ref.invalidateSelf();
+  }
+
+  /// Explicit, user-initiated Lexi refinement of the current plan's reason.
+  /// Never called automatically — Lexi is an optional enhancer (ADR-001).
+  Future<void> requestLexiRefinement() async {
+    if (!state.hasValue) return;
+    try {
+      final pending = await ref
+          .read(taskRepositoryProvider)
+          .watchPending()
+          .first;
+      final todayMood = await ref
+          .read(moodRepositoryProvider)
+          .watchTodayLatest()
+          .first;
+      state = AsyncData(
+        await _computeState(
+          pending,
+          DayCapacity(latestMood: todayMood?.level),
+          refine: true,
+        ),
+      );
+    } catch (error, stackTrace) {
+      state = AsyncError(_LexiRefinementFailure(error), stackTrace);
+    }
   }
 }
 
@@ -370,36 +414,51 @@ final todayCalendarSourceProvider = Provider<TodayCalendarSource>(
   (ref) => const NoCalendarSource(),
 );
 
-final timelineForDayProvider =
-    FutureProvider.family<TodayTimelineData, DateTime>((ref, viewedDay) async {
-  final today = ref.watch(currentDayProvider);
-  final isViewingToday = isSameDay(viewedDay, today);
-  final tasks = await ref
-      .watch(taskRepositoryProvider)
-      .watchTimelineForDay(
-        viewedDay,
-        includeFlexibleTasks: isViewingToday,
-      )
-      .first;
-  final routines =
-      await ref.watch(routineRepositoryProvider).watchActive().first;
-  final calendar = ref.watch(todayCalendarSourceProvider);
-  final calendarItems = await calendar.load(viewedDay);
-  final recommended = isViewingToday
-      ? ref.watch(todayControllerProvider).value?.primaryTask
-      : null;
-  return TodayTimelineData(
-    items: const TodayTimelineBuilder().build(
-      day: viewedDay,
-      tasks: tasks,
-      routines: routines,
-      calendarItems: calendarItems,
-    ),
-    recommendedTask: recommended,
-    hasCalendarPermission: calendar.hasPermission,
-    lexiAvailable: ref.watch(advisorTierProvider) != AdvisorTier.none,
-  );
-});
+final timelineForDayProvider = StreamProvider.family<TodayTimelineData, DateTime>(
+  (ref, viewedDay) {
+    final today = ref.watch(currentDayProvider);
+    final isViewingToday = isSameDay(viewedDay, today);
+    final taskRepo = ref.watch(taskRepositoryProvider);
+    final routines =
+        ref.watch(activeRoutinesProvider).value ?? const <Routine>[];
+    final calendar = ref.watch(todayCalendarSourceProvider);
+    final recommended = isViewingToday
+        ? ref.watch(todayControllerProvider).value?.primaryTask
+        : null;
+    final lexiAvailable = ref.watch(advisorTierProvider) != AdvisorTier.none;
+
+    // Stays subscribed to the Drift stream (no `.first`) so this provider keeps
+    // emitting as tasks change instead of freezing at its first read — the
+    // wrapping `todayTimelineProvider` only invalidates itself, not this
+    // family member, so a live upstream stream is what actually keeps data
+    // fresh after a task is added/edited/completed.
+    return taskRepo
+        .watchTimelineForDay(viewedDay, includeFlexibleTasks: isViewingToday)
+        .asyncMap((tasks) async {
+          // Calendar is an external/integration source (Google Calendar, etc.)
+          // — a load failure must never take down the whole Today timeline
+          // stream. Fail closed to no calendar items; tasks/routines still
+          // render normally.
+          List<TimelineItem> calendarItems;
+          try {
+            calendarItems = await calendar.load(viewedDay);
+          } catch (_) {
+            calendarItems = const [];
+          }
+          return TodayTimelineData(
+            items: const TodayTimelineBuilder().build(
+              day: viewedDay,
+              tasks: tasks,
+              routines: routines,
+              calendarItems: calendarItems,
+            ),
+            recommendedTask: recommended,
+            hasCalendarPermission: calendar.hasPermission,
+            lexiAvailable: lexiAvailable,
+          );
+        });
+  },
+);
 
 /// Backward-compatible Today entry point used by the screen and existing
 /// mutation flows. The selected day controls the actual query.
@@ -484,7 +543,9 @@ class TaskActionController {
   }
 
   Future<void> _updateActiveTaskNotification(
-      Task task, TaskStatus status) async {
+    Task task,
+    TaskStatus status,
+  ) async {
     try {
       final notifications = ref.read(notificationServiceProvider);
       if (status == TaskStatus.inProgress) {
@@ -543,8 +604,9 @@ class LexiProposalController implements LexiProposalActionHandler {
         await actions.saveForLater(
           taskId,
           ReentryNote(
-            lastCompletedStep:
-                _optionalPayloadString(proposal.payload['lastCompletedStep']),
+            lastCompletedStep: _optionalPayloadString(
+              proposal.payload['lastCompletedStep'],
+            ),
             nextAction: _requiredPayloadString(proposal, 'nextAction'),
             returnAt: returnAt,
             updatedAt: DateTime.now(),
