@@ -241,9 +241,12 @@ class TodayController extends AsyncNotifier<TodayState> {
         await ref.watch(taskRepositoryProvider).watchPending().first;
     final todayMood =
         await ref.watch(moodRepositoryProvider).watchTodayLatest().first;
+    // Deterministic plan only — Lexi refinement is opt-in via
+    // requestLexiRefinement(), never invoked automatically on load.
     final state = await _computeState(
       pending,
       DayCapacity(latestMood: todayMood?.level),
+      refine: false,
     );
 
     // Push to watch after state change
@@ -254,17 +257,18 @@ class TodayController extends AsyncNotifier<TodayState> {
 
   Future<TodayState> _computeState(
     List<Task> pending,
-    DayCapacity capacity,
-  ) async {
+    DayCapacity capacity, {
+    required bool refine,
+  }) async {
     final executive = ref.read(executiveProvider);
-    final advisor = ref.read(planAdvisorProvider);
 
     final active = _snoozedIds.isEmpty
         ? pending
         : pending.where((t) => !_snoozedIds.contains(t.id)).toList();
 
     final raw = executive.evaluate(active, capacity: capacity);
-    final refined = await advisor.refine(raw, active);
+    final refined =
+        refine ? await ref.read(planAdvisorProvider).refine(raw, active) : raw;
 
     return TodayState(
       mode: refined.mode,
@@ -282,6 +286,21 @@ class TodayController extends AsyncNotifier<TodayState> {
   void snoozeForSession(String taskId) {
     _snoozedIds.add(taskId);
     ref.invalidateSelf();
+  }
+
+  /// Explicit, user-initiated Lexi refinement of the current plan's reason.
+  /// Never called automatically — Lexi is an optional enhancer (ADR-001).
+  Future<void> requestLexiRefinement() async {
+    if (!state.hasValue) return;
+    final pending =
+        await ref.read(taskRepositoryProvider).watchPending().first;
+    final todayMood =
+        await ref.read(moodRepositoryProvider).watchTodayLatest().first;
+    state = AsyncData(await _computeState(
+      pending,
+      DayCapacity(latestMood: todayMood?.level),
+      refine: true,
+    ));
   }
 }
 
@@ -371,34 +390,39 @@ final todayCalendarSourceProvider = Provider<TodayCalendarSource>(
 );
 
 final timelineForDayProvider =
-    FutureProvider.family<TodayTimelineData, DateTime>((ref, viewedDay) async {
+    StreamProvider.family<TodayTimelineData, DateTime>((ref, viewedDay) {
   final today = ref.watch(currentDayProvider);
   final isViewingToday = isSameDay(viewedDay, today);
-  final tasks = await ref
-      .watch(taskRepositoryProvider)
-      .watchTimelineForDay(
-        viewedDay,
-        includeFlexibleTasks: isViewingToday,
-      )
-      .first;
+  final taskRepo = ref.watch(taskRepositoryProvider);
   final routines =
-      await ref.watch(routineRepositoryProvider).watchActive().first;
+      ref.watch(activeRoutinesProvider).value ?? const <Routine>[];
   final calendar = ref.watch(todayCalendarSourceProvider);
-  final calendarItems = await calendar.load(viewedDay);
   final recommended = isViewingToday
       ? ref.watch(todayControllerProvider).value?.primaryTask
       : null;
-  return TodayTimelineData(
-    items: const TodayTimelineBuilder().build(
-      day: viewedDay,
-      tasks: tasks,
-      routines: routines,
-      calendarItems: calendarItems,
-    ),
-    recommendedTask: recommended,
-    hasCalendarPermission: calendar.hasPermission,
-    lexiAvailable: ref.watch(advisorTierProvider) != AdvisorTier.none,
-  );
+  final lexiAvailable = ref.watch(advisorTierProvider) != AdvisorTier.none;
+
+  // Stays subscribed to the Drift stream (no `.first`) so this provider keeps
+  // emitting as tasks change instead of freezing at its first read — the
+  // wrapping `todayTimelineProvider` only invalidates itself, not this
+  // family member, so a live upstream stream is what actually keeps data
+  // fresh after a task is added/edited/completed.
+  return taskRepo
+      .watchTimelineForDay(viewedDay, includeFlexibleTasks: isViewingToday)
+      .asyncMap((tasks) async {
+    final calendarItems = await calendar.load(viewedDay);
+    return TodayTimelineData(
+      items: const TodayTimelineBuilder().build(
+        day: viewedDay,
+        tasks: tasks,
+        routines: routines,
+        calendarItems: calendarItems,
+      ),
+      recommendedTask: recommended,
+      hasCalendarPermission: calendar.hasPermission,
+      lexiAvailable: lexiAvailable,
+    );
+  });
 });
 
 /// Backward-compatible Today entry point used by the screen and existing

@@ -26,6 +26,7 @@ void main() {
     await tester.scrollUntilVisible(
         find.text('Flexible writing block').last, 180);
     expect(find.text('Flexible writing block'), findsWidgets);
+    expect(find.text('Flexible tasks'), findsOneWidget);
     expect(find.text('Not now'), findsOneWidget);
   });
 
