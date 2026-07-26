@@ -65,14 +65,14 @@ class NotificationService {
       title,
       body,
       tzScheduled,
-      NotificationDetails(
+      const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
           importance: Importance.defaultImportance,
           priority: Priority.defaultPriority,
         ),
-        iOS: const DarwinNotificationDetails(),
+        iOS: DarwinNotificationDetails(),
       ),
       androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
       uiLocalNotificationDateInterpretation:
@@ -94,7 +94,7 @@ class NotificationService {
       _idMorningBriefing,
       'Good morning',
       body,
-      NotificationDetails(
+      const NotificationDetails(
         android: AndroidNotificationDetails(
           _channelId,
           _channelName,
@@ -102,7 +102,7 @@ class NotificationService {
           priority: Priority.defaultPriority,
           playSound: false, // quiet notification — ADHD: no startle
         ),
-        iOS: const DarwinNotificationDetails(
+        iOS: DarwinNotificationDetails(
           presentSound: false,
         ),
       ),

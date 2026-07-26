@@ -15,14 +15,14 @@
 //  • ExistingWorkPolicy.keep is correct for 24h periodic tasks: preserves the
 //    existing schedule instead of cancelling and rescheduling on every launch.
 
-import 'package:flutter/services.dart';
+import 'dart:ui';
 import 'package:workmanager/workmanager.dart';
 
-import '../../data/database.dart';
-import '../../data/task_repository_impl.dart';
-import '../notifications/notification_service.dart';
-import '../sync/google_tasks_sync_service.dart';
-import '../sync/sync_queue_repository_impl.dart';
+import 'package:neuroflow/data/database.dart';
+import 'package:neuroflow/data/task_repository_impl.dart';
+import 'package:neuroflow/platform/notifications/notification_service.dart';
+import 'package:neuroflow/platform/sync/google_tasks_sync_service.dart';
+import 'package:neuroflow/platform/sync/sync_queue_repository_impl.dart';
 
 const _taskMorningRefresh = 'neuroflow.morning_refresh';
 const _taskSyncFlush = 'neuroflow.sync_flush';
@@ -92,7 +92,6 @@ class BackgroundScheduler {
   Future<void> init() async {
     await Workmanager().initialize(
       callbackDispatcher,
-      isInDebugMode: false, // flip to true for logcat output during dev
     );
   }
 
@@ -103,10 +102,10 @@ class BackgroundScheduler {
       _taskMorningRefresh,
       frequency: const Duration(hours: 24),
       constraints: Constraints(
-        networkType: NetworkType.not_required,
+        networkType: NetworkType.notRequired,
         requiresBatteryNotLow: false,
       ),
-      existingWorkPolicy: ExistingWorkPolicy.keep,
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
     );
 
     // Sync queue flush — runs every 4 hours when network available.
@@ -117,7 +116,7 @@ class BackgroundScheduler {
       constraints: Constraints(
         networkType: NetworkType.connected,
       ),
-      existingWorkPolicy: ExistingWorkPolicy.keep,
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
     );
   }
 

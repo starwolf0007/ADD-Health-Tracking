@@ -1,22 +1,41 @@
 // lib/app/providers.dart
 //
-// PRESENTATION-adjacent wiring. This is the only file allowed to know about
-// every layer at once — it's composition root, not logic. Plain Riverpod
-// (no generator) to keep codegen surface limited to Drift for phase 1.
-//
-// Layering reminder (§3): Executive (planner) depends on the PlanAdvisor
-// INTERFACE only. The concrete advisor (NoOpPlanAdvisor today, Lexi later)
-// is chosen HERE, at the composition root — Executive code never imports
-// lib/intelligence/.
+// THE composition root — the only file allowed to know every layer at once.
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-import '../domain/task.dart';
-import '../domain/task_repository.dart';
-import '../executive/planner.dart';
-import '../platform/local/database.dart';
-import '../platform/local/task_repository_impl.dart';
-import '../platform/notifications/notification_service.dart';
+import 'package:neuroflow/data/database.dart';
+import 'package:neuroflow/data/habit_repository.dart';
+import 'package:neuroflow/data/habit_repository_impl.dart';
+import 'package:neuroflow/data/routine_repository.dart';
+import 'package:neuroflow/data/routine_repository_impl.dart';
+import 'package:neuroflow/data/task_repository.dart';
+import 'package:neuroflow/data/task_repository_impl.dart';
+import 'package:neuroflow/domain/habit.dart';
+import 'package:neuroflow/domain/routine.dart';
+import 'package:neuroflow/domain/task.dart';
+import 'package:neuroflow/executive/planner.dart';
+import 'package:neuroflow/intelligence/lexi_plan_advisor.dart';
+import 'package:neuroflow/domain/google/google_account.dart';
+import 'package:neuroflow/domain/google/google_auth_repository.dart';
+import 'package:neuroflow/domain/google/google_account_repository.dart';
+import 'package:neuroflow/domain/google/google_permission_manager.dart';
+import 'package:neuroflow/domain/google/connected_services_repository.dart';
+import 'package:neuroflow/domain/google/google_connection_state.dart';
+import 'package:neuroflow/domain/google/sync_engine.dart';
+import 'package:neuroflow/data/google/google_auth_repository_impl.dart';
+import 'package:neuroflow/data/google/google_account_repository_impl.dart';
+import 'package:neuroflow/data/google/google_permission_manager_impl.dart';
+import 'package:neuroflow/data/google/connected_services_repository_impl.dart';
+import 'package:neuroflow/platform/google/google_service_manager.dart';
+import 'package:neuroflow/platform/google/google_api_factory.dart';
+import 'package:neuroflow/platform/sync/google_sync_engine_impl.dart';
+import 'package:neuroflow/platform/settings_service.dart';
+import 'package:neuroflow/platform/sync/google_tasks_sync_service.dart';
+import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
+import 'package:neuroflow/platform/sync/sync_queue_repository_impl.dart';
+import 'package:neuroflow/platform/wear/wear_sync_service.dart';
 
 // ---------------------------------------------------------------------------
 // Platform layer
@@ -28,115 +47,230 @@ final databaseProvider = Provider<AppDatabase>((ref) {
   return db;
 });
 
+final settingsServiceProvider = Provider<SettingsService>((ref) {
+  return SettingsService();
+});
+
+// ---------------------------------------------------------------------------
+// Google layer
+// ---------------------------------------------------------------------------
+
+final googleAuthRepositoryProvider = Provider<GoogleAuthRepository>((ref) {
+  return GoogleAuthRepositoryImpl();
+});
+
+final googleAccountRepositoryProvider = Provider<GoogleAccountRepository>((ref) {
+  return GoogleAccountRepositoryImpl(const FlutterSecureStorage());
+});
+
+final googlePermissionManagerProvider = Provider<GooglePermissionManager>((ref) {
+  return GooglePermissionManagerImpl();
+});
+
+final connectedServicesRepositoryProvider = Provider<ConnectedServicesRepository>((ref) {
+  return ConnectedServicesRepositoryImpl(const FlutterSecureStorage());
+});
+
+final googleServiceManagerProvider = Provider<GoogleServiceManager>((ref) {
+  final authRepo = ref.watch(googleAuthRepositoryProvider);
+  final accountRepo = ref.watch(googleAccountRepositoryProvider);
+  return GoogleServiceManager(authRepo, accountRepo);
+});
+
+final googleApiFactoryProvider = Provider<GoogleApiFactory>((ref) {
+  return GoogleApiFactory(ref.watch(googleServiceManagerProvider));
+});
+
+/// Stream of the currently connected Google account.
+final googleAccountProvider = StreamProvider<GoogleAccount?>((ref) {
+  return ref.watch(googleServiceManagerProvider).accountChanges;
+});
+
+/// Stream of the global Google connection state.
+final googleConnectionStateProvider = StreamProvider<GoogleConnectionState>((ref) {
+  return ref.watch(googleServiceManagerProvider).connectionState;
+});
+
+final googleSyncEngineProvider = Provider<SyncEngine>((ref) {
+  return GoogleSyncEngineImpl(ref.watch(syncQueueRepositoryProvider));
+});
+
+// ---------------------------------------------------------------------------
+// Sync layer
+// ---------------------------------------------------------------------------
+
+final syncQueueRepositoryProvider = Provider<SyncQueueRepository>((ref) {
+  return DriftSyncQueueRepository(ref.watch(databaseProvider));
+});
+
+final googleTasksSyncServiceProvider = Provider<GoogleTasksSyncService>((ref) {
+  return GoogleTasksSyncService(ref.watch(syncQueueRepositoryProvider));
+});
+
+final wearSyncServiceProvider = Provider<WearSyncService>((ref) {
+  return WearSyncService();
+});
+
+final displayNameProvider = FutureProvider<String>((ref) async {
+  return ref.watch(settingsServiceProvider).getDisplayName();
+});
+
+// ---------------------------------------------------------------------------
+// Data layer
+// ---------------------------------------------------------------------------
+
 final taskRepositoryProvider = Provider<TaskRepository>((ref) {
-  return DriftTaskRepository(ref.watch(databaseProvider));
+  return DriftTaskRepository(
+    ref.watch(databaseProvider),
+    syncQueue: ref.watch(syncQueueRepositoryProvider),
+  );
 });
 
-final notificationServiceProvider = Provider<NotificationService>((ref) {
-  return NotificationService();
-  // .init() is called once at app startup (main.dart), not here — provider
-  // construction should stay synchronous and side-effect-light.
+final routineRepositoryProvider = Provider<RoutineRepository>((ref) {
+  return DriftRoutineRepository(ref.watch(databaseProvider));
 });
 
-/// Reactive open-task list — the single stream the UI and the controller
-/// below both watch. Local DB is source of truth (§3 v1.4).
-final openTasksProvider = StreamProvider<List<Task>>((ref) {
-  return ref.watch(taskRepositoryProvider).watchOpenTasks();
-});
-
-/// Drives the §13 heartbeat line — completions today, real data not a stub.
-final completedTodayCountProvider = StreamProvider<int>((ref) {
-  return ref.watch(taskRepositoryProvider).watchCompletedTodayCount();
+final habitRepositoryProvider = Provider<HabitRepository>((ref) {
+  return DriftHabitRepository(ref.watch(databaseProvider));
 });
 
 // ---------------------------------------------------------------------------
 // Executive layer
 // ---------------------------------------------------------------------------
 
-final plannerProvider = Provider<Planner>((ref) => DeterministicPlanner());
-
-/// Composition root for Intelligence. Defaults to the null-object advisor —
-/// the app is fully usable with this provider never overridden. When the
-/// Lexi platform-channel bridge (§14) lands, swap this single line (or
-/// override it via ProviderScope for testing); nothing else changes.
-final planAdvisorProvider = Provider<PlanAdvisor>((ref) {
-  return const NoOpPlanAdvisor();
-});
-
-/// Inputs the planner needs that aren't yet backed by real features.
-/// `todayMood` / `lastInteraction` are placeholders until the behavioral
-/// layer (mood check-in) lands in phase 3 — wiring them is a one-line change
-/// to these two providers, nothing downstream needs to know.
-final todayMoodProvider = StateProvider<int?>((ref) => null);
-final lastInteractionProvider = StateProvider<DateTime?>((ref) => null);
-
-final contextSnapshotProvider = Provider<ContextSnapshot>((ref) {
-  return ContextSnapshot(
-    now: DateTime.now(),
-    todayMood: ref.watch(todayMoodProvider),
-    lastInteraction: ref.watch(lastInteractionProvider),
-  );
-});
+final executiveProvider = Provider<Executive>((ref) => Executive());
 
 // ---------------------------------------------------------------------------
-// Today — the orchestration that actually calls PlanAdvisor.refine()
+// AI advisor tier (§14)
 // ---------------------------------------------------------------------------
 
-enum TodayMode { normal, quickWins }
-
-class TodayState {
-  final TodayMode mode;
-  final List<Task> items; // deterministic order, possibly AI-refined
-  final Task? primary;
-  final String reason;
-  const TodayState({
-    required this.mode,
-    required this.items,
-    required this.primary,
-    required this.reason,
-  });
+enum AdvisorTier {
+  none,
+  lexi,
+  cloud,
 }
 
-/// AsyncNotifier because PlanAdvisor.refine() is async (it may call an
-/// on-device model later) — but note the DETERMINISTIC path never awaits
-/// anything slow: NoOpPlanAdvisor.refine() resolves synchronously-fast, so
-/// today's behavior has no perceptible AI latency anywhere in it.
+class AdvisorTierNotifier extends Notifier<AdvisorTier> {
+  @override
+  AdvisorTier build() => AdvisorTier.lexi;
+
+  // ignore: use_setters_to_change_properties
+  void set(AdvisorTier tier) => state = tier;
+}
+
+final advisorTierProvider =
+    NotifierProvider<AdvisorTierNotifier, AdvisorTier>(
+  AdvisorTierNotifier.new,
+);
+
+final planAdvisorProvider = Provider<PlanAdvisor>((ref) {
+  switch (ref.watch(advisorTierProvider)) {
+    case AdvisorTier.lexi:
+      return LexiPlanAdvisor();
+    case AdvisorTier.cloud:
+      // TODO(phase3): read API key from FlutterSecureStorage
+      return const CloudGeminiPlanAdvisor(apiKey: null);
+    case AdvisorTier.none:
+      return const NoOpPlanAdvisor();
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Today controller — the Presentation ↔ Executive bridge
+// ---------------------------------------------------------------------------
+
+class TodayState {
+  final DayMode mode;
+  final Task? primaryTask;
+  final List<Task> quickWins;
+  final String reason;
+  final bool isLoading;
+
+  const TodayState({
+    this.mode = DayMode.normal,
+    this.primaryTask,
+    this.quickWins = const [],
+    this.reason = '',
+    this.isLoading = true,
+  });
+
+  TodayState copyWith({
+    DayMode? mode,
+    Task? primaryTask,
+    List<Task>? quickWins,
+    String? reason,
+    bool? isLoading,
+  }) {
+    return TodayState(
+      mode: mode ?? this.mode,
+      primaryTask: primaryTask ?? this.primaryTask,
+      quickWins: quickWins ?? this.quickWins,
+      reason: reason ?? this.reason,
+      isLoading: isLoading ?? this.isLoading,
+    );
+  }
+}
+
 class TodayController extends AsyncNotifier<TodayState> {
+  final Set<String> _snoozedIds = {};
+
   @override
   Future<TodayState> build() async {
-    final open = await ref.watch(openTasksProvider.future);
-    final ctx = ref.watch(contextSnapshotProvider);
-    final planner = ref.watch(plannerProvider);
-    final advisor = ref.watch(planAdvisorProvider);
+    final pending = await ref.watch(taskRepositoryProvider).watchPending().first;
+    final state = await _computeState(pending);
+    
+    // Push to watch after state change
+    await ref.read(wearSyncServiceProvider).pushPrimaryTask(state);
+    
+    return state;
+  }
 
-    final inQuickWins = planner.shouldEnterQuickWins(ctx);
-    final deterministic = planner.orderedCandidates(open, ctx);
+  Future<TodayState> _computeState(List<Task> pending) async {
+    final executive = ref.read(executiveProvider);
+    final advisor = ref.read(planAdvisorProvider);
 
-    // The ONLY call site for Intelligence in the whole app. Executive
-    // produced a complete, correct `deterministic` list before this line —
-    // refine() is asked to improve it, never to produce it from scratch.
-    final refined = await advisor.refine(deterministic, ctx);
+    final active = _snoozedIds.isEmpty
+        ? pending
+        : pending.where((t) => !_snoozedIds.contains(t.id)).toList();
 
-    final primary = refined.isNotEmpty ? refined.first : null;
-    final reason = inQuickWins
-        ? (primary == null
-            ? "Nothing easy is tracked. Resting counts."
-            : "A small one for a lighter day.")
-        : (primary == null ? "Today's clear." : "Top of today.");
+    final raw = executive.evaluate(active);
+    final refined = await advisor.refine(raw, active);
 
     return TodayState(
-      mode: inQuickWins ? TodayMode.quickWins : TodayMode.normal,
-      items: refined,
-      primary: primary,
-      reason: reason,
+      mode: refined.mode,
+      primaryTask: refined.primaryTask,
+      quickWins: refined.quickWins,
+      reason: refined.reason,
+      isLoading: false,
     );
   }
 
   Future<void> complete(String taskId) async {
-    await ref.read(taskRepositoryProvider).complete(taskId);
+    await ref.read(taskRepositoryProvider).markComplete(taskId);
+    ref.invalidateSelf();
+  }
+
+  void snoozeForSession(String taskId) {
+    _snoozedIds.add(taskId);
     ref.invalidateSelf();
   }
 }
 
 final todayControllerProvider =
     AsyncNotifierProvider<TodayController, TodayState>(TodayController.new);
+
+final completedTodayCountProvider = StreamProvider<int>((ref) {
+  return ref.watch(taskRepositoryProvider).watchCompletedTodayCount();
+});
+
+final activeRoutinesProvider = StreamProvider<List<Routine>>((ref) {
+  return ref.watch(routineRepositoryProvider).watchActive();
+});
+
+final dueRoutinesProvider = FutureProvider<List<Routine>>((ref) {
+  return ref.watch(routineRepositoryProvider).fetchDueNow();
+});
+
+final activeHabitsProvider = StreamProvider<List<Habit>>((ref) {
+  return ref.watch(habitRepositoryProvider).watchActive();
+});

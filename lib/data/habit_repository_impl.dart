@@ -5,9 +5,9 @@
 
 import 'package:drift/drift.dart';
 
-import '../domain/habit.dart';
-import 'database.dart';
-import 'habit_repository.dart';
+import 'package:neuroflow/domain/habit.dart';
+import 'package:neuroflow/data/database.dart';
+import 'package:neuroflow/data/habit_repository.dart';
 
 class DriftHabitRepository implements HabitRepository {
   final AppDatabase _db;

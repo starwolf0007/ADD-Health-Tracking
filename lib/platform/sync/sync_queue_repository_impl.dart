@@ -4,9 +4,9 @@
 
 import 'package:drift/drift.dart';
 
-import '../../data/database.dart';
-import 'sync_operation.dart';
-import 'sync_queue_repository.dart';
+import 'package:neuroflow/data/database.dart';
+import 'package:neuroflow/platform/sync/sync_operation.dart';
+import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
 
 class DriftSyncQueueRepository implements SyncQueueRepository {
   final AppDatabase _db;

@@ -3,7 +3,7 @@
 // Abstract repository interface. Executive layer depends only on this;
 // Drift implementation is injected via Riverpod (see providers.dart).
 
-import '../domain/task.dart';
+import 'package:neuroflow/domain/task.dart';
 
 abstract class TaskRepository {
   /// All pending tasks, ordered by energy ascending (low first).
@@ -15,4 +15,5 @@ abstract class TaskRepository {
   Future<void> save(Task task);
   Future<void> markComplete(String id);
   Future<void> delete(String id);
+  Future<Task?> getById(String id);
 }

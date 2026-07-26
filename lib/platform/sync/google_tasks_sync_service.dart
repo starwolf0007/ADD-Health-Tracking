@@ -23,8 +23,8 @@
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-import 'sync_operation.dart';
-import 'sync_queue_repository.dart';
+import 'package:neuroflow/platform/sync/sync_operation.dart';
+import 'package:neuroflow/platform/sync/sync_queue_repository.dart';
 
 const _kGoogleTasksToken = 'neuroflow_google_tasks_token';
 const _kGoogleTasksListId = 'neuroflow_google_tasks_list_id';

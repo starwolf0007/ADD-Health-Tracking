@@ -3,7 +3,7 @@
 // Interface for the Google Tasks sync queue.
 // Drift implementation lives in sync_queue_repository_impl.dart.
 
-import 'sync_operation.dart';
+import 'package:neuroflow/platform/sync/sync_operation.dart';
 
 abstract class SyncQueueRepository {
   /// Add a new operation to the queue.

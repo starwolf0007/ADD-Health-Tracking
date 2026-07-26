@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dart run *)",
+      "Bash(flutter devices *)",
+      "Bash(grep -A2 \"^  workmanager:\" pubspec.lock)",
+      "Bash(findstr /C:\"workmanager\" pubspec.lock)",
+      "Bash(flutter clean *)",
+      "Bash(dart fix *)",
+      "PowerShell(Get-Process | Where-Object { $_.ProcessName -match 'java|dart|flutter' } | Select-Object Id, ProcessName, Path)",
+      "PowerShell(\"removed\")",
+      "PowerShell(Add-MpPreference -ExclusionPath \"C:\\\\Dev\" -ErrorAction Stop)",
+      "PowerShell(\"exclusion added\")",
+      "PowerShell(\"cleared\")",
+      "PowerShell(Get-MpComputerStatus)",
+      "PowerShell(Get-Service -Name WinDefend -ErrorAction SilentlyContinue)",
+      "PowerShell(Get-Process | Where-Object { $_.ProcessName -match 'java|dart' } | Select-Object Id, ProcessName, CPU, StartTime | Sort-Object CPU -Descending)",
+      "PowerShell(Get-MpPreference)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"ProcessId=31484\")",
+      "PowerShell(Get-Process -Id 31484 -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, CPU; Get-Process | Where-Object { $_.ProcessName -match 'studio' } | Select-Object Id, ProcessName)",
+      "PowerShell(Get-Process -Id 31484 -ErrorAction SilentlyContinue; Get-Process | Where-Object { $_.ProcessName -match 'studio' } | Select-Object Id, ProcessName)",
+      "Bash(taskkill //F //PID 31484)",
+      "Read(//c/Program Files/Android/Android Studio/jbr/lib/**)"
+    ]
+  }
+}

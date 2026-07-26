@@ -11,9 +11,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../domain/routine.dart';
-import '../providers.dart';
-import 'theme.dart';
+import 'package:neuroflow/domain/routine.dart';
+import 'package:neuroflow/app/providers.dart';
+import 'package:neuroflow/presentation/theme.dart';
 
 // ---------------------------------------------------------------------------
 // The screen receives the full Routine and calls back when done/exited.
@@ -311,7 +311,7 @@ class _UpNextList extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Up next', style: AppTextStyles.bodySmall),
+          const Text('Up next', style: AppTextStyles.bodySmall),
           const SizedBox(height: 8),
           ...steps.take(3).map((s) => Padding(
                 padding: const EdgeInsets.only(bottom: 6),
@@ -374,8 +374,7 @@ class _CelebrationView extends StatelessWidget {
 // Entry point helper — push RoutineScreen as a full-screen route
 // ---------------------------------------------------------------------------
 
-Future<void> launchRoutine(
-    BuildContext context, WidgetRef ref, Routine routine) async {
+Future<void> launchRoutine(BuildContext context, Routine routine) async {
   await Navigator.of(context).push(
     MaterialPageRoute<void>(
       fullscreenDialog: true,

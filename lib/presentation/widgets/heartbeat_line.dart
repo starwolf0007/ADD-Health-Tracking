@@ -10,7 +10,7 @@
 // repeating/looping animation here — that's what guarantees no idle motion.
 
 import 'package:flutter/material.dart';
-import '../theme.dart';
+import 'package:neuroflow/presentation/theme.dart';
 
 class HeartbeatLine extends StatelessWidget {
   /// 0.0–1.0. Caller computes this from real data (completed / total) —

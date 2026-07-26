@@ -9,7 +9,7 @@
 //     PlanAdvisor.refine(). Executive never calls Intelligence directly.
 //   • PlanAdvisor interface is always non-null; default is NoOpPlanAdvisor.
 
-import '../domain/task.dart';
+import 'package:neuroflow/domain/task.dart';
 
 // ---------------------------------------------------------------------------
 // Mode

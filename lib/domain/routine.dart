@@ -2,12 +2,6 @@
 //
 // Routine domain models — pure, no Flutter/Drift dependencies.
 // A Routine is a named, ordered sequence of RoutineSteps.
-// Steps are walked one at a time; completing the last step completes the routine.
-//
-// Design intent (ADHD-first):
-//   • Routines break overwhelming sequences into single visible steps.
-//   • The active step is always ONE thing — no list anxiety.
-//   • Completion is celebrated briefly, then the next step surfaces.
 
 import 'package:uuid/uuid.dart';
 
@@ -15,13 +9,11 @@ import 'package:uuid/uuid.dart';
 // Schedule
 // ---------------------------------------------------------------------------
 
-/// When a routine fires. Phase 1: time-of-day anchors only.
-/// Phase 2 will add day-of-week filtering.
 enum RoutineAnchor {
   morning, // ~6–9 AM
   midday,  // ~11 AM–1 PM
   evening, // ~5–8 PM
-  custom,  // user-defined time (stored in scheduleHour/scheduleMinute)
+  custom,  // user-defined time
 }
 
 // ---------------------------------------------------------------------------
@@ -31,10 +23,10 @@ enum RoutineAnchor {
 class RoutineStep {
   final String id;
   final String routineId;
-  final int position; // 0-indexed order within the routine
+  final int position;
   final String title;
   final String? notes;
-  final int? durationMinutes; // optional time box
+  final int? durationMinutes;
   bool isComplete;
 
   RoutineStep({
@@ -91,9 +83,12 @@ class Routine {
   final String id;
   final String name;
   final RoutineAnchor anchor;
-  final int? scheduleHour;   // 0–23, used when anchor == custom
-  final int? scheduleMinute; // 0–59, used when anchor == custom
-  final bool isActive; // user can disable a routine without deleting it
+  final int? scheduleHour;
+  final int? scheduleMinute;
+  final bool isActive;
+  /// Which weekdays this routine fires — ISO weekday digits (Mon=1 … Sun=7)
+  /// as a compact string, e.g. "12345" for weekdays. Null = every day.
+  final String? activeDays;
   final List<RoutineStep> steps;
   final DateTime createdAt;
 
@@ -104,6 +99,7 @@ class Routine {
     this.scheduleHour,
     this.scheduleMinute,
     this.isActive = true,
+    this.activeDays,
     this.steps = const [],
     required this.createdAt,
   });
@@ -113,6 +109,7 @@ class Routine {
     required RoutineAnchor anchor,
     int? scheduleHour,
     int? scheduleMinute,
+    String? activeDays,
     List<RoutineStep> steps = const [],
   }) {
     return Routine(
@@ -121,6 +118,7 @@ class Routine {
       anchor: anchor,
       scheduleHour: scheduleHour,
       scheduleMinute: scheduleMinute,
+      activeDays: activeDays,
       steps: steps,
       createdAt: DateTime.now(),
     );
@@ -132,6 +130,7 @@ class Routine {
     int? scheduleHour,
     int? scheduleMinute,
     bool? isActive,
+    String? activeDays,
     List<RoutineStep>? steps,
   }) {
     return Routine(
@@ -141,30 +140,28 @@ class Routine {
       scheduleHour: scheduleHour ?? this.scheduleHour,
       scheduleMinute: scheduleMinute ?? this.scheduleMinute,
       isActive: isActive ?? this.isActive,
+      activeDays: activeDays ?? this.activeDays,
       steps: steps ?? this.steps,
       createdAt: createdAt,
     );
   }
 
-  // ------------------------------------------------------------------
-  // Computed helpers
-  // ------------------------------------------------------------------
+  bool firesOn(DateTime date) {
+    if (activeDays == null || activeDays!.isEmpty) return true;
+    return activeDays!.contains(date.weekday.toString());
+  }
 
-  /// The currently active step — first incomplete step in order.
   RoutineStep? get activeStep {
     try {
       return steps
           .where((s) => !s.isComplete)
           .reduce((a, b) => a.position < b.position ? a : b);
     } catch (_) {
-      return null; // all steps done
+      return null;
     }
   }
 
   bool get isComplete => steps.isNotEmpty && steps.every((s) => s.isComplete);
-
   int get completedCount => steps.where((s) => s.isComplete).length;
-
-  double get progressFraction =>
-      steps.isEmpty ? 0.0 : completedCount / steps.length;
+  double get progressFraction => steps.isEmpty ? 0.0 : completedCount / steps.length;
 }
