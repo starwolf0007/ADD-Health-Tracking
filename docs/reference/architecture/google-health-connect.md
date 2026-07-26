@@ -33,13 +33,18 @@ Implemented now:
 
 - Health Connect dependency, availability mapping, and permission scaffold.
 - Steps-only permission declaration and request.
-
-Frozen for the next Steps implementation slice:
-
 - Bounded and fully paged Steps reads.
 - The Steps Transport v1 result envelope.
+- Kotlin record-to-transport mapping.
 - Strict Dart parsing and mapping.
 - Transaction construction and validation.
+
+Still out of scope:
+
+- Persistence and change tokens.
+- Background sync.
+- UI.
+- Additional Health Connect data types.
 
 ## Patterns NeuroFlow should adopt
 
@@ -68,9 +73,9 @@ Android Health Connect SDK objects and constants must not cross the platform
 boundary. Native code emits plain transport values; Dart owns canonical parsing
 and normalization.
 
-## Frozen Steps implementation slice
+## Implemented Steps ingestion slice
 
-The next implementation slice follows this accepted flow:
+The implemented Steps ingestion slice follows this accepted flow:
 
 ```text
 HealthConnectClient

@@ -5,7 +5,8 @@
 #   1. flutter pub get
 #   2. dart run build_runner build (generates Drift .g.dart files)
 #   3. flutter test
-#   4. flutter build apk --release (push-only, produces artifact)
+#   4. gradlew :app:testDebugUnitTest (native Kotlin bridge unit tests)
+#   5. flutter build apk --release (push-only, produces artifact)
 #
 # Requires Flutter >= 3.44.0 / Dart >= 3.12.0 (matches pubspec.lock resolved SDKs).
 
@@ -56,6 +57,10 @@ jobs:
 
       - name: Run Flutter tests
         run: flutter test
+
+      - name: Run Kotlin unit tests (Health Connect bridge)
+        working-directory: android
+        run: ./gradlew :app:testDebugUnitTest
 
       - name: Restore google-services.json
         if: github.event_name == 'push' && env.GOOGLE_SERVICES_JSON != ''
