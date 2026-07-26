@@ -263,20 +263,33 @@ class _DateNavigator extends ConsumerWidget {
   }
 }
 
-class _DaySummaryCard extends StatelessWidget {
+class _DaySummaryCard extends ConsumerWidget {
   final TodayTimelineData data;
   const _DaySummaryCard({required this.data});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final reason = ref.watch(todayControllerProvider).value?.reason ?? '';
     return Semantics(
       button: true,
       label: 'Open Lexi conversation',
       child: InkWell(
         borderRadius: BorderRadius.circular(AppSpace.radiusCard),
-        onTap: () => Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => const LexiConversationScreen(),
-        )),
+        onTap: () {
+          // Explicit, user-initiated trigger for TodayController's opt-in
+          // Lexi refinement (ADR-001) — never called automatically. Tapping
+          // this card to open Lexi is the one intended explicit action.
+          if (data.lexiAvailable) {
+            unawaited(
+              ref
+                  .read(todayControllerProvider.notifier)
+                  .requestLexiRefinement(),
+            );
+          }
+          Navigator.of(context).push(MaterialPageRoute<void>(
+            builder: (_) => const LexiConversationScreen(),
+          ));
+        },
         child: Container(
           padding: const EdgeInsets.all(AppSpace.lg),
           decoration: BoxDecoration(
@@ -319,6 +332,14 @@ class _DaySummaryCard extends StatelessWidget {
                           : 'Lexi is offline. Everything here still works.',
                       style: AppTextStyles.bodySmall,
                     ),
+                    if (reason.isNotEmpty) ...[
+                      const SizedBox(height: AppSpace.sm),
+                      Text(
+                        reason,
+                        style: AppTextStyles.bodySmall
+                            .copyWith(color: AppColors.accent),
+                      ),
+                    ],
                   ],
                 ),
               ),
