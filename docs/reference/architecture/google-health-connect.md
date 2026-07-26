@@ -159,7 +159,7 @@ inferred device names, health interpretation, or derived analytics.
 
 ## Relevant source files and modules
 
-- `health-connect/HealthConnectSample` in `android/health-samples`
+- `health-connect/HealthConnectSample` in `android/health-samples` <!-- doc-path-check: ignore -->
 - the codelab's `start` and `finished` modules
 - permission, availability, bounded-read, and changes-token examples
 

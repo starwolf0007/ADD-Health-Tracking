@@ -214,6 +214,7 @@ The Lexi system prompt's source of truth is
 is `lib/intelligence/lexi_mobile_prompt.dart`, whose header says not to edit it
 directly. Edit the markdown, then regenerate the constant — the same
 one-source-of-truth discipline as the Drift schema. (That file's own header
+<!-- doc-path-check: ignore -->
 comment still cites its former `lib/core/` path; the directory no longer exists.)
 
 ## Current status

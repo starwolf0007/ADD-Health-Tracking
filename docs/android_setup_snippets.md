@@ -112,5 +112,6 @@ Pair the watch to the phone via the Wear OS app first if not already done.
 - The `neuroflow/wear` MethodChannel is registered in `WearBridge.register()` —
   no changes needed to `pubspec.yaml` or any Flutter plugin.
 - Tile preview drawable (`@drawable/tile_preview`) is referenced in the manifest.
+  <!-- doc-path-check: ignore -->
   Add a placeholder PNG at `wear/src/main/res/drawable/tile_preview.png` to
   prevent a build warning. Any 384×384 dark image works for dev.

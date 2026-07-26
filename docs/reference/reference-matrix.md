@@ -14,8 +14,8 @@ evidence/sensitivity doctrine.
 
 | Reference | Status | Role | Doc |
 |---|---|---|---|
-| `android/health-samples` | Verified | Health Connect platform authority — permission flow, change tokens, Upsertion/Deletion handling | `architecture/google-health-connect.md` |
-| `android/android-health-connect-codelab` | Verified | Companion learning flow to the above | `architecture/google-health-connect.md` |
+| `android/health-samples` | Verified | Health Connect platform authority — permission flow, change tokens, Upsertion/Deletion handling | `architecture/google-health-connect.md` | <!-- doc-path-check: ignore -->
+| `android/android-health-connect-codelab` | Verified | Companion learning flow to the above | `architecture/google-health-connect.md` | <!-- doc-path-check: ignore -->
 | `the-momentum/open_wearables_health_sdk` | Provisionally verified | Kotlin↔Flutter bridge shape and multi-provider transport pattern; backend sync model not adopted | not yet written |
 | `health_connector` | Provisionally verified | Type-mapping and timestamp-handling comparison | not yet written |
 | `karlicoss/HPI` | Provisionally verified | Local evidence-vs-derived philosophy and source-adapter pattern | not yet written |

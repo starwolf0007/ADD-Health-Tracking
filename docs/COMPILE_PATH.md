@@ -141,6 +141,7 @@ generated scaffolding that nothing tests or ships.
 knowledge and both now resolved by an actual compiler:
 
 - `googleapis_auth`'s `AccessCredentials`/`AccessToken` constructor shape in
+  <!-- doc-path-check: ignore -->
   `lib/platform/calendar/calendar_service.dart` — resolved by removal. That file
   does not exist; Calendar integration was descoped to a later tier before any
   service was written.
@@ -150,6 +151,7 @@ knowledge and both now resolved by an actual compiler:
   and what compiles today.
 
 **The Drift schema.** The original text described generating from
+<!-- doc-path-check: ignore -->
 `lib/platform/local/database.dart` at schema v5 with five tables. The database
 now lives at `lib/data/database.dart` at **schemaVersion 7**, spanning tasks,
 habits, routines, notes and mood, the sync queue, scheduling rules, Hevy import

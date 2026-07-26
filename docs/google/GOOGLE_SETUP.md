@@ -26,7 +26,7 @@ Enable the following APIs for future sprints:
 - [ ] Click **Create Credentials > OAuth client ID**.
 - [ ] Application type: **Android**.
 - [ ] Name: `NeuroFlow Android (Debug)`.
-- [ ] Package name: `com.example.neuroflow` (Verify in `android/app/build.gradle`).
+- [ ] Package name: `com.example.neuroflow` (Verify in `android/app/build.gradle.kts`).
 - [ ] **SHA-1 certificate fingerprint**:
     - Run: `./gradlew signingReport` in the `android/` directory.
     - Copy the SHA-1 from the `debug` variant.
