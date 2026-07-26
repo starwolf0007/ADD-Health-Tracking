@@ -171,7 +171,7 @@ class HevySets extends Table {
   IntColumn get distanceMeters => integer().nullable()();
   IntColumn get durationSeconds => integer().nullable()();
   RealColumn get rpe => real().nullable()();
-  BoolColumn get customMetric => boolean().nullable()();
+  RealColumn get customMetric => real().nullable()();
   TextColumn get rawJson => text()();
 
   @override
@@ -261,7 +261,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.executor);
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -317,6 +317,16 @@ class AppDatabase extends _$AppDatabase {
             await m.createTable(healthTombstones);
             await m.createTable(healthPermissions);
             await _createHealthIndexes();
+          }
+          if (from >= 4 && from < 8) {
+            await m.alterTable(
+              TableMigration(
+                hevySets,
+                columnTransformer: {
+                  hevySets.customMetric: hevySets.customMetric.cast<double>(),
+                },
+              ),
+            );
           }
         },
       );

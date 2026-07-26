@@ -77,7 +77,7 @@ class HevyRepository implements HevyWorkoutSink, HevySyncMetadataSink {
                 distanceMeters: Value(set.distanceMeters),
                 durationSeconds: Value(set.durationSeconds),
                 rpe: Value(set.rpe?.toDouble()),
-                customMetric: Value(set.customMetric),
+                customMetric: Value(set.customMetric?.toDouble()),
                 rawJson: jsonEncode(set.raw),
               ),
             );

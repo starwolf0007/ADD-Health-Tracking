@@ -45,6 +45,7 @@ void main() {
     addTearDown(() => directory.delete(recursive: true));
     final file = File('${directory.path}/v5.sqlite');
     final raw = sqlite.sqlite3.open(file.path);
+    _createLegacyHevyTables(raw);
     raw.execute('PRAGMA user_version = 5');
     raw.close();
 
@@ -106,4 +107,45 @@ void main() {
           .having((error) => error.field, 'field', 'byDay')),
     );
   });
+}
+
+void _createLegacyHevyTables(sqlite.Database raw) {
+  raw.execute('''
+    CREATE TABLE hevy_workouts (
+      id TEXT NOT NULL PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT,
+      start_time INTEGER NOT NULL,
+      end_time INTEGER NOT NULL,
+      hevy_updated_at INTEGER,
+      hevy_created_at INTEGER,
+      imported_at INTEGER NOT NULL
+    )
+  ''');
+  raw.execute('''
+    CREATE TABLE hevy_exercises (
+      id TEXT NOT NULL PRIMARY KEY,
+      workout_id TEXT NOT NULL REFERENCES hevy_workouts(id),
+      position INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      notes TEXT,
+      exercise_template_id TEXT NOT NULL,
+      superset_id TEXT
+    )
+  ''');
+  raw.execute('''
+    CREATE TABLE hevy_sets (
+      id TEXT NOT NULL PRIMARY KEY,
+      exercise_id TEXT NOT NULL REFERENCES hevy_exercises(id),
+      position INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      weight_kg REAL,
+      reps INTEGER,
+      distance_meters INTEGER,
+      duration_seconds INTEGER,
+      rpe REAL,
+      custom_metric INTEGER,
+      raw_json TEXT NOT NULL
+    )
+  ''');
 }

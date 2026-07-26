@@ -112,6 +112,32 @@ void main() {
     expect(find.textContaining('private-token'), findsNothing);
   });
 
+  testWidgets('workout format failures are not mislabeled as connectivity', (
+    tester,
+  ) async {
+    final gateway = FakeGateway(
+      configured: true,
+      syncError: const FormatException('private workout payload'),
+    );
+    await _pump(
+      tester,
+      gateway: gateway,
+      workouts: [_summary('Cached workout', DateTime(2026, 7, 18))],
+    );
+    await tester.tap(find.byKey(const Key('hevySyncButton')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Cached workout'), findsOneWidget);
+    expect(
+      find.text(
+        'Hevy returned workout data NeuroFlow couldn’t import. '
+        'Your saved workouts are still available.',
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('private workout payload'), findsNothing);
+  });
+
   testWidgets('disconnect clears credential and retains workout list', (
     tester,
   ) async {

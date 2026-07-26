@@ -115,15 +115,14 @@ class HevyIntegrationController extends AsyncNotifier<HevyIntegrationState> {
     );
     try {
       await _gateway.sync();
-    } catch (_) {
+    } catch (error) {
       state = AsyncData(
         HevyIntegrationState(
           status: HevyUiStatus.error,
           isConnected: true,
           importedWorkoutCount: current.importedWorkoutCount,
           lastSuccessfulSync: current.lastSuccessfulSync,
-          message:
-              'NeuroFlow couldn’t reach Hevy. Your saved workouts are still available.',
+          message: _syncFailureMessage(error),
         ),
       );
       return;
@@ -155,5 +154,14 @@ class HevyIntegrationController extends AsyncNotifier<HevyIntegrationState> {
       return 'That Hevy API key wasn’t accepted.';
     }
     return 'NeuroFlow couldn’t reach Hevy. Please try again.';
+  }
+
+  static String _syncFailureMessage(Object error) {
+    if (error is FormatException || error is TypeError) {
+      return 'Hevy returned workout data NeuroFlow couldn’t import. '
+          'Your saved workouts are still available.';
+    }
+    return 'NeuroFlow couldn’t reach Hevy. '
+        'Your saved workouts are still available.';
   }
 }

@@ -103,4 +103,51 @@ void main() {
     expect(page.workouts, isEmpty);
     expect(page.hasNextPage, isFalse);
   });
+
+  test('parses numeric custom metrics and current superset identifiers',
+      () async {
+    final httpClient = MockClient((request) async {
+      return http.Response(
+        '''
+        {
+          "page": 1,
+          "page_count": 1,
+          "workouts": [
+            {
+              "id": "workout-1",
+              "title": "Stair workout",
+              "start_time": "2026-07-25T08:00:00Z",
+              "end_time": "2026-07-25T08:30:00Z",
+              "exercises": [
+                {
+                  "index": 0,
+                  "title": "Stair Machine",
+                  "exercise_template_id": "template-1",
+                  "supersets_id": 7,
+                  "sets": [
+                    {
+                      "index": 0,
+                      "type": "normal",
+                      "custom_metric": 50
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        ''',
+        200,
+      );
+    });
+
+    final client = HevyApiClient(
+      httpClient: httpClient,
+      credentials: const HevyCredentialsStore(FlutterSecureStorage()),
+    );
+
+    final workout = (await client.getWorkouts()).workouts.single;
+    expect(workout.exercises.single.supersetId, '7');
+    expect(workout.exercises.single.sets.single.customMetric, 50);
+  });
 }

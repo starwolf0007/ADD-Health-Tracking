@@ -58,7 +58,9 @@ class HevyExercise {
       title: _requiredString(json, 'title'),
       notes: json['notes'] as String?,
       exerciseTemplateId: _requiredString(json, 'exercise_template_id'),
-      supersetId: json['superset_id'] as String?,
+      supersetId: _optionalIdentifier(
+        json['superset_id'] ?? json['supersets_id'],
+      ),
       sets: _listOfMaps(json['sets'])
           .map(HevySet.fromJson)
           .toList(growable: false),
@@ -74,7 +76,7 @@ class HevySet {
   final int? distanceMeters;
   final int? durationSeconds;
   final num? rpe;
-  final bool? customMetric;
+  final num? customMetric;
   final Map<String, dynamic> raw;
 
   const HevySet({
@@ -98,7 +100,7 @@ class HevySet {
       distanceMeters: (json['distance_meters'] as num?)?.toInt(),
       durationSeconds: (json['duration_seconds'] as num?)?.toInt(),
       rpe: json['rpe'] as num?,
-      customMetric: json['custom_metric'] as bool?,
+      customMetric: json['custom_metric'] as num?,
       raw: Map<String, dynamic>.unmodifiable(json),
     );
   }
@@ -146,6 +148,15 @@ DateTime _requiredDateTime(Map<String, dynamic> json, String key) {
 DateTime? _optionalDateTime(Object? value) {
   if (value is! String || value.isEmpty) return null;
   return DateTime.tryParse(value)?.toUtc();
+}
+
+String? _optionalIdentifier(Object? value) {
+  if (value is String) {
+    final normalized = value.trim();
+    return normalized.isEmpty ? null : normalized;
+  }
+  if (value is num) return value.toString();
+  return null;
 }
 
 int _requiredInt(Map<String, dynamic> json, String key) {

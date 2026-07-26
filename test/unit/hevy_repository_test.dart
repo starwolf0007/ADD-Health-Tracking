@@ -35,6 +35,19 @@ void main() {
     expect(await database.select(database.hevySets).get(), hasLength(2));
   });
 
+  test('numeric custom metrics persist without losing precision', () async {
+    await repository.upsertWorkouts([
+      _workout(
+        exercises: [
+          _exercise(sets: [_set(0, customMetric: 12.5)]),
+        ],
+      ),
+    ]);
+
+    final set = await database.select(database.hevySets).getSingle();
+    expect(set.customMetric, 12.5);
+  });
+
   test('repeated import creates no duplicates', () async {
     await repository.upsertWorkouts([_workout()]);
     await repository.upsertWorkouts([_workout()]);
@@ -157,9 +170,15 @@ HevyExercise _exercise({
       sets: sets,
     );
 
-HevySet _set(int index, {int? reps}) => HevySet(
+HevySet _set(int index, {int? reps, num? customMetric}) => HevySet(
       index: index,
       type: 'normal',
       reps: reps,
-      raw: {'index': index, 'type': 'normal', 'reps': reps},
+      customMetric: customMetric,
+      raw: {
+        'index': index,
+        'type': 'normal',
+        'reps': reps,
+        'custom_metric': customMetric,
+      },
     );
