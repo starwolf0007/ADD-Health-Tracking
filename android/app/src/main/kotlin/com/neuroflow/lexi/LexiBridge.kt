@@ -1,6 +1,9 @@
 package com.neuroflow.lexi
 
+import android.content.Context
 import android.util.Log
+import com.google.ai.edge.aicore.GenerativeModel
+import com.google.ai.edge.aicore.generationConfig
 import io.flutter.embedding.engine.plugins.FlutterPlugin
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -16,9 +19,16 @@ import kotlinx.coroutines.*
  * call. This avoids the per-call model-load overhead that existed in the
  * previous implementation.
  *
- * Real SDK integration: aicore (com.google.ai.edge.aicore) is already on the
- * classpath (build.gradle.kts). Drop the real calls into the TODO anchors
- * marked "AICORE" when the API stabilises.
+ * Real SDK integration: com.google.ai.edge.aicore:aicore:0.0.1-exp01
+ * (build.gradle.kts). `generationConfig`/`temperature`/`maxOutputTokens` are
+ * fixed at model-construction time (the SDK has no per-call override), so
+ * they're set once here to match the only values the Dart side ever sends
+ * (see LexiPlanAdvisor._callOnDeviceLLM: maxTokens 80, temperature 0.7).
+ * DownloadConfig is left at its default (no custom DownloadCallback) — there
+ * is no UI surface for model-download progress in this sprint; a failed or
+ * pending download simply falls through the existing catch block below and
+ * Lexi stays unavailable, per ADR-001/ADR-006 (AI absent must never block
+ * the app).
  *
  * Channel: neuroflow/lexi
  * Methods:
@@ -41,6 +51,7 @@ class LexiBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
     // ── Fields ───────────────────────────────────────────────────────────────
 
     private lateinit var channel: MethodChannel
+    private lateinit var appContext: Context
 
     /**
      * Dedicated IO scope for model init, warm-up, and inference.
@@ -53,17 +64,15 @@ class LexiBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
     /**
      * The retained inference session. Created once during warm-up and reused
      * for all subsequent [generateResponse] calls.
-     *
-     * TODO [AICORE]: replace Any? with the real session type, e.g.:
-     *   private var session: GenerativeModel? = null
      */
-    private var session: Any? = null
+    private var session: GenerativeModel? = null
 
     // ── FlutterPlugin ────────────────────────────────────────────────────────
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         channel = MethodChannel(binding.binaryMessenger, CHANNEL)
         channel.setMethodCallHandler(this)
+        appContext = binding.applicationContext
         initializeAndWarm()
     }
 
@@ -101,20 +110,25 @@ class LexiBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
             try {
                 Log.d(TAG, "Initialize: setting up inference engine")
 
-                // TODO [AICORE]: initialize the real model, e.g.:
-                //   val config = generationConfig { temperature = 0.7f }
-                //   val model = GenerativeModel(
-                //     modelName = "gemini-nano",
-                //     generationConfig = config,
-                //   )
+                val config = generationConfig {
+                    context = appContext
+                    temperature = 0.7f
+                    maxOutputTokens = 80
+                }
+                val model = GenerativeModel(config)
 
                 lifecycleState = LifecycleState.WARMING
-                Log.d(TAG, "Warm: pre-loading model weights")
+                Log.d(TAG, "Warm: preparing inference engine")
 
-                // TODO [AICORE]: call model.warmUp() or equivalent:
-                //   model.warmUp()
+                // Triggers device-capability/model-availability checks and, if
+                // needed, a model download — throws (PreparationException /
+                // DownloadException / etc., all GenerativeAIException) on any
+                // device that can't run Gemini Nano. Caught below; Lexi simply
+                // stays unavailable, matching the pre-existing fallback
+                // contract (ADR-001/ADR-006).
+                model.prepareInferenceEngine()
 
-                session = createStubSession()   // TODO [AICORE]: session = model
+                session = model
                 lifecycleState = LifecycleState.READY
                 Log.d(TAG, "Ready: inference session live, state=$lifecycleState")
 
@@ -132,9 +146,7 @@ class LexiBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
     private fun dispose() {
         lifecycleState = LifecycleState.DISPOSED
 
-        // TODO [AICORE]: release native resources, e.g.:
-        //   (session as? GenerativeModel)?.close()
-
+        session?.close()
         session = null
         scope.cancel()
         Log.d(TAG, "Disposed: inference session released")
@@ -188,24 +200,14 @@ class LexiBridge : FlutterPlugin, MethodChannel.MethodCallHandler {
      * lifecycle optimisation.
      */
     private suspend fun runInference(prompt: String): String? {
-        Log.d(TAG, "runInference: prompt length=${prompt.length}, session=$session")
-
-        // TODO [AICORE]: replace with real call, e.g.:
-        //   return (session as GenerativeModel)
-        //       .generateContent(prompt)
-        //       .text
-
-        return null   // stub: no on-device LLM wired yet
+        val model = session ?: return null
+        Log.d(TAG, "runInference: prompt length=${prompt.length}")
+        return model.generateContent(prompt).text
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun isReady(): Boolean = lifecycleState == LifecycleState.READY
-
-    /** Placeholder session object. Remove when real SDK session is wired. */
-    private fun createStubSession(): Any = object : Any() {
-        override fun toString() = "LexiStubSession"
-    }
 
     // ── Constants ─────────────────────────────────────────────────────────────
 
