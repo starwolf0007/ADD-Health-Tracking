@@ -55,8 +55,8 @@ Any temporary layer leak or pragmatic stub introduced for speed must be document
 - One surface at a time.
 - After each surface is unlocked and verified, stop and confirm before moving to the next.
 - Preferred order (subject to owner direction):
-  1. Notes — **see `docs/UNLOCK-SPRINT-NOTES.md` for Tier 1/2/3 scope, inspection checklist, and required stop**
-  2. Reflect
+  1. Notes — **see `docs/UNLOCK-SPRINT-NOTES.md`**
+  2. Reflect — **see `docs/UNLOCK-SPRINT-REFLECT.md`** (mission: *What happened today, and what can I learn from it?* — timeline, not journaling/analytics)
   3. Settings / Connected Services / Health Integrations (make every control do something visible)
   4. Lexi conversation surface (mock or lightweight path so the companion feel is present)
   5. Remaining capture / Today / Routines dead-ends if any
@@ -66,7 +66,8 @@ Surface-specific briefs (when present) override generic “make it usable” lan
 ## How other agents should behave
 
 - Read this memo before large presentation or feature work.
-- For Notes, also read `docs/UNLOCK-SPRINT-NOTES.md` before implementing or reviewing.
+- For Notes, read `docs/UNLOCK-SPRINT-NOTES.md`.
+- For Reflect, read `docs/UNLOCK-SPRINT-REFLECT.md` — do not turn Reflect into journaling, charts, or a second dashboard.
 - Prefer shipping a usable, honest surface over preserving every process constraint from the earlier spine phase.
 - When in doubt, ask: “Does this change make the app more usable for daily dogfooding without breaking hard architectural invariants?”
 - Continue to report accurately. Continue to keep Executive pure.
@@ -78,6 +79,7 @@ Surface-specific briefs (when present) override generic “make it usable” lan
 - Hard architecture (ADRs, Executive purity, Intelligence optional) is unchanged.
 - See also the short note added to `AGENTS.md` and the entry in `docs/DECISIONS.md`.
 - Notes surface brief: `docs/UNLOCK-SPRINT-NOTES.md`
+- Reflect surface brief: `docs/UNLOCK-SPRINT-REFLECT.md`
 
 ---
 
