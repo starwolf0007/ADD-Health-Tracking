@@ -16,12 +16,15 @@ export 'package:neuroflow/app/hevy_providers.dart';
 import 'package:neuroflow/data/habit_repository.dart';
 import 'package:neuroflow/data/habit_repository_impl.dart';
 import 'package:neuroflow/data/mood_repository_impl.dart';
+import 'package:neuroflow/data/note_repository_impl.dart';
 import 'package:neuroflow/data/routine_repository.dart';
 import 'package:neuroflow/data/routine_repository_impl.dart';
 import 'package:neuroflow/data/task_repository.dart';
 import 'package:neuroflow/data/task_repository_impl.dart';
 import 'package:neuroflow/domain/habit.dart';
 import 'package:neuroflow/domain/mood_repository.dart';
+import 'package:neuroflow/domain/note.dart';
+import 'package:neuroflow/domain/note_repository.dart';
 import 'package:neuroflow/domain/routine.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
 import 'package:neuroflow/domain/task.dart';
@@ -153,6 +156,15 @@ final routineRepositoryProvider = Provider<RoutineRepository>((ref) {
 
 final habitRepositoryProvider = Provider<HabitRepository>((ref) {
   return DriftHabitRepository(ref.watch(databaseProvider));
+});
+
+final noteRepositoryProvider = Provider<NoteRepository>((ref) {
+  return DriftNoteRepository(ref.watch(databaseProvider));
+});
+
+/// Live stream of all notes (pinned first, then most recently updated).
+final notesProvider = StreamProvider<List<Note>>((ref) {
+  return ref.watch(noteRepositoryProvider).watchAll();
 });
 
 // ---------------------------------------------------------------------------
