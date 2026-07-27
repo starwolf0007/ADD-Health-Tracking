@@ -604,6 +604,15 @@ class AppDatabase extends _$AppDatabase {
         ..limit(1))
       .watchSingleOrNull();
 
+  /// Recent mood check-ins newest first (for Reflect). No schema change.
+  Stream<List<MoodLogRow>> watchRecentMoodLogs({int days = 14}) {
+    final since = _startOfToday.subtract(Duration(days: days));
+    return (select(moodLogs)
+          ..where((m) => m.loggedAt.isBiggerOrEqualValue(since))
+          ..orderBy([(m) => OrderingTerm.desc(m.loggedAt)]))
+        .watch();
+  }
+
   Future<void> enqueueSyncOp(SyncQueueCompanion op) =>
       into(syncQueue).insert(op);
 
