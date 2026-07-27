@@ -16,7 +16,13 @@ class DriftMoodRepository implements MoodRepository {
 
   @override
   Stream<MoodLog?> watchTodayLatest() =>
-      _db.watchTodayLatestMood().map(_toDomain);
+      _db.watchTodayLatestMood().map(_toDomainNullable);
+
+  @override
+  Stream<List<MoodLog>> watchRecent({int days = 14}) =>
+      _db.watchRecentMoodLogs(days: days).map(
+            (rows) => rows.map(_toDomain).toList(),
+          );
 
   @override
   Future<void> log(MoodLog entry) => _db.insertMoodLog(
@@ -28,13 +34,15 @@ class DriftMoodRepository implements MoodRepository {
         ),
       );
 
-  MoodLog? _toDomain(MoodLogRow? row) {
+  MoodLog? _toDomainNullable(MoodLogRow? row) {
     if (row == null) return null;
-    return MoodLog(
-      id: row.id,
-      level: MoodLevelX.fromScore(row.level),
-      note: row.note,
-      loggedAt: row.loggedAt,
-    );
+    return _toDomain(row);
   }
+
+  MoodLog _toDomain(MoodLogRow row) => MoodLog(
+        id: row.id,
+        level: MoodLevelX.fromScore(row.level),
+        note: row.note,
+        loggedAt: row.loggedAt,
+      );
 }

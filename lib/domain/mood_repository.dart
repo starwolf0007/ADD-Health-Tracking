@@ -16,5 +16,8 @@ abstract class MoodRepository {
   /// rolls over, so yesterday's rough check-in must not reshape this morning.
   Stream<MoodLog?> watchTodayLatest();
 
+  /// Recent check-ins newest first (default last 14 days). For Reflect history.
+  Stream<List<MoodLog>> watchRecent({int days = 14});
+
   Future<void> log(MoodLog entry);
 }
