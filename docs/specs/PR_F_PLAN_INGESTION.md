@@ -65,7 +65,7 @@ source file (PDF/XLSX)
 
 The normalized form must carry every prescription detail §0 promises, so approval and writing can reconstruct a fully-specified routine. It is **not** limited to sets/reps/load/RPE/superset:
 
-- **load** — numeric value **plus an explicit unit** (`kg` | `lb` | `bodyweight` | `unitless`); the executor converts to Hevy's `weight_kg`. Missing or mixed/conflicting units are never guessed — they route through review (§3).
+- **load** — numeric value **plus an explicit unit**. `kg` and `lb` convert deterministically to Hevy's `weight_kg`; `bodyweight` maps to Hevy's bodyweight representation (no external load). A `unitless` numeric load has **no deterministic `weight_kg` mapping**, so it is treated as **unsupported** — it routes through review (§3) and is never auto-written as an arbitrary weight. Missing or mixed/conflicting units likewise route through review; units are never guessed.
 - **set type** — `normal` | `warmup` | `drop` | `failure` (maps to `HevySet.type`).
 - **timed / distance sets** — `durationSeconds` and `distanceMeters`, mirroring the existing `HevySet` model, for sets not expressed as reps.
 - **rest timer** — per-set or per-exercise rest, when the plan specifies it.
@@ -142,7 +142,7 @@ The parser has **no direct write path**. A parser retry can never produce an out
 
 The parsed plan is **source-of-truth input data** (coach/user authored intent), not a derived analytic. It is therefore exempt from derived-not-stored and *is* persisted.
 
-Retained: raw source file, extraction output, normalized plan, every resolution decision, and the approved revision.
+Retained: extraction output, normalized plan, every resolution decision, and the approved revision — plus the raw source file **only when it passes the §1 medical-content screen.** A flagged or un-inspectable raw file is never persisted to this repository (it is redacted, or held vault-only, per §1). The §1 fail-closed boundary governs; §6 never overrides it.
 
 ### Non-nullable provenance fields
 
@@ -175,7 +175,7 @@ The write direction **cannot assume idempotent transport.** PR B–E is read-dir
 planId + mesocycleWeek + sessionIndex + approvedRevision
 ```
 
-`planId` is a **stable logical plan identity**, assigned once when a plan is first ingested — **not** derived from the file bytes. A corrected source file is ingested as a new *revision of the same `planId`* through an explicit `replaces` relationship (chosen at ingest: "new plan" vs. "correction of plan X"), so a fixed typo does not fork into a second plan. `sourceFileHash` is retained as **provenance only**, and additionally used to dedup *identical* re-ingests (same bytes → same revision — a retry, not a new revision). Because `planId` is stable across corrected files, the supersession lookup below reliably finds the previously-published routine instead of stranding it as a duplicate.
+`planId` is a **stable logical plan identity**, assigned once when a plan is first ingested — **not** derived from the file bytes. A corrected source file is ingested as a new *revision of the same `planId`* through an explicit `replaces` relationship (chosen at ingest: "new plan" vs. "correction of plan X"), so a fixed typo does not fork into a second plan. `sourceFileHash` is retained as **provenance only**, and additionally used to dedup *identical* re-ingests **within the same selected plan** (same bytes → same revision — a retry, not a new revision). A deliberate reuse of the same file under an explicit *new plan* choice is a new plan, not a dedup — the user's new-plan-vs-correction selection always wins over content hashing. Because `planId` is stable across corrected files, the supersession lookup below reliably finds the previously-published routine instead of stranding it as a duplicate.
 
 **2. Remote reconciliation (Hevy-side).** The intent key is also persisted as a stable, machine-readable marker on the created Hevy object (embedded in a reserved namespace within the routine's notes/title), so it can be recovered by read-back. Before creating, the write executor reconciles the intent key against existing Hevy objects:
 
@@ -186,17 +186,19 @@ This makes create operations effectively idempotent even though Hevy exposes no 
 
 ### Serialized, single-owner execution
 
-The reconcile-then-create in layer 2 is **not atomic by itself**: two concurrent runners (e.g. a foreground action and a background retry) could both read "no match" and both create. Execution is therefore serialized on the **session slot** — `hevyAccountId + planId + mesocycleWeek + sessionIndex` — **not** the revision-specific intent key. This matters because two *different* revisions of one session (N and N+1) carry different intent keys and would otherwise take independent leases and both create; leasing by the slot forces them into a single ordered publisher. The slot lease is a state machine — `pending → leased → published` (or `failed`) — and **only the current lease holder may create or supersede**; any other runner for the same slot (a retry, a background pass, or a newer revision) observes the active lease and waits or no-ops. Leases expire, and on expiry/restart recovery re-runs reconciliation by the remote marker *before* re-leasing, so a create that succeeded but whose response or local record was lost is adopted, not duplicated. The stable `planId`, the remote marker, and the slot lease together back the §10 zero-duplicate guarantee.
+The reconcile-then-create in layer 2 is **not atomic by itself**: two concurrent runners (e.g. a foreground action and a background retry) could both read "no match" and both create. Execution is therefore serialized on the **session slot** — `hevyAccountId + planId + mesocycleWeek + sessionIndex` — **not** the revision-specific intent key. This matters because two *different* revisions of one session (N and N+1) carry different intent keys and would otherwise take independent leases and both create; leasing by the slot forces them into a single ordered publisher. The slot lease is a state machine — `pending → leased → published` (or `failed`) — and **only the current lease holder may create or supersede**; any other runner for the same slot (a retry, a background pass, or a newer revision) observes the active lease and waits or no-ops. Leases expire, and on expiry/restart recovery re-runs reconciliation by the remote marker *before* re-leasing, so a create that succeeded but whose response or local record was lost is adopted, not duplicated.
+
+Mutual exclusion is not ordering, so the lease also enforces **monotonic revision**: the holder publishes only the *newest approved* revision for the slot, and any command whose `approvedRevision` is older than the slot's latest-approved is a **safe no-op**. This stops a lagging revision *N* from acquiring the lease after *N+1* has published and overwriting it with stale content. The stable `planId`, the remote marker, the slot lease, and the monotonic check together back the §10 zero-duplicate guarantee.
 
 ### Superseding a published revision
 
 Because `approvedRevision` is part of the intent identity, re-approving a corrected plan is a *new* write intent, not a retry — so without a supersession rule both the old and corrected routines would coexist in Hevy. On publishing revision *N+1* for a `(planId, mesocycleWeek, sessionIndex)` that already has a published revision *N*, the executor:
 
 1. resolves revision *N*'s recorded remote-object identity (layer 2 above);
-2. **updates that object in place** to the *N+1* content when Hevy supports update, or **deletes *N* then creates *N+1*** otherwise;
-3. marks revision *N* superseded locally only after Hevy confirms.
+2. **updates that object in place** to the *N+1* content when Hevy supports update; otherwise it **creates *N+1*, confirms it live, then deletes *N*** (create-before-delete). A failed or rejected *N+1* leaves *N* intact — the user is never left without a routine;
+3. marks revision *N* superseded locally only after *N+1* is confirmed live **and** *N* is removed.
 
-A partial failure leaves the plan *not* marked fully published (§10) and is recoverable on retry, since the intent key + remote identity still resolve. Exactly one live routine per `(planId, week, session)` is the invariant.
+If the process is interrupted between create and delete, both may briefly exist; recovery reconciles by the remote marker (layer 2) — *N+1* is adopted and the stale *N* deleted — converging to exactly one. Until then the slot is *not* marked fully published (§10). The invariant is **never zero, and exactly one once settled** per `(planId, week, session)`.
 
 ---
 
@@ -253,6 +255,9 @@ Automatic promotion is explicitly rejected for v1: one coach-specific synonym or
 - [ ] Overrides, plans, and write commands are bound to a verified `hevyAccountId`; account switch segregates prior records
 - [ ] Approval + all derived write commands persist in one transaction (or a recovery scan re-materializes missing commands)
 - [ ] Concurrent/retried writes cannot duplicate — publication serialized by a lease on the session slot (account + planId + week + session), across revisions
+- [ ] Lease enforces monotonic revision — a stale (older `approvedRevision`) command safely no-ops and cannot overwrite a newer published routine
+- [ ] Supersession never leaves a session without a live routine — create-before-delete when Hevy lacks in-place update; a failed replacement keeps the prior routine
+- [ ] `unitless` loads are unsupported and route through review — never auto-assigned a weight
 - [ ] `planId` is a stable logical identity; a corrected source file supersedes the prior routine instead of creating a second — exactly one live routine per (planId, week, session)
 - [ ] Overrides auto-resolve only within their originating coach/plan context; cross-context reuse routes through review
 - [ ] Raw files fully inspected (text + OCR attestation) before persistence; flagged or un-inspectable content redacted or withheld — boundary fails closed
@@ -300,6 +305,11 @@ Automatic promotion is explicitly rejected for v1: one coach-specific synonym or
 | Bind overrides/writes to the connected Hevy account | §6 — account binding |
 | Review surface must be able to resolve flagged items | §9 — resolving review UI |
 | Medical-tier boundary + full-file screening attestation | §1 — screen whole file (text + OCR), fail closed |
+| Stale-revision overwrite under the slot lease | §7 — monotonic revision (stale commands no-op) |
+| `unitless` load has no `weight_kg` mapping | §2 — treated as unsupported → review |
+| Raw-file retention contradicted §1 fail-closed | §6 — retention conditional on passing the §1 screen |
+| Failed replacement could strand the session (delete-then-create) | §7 — create-before-delete; prior routine preserved on failure |
+| Identical-file dedup collapsed an intentional new-cycle reuse | §7 — dedup scoped to the selected plan; explicit new-plan choice wins |
 
 **Still open — P2, deferred to the implementation PR (do not gate safety, but track):**
 
