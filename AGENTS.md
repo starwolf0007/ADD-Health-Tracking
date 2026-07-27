@@ -8,6 +8,28 @@ These rules take precedence over agent defaults unless they directly conflict wi
 
 ---
 
+## Active Temporary Override — Unlock Sprint (2026-07-27)
+
+**See `docs/UNLOCK-SPRINT-MEMO.md` for full authority and rationale.**
+
+For the duration of the Unlock Sprint the following process constraints are **softened** so that primary surfaces can become usable for daily dogfooding:
+
+- Larger coherent presentation-layer changes are allowed when they unlock a complete surface.
+- Related presentation + domain wiring for a single surface may be changed together.
+- Explicit authorization for widget / presentation changes is granted for unlock work.
+- Phase-gating placeholder text on user-facing screens is removed; incomplete seams must remain honest but surfaces must be accessible.
+
+**Still inviolable:**
+- Executive layer remains pure Dart and never imports `lib/intelligence/`.
+- Intelligence remains optional (`NoOpPlanAdvisor` default).
+- Sealed-state architecture and repository conventions.
+- Verification rules (never claim success without running the command; report «Not executed.»).
+- Truth over appearance; no fabricated results; no deleted tests; no placeholder-as-finished-work.
+
+Work one surface at a time. Preferred order is documented in the memo. When the owner declares the daily-driver baseline reached, full process strictness is restored.
+
+---
+
 Core Principles
 
 1. Truth over appearance.
@@ -17,6 +39,8 @@ Core Principles
 5. Verified results over assumed success.
 
 Never optimize for producing an impressive report. Optimize for leaving the repository in a correct, verifiable state.
+
+*(Note: Principle 3 is temporarily softened per the Unlock Sprint override above.)*
 
 ---
 
@@ -57,6 +81,8 @@ Do not change unrelated:
 unless explicitly requested.
 
 If additional improvements are discovered, report them separately rather than implementing them.
+
+*(Temporarily relaxed for single-surface unlock work — see Unlock Sprint memo.)*
 
 ---
 
@@ -248,6 +274,8 @@ NeuroFlow-Specific Rules
 - Keep public APIs minimal.
 - Safe no-op behavior is preferred over exceptions where appropriate.
 - Never introduce Flutter dependencies into pure executive code solely for debugging.
+
+*(Widget-authorization rule is granted for Unlock Sprint surface work — see memo.)*
 
 ---
 
