@@ -33,11 +33,11 @@ Being a separate input domain removes the *evidence/correlation* machinery, **no
 
 Therefore, before any raw file is persisted (§6):
 
-1. **Screen** the extracted text with a deterministic medical-content classifier (keyword/section heuristics versioned with the ruleset).
-2. **Clean → persist normally.** Files with no medical-tier signal follow the normal persistence path.
-3. **Flagged → do not store the raw file in the PlanIngestion repository.** Either redact the medical spans before persisting the raw file, or hold the raw bytes only in the isolated encrypted-at-rest vault (once it exists) and persist a redacted derivative plus a `medicalContentRedacted` provenance flag. The training prescription (sets/reps/load) still flows through the pipeline; only the sensitive raw content is withheld from ordinary storage.
+1. **Screen the whole file, not just the extracted text.** A deterministic medical-content classifier (keyword/section heuristics versioned with the ruleset) runs over *all* recoverable content. Because scanned pages, embedded images, and non-text objects carry no signal to a text-only classifier, screening requires an **extraction-completeness attestation**: every page/region must be either machine-text-extracted or OCR-inspected. Any file with uninspected content (image-only pages not OCR'd, undecodable objects) **fails the attestation** and is treated as unscreened.
+2. **Clean → persist normally.** Only files that pass the attestation with no medical-tier signal follow the normal persistence path.
+3. **Flagged or unscreened → do not store the raw file in the PlanIngestion repository.** Redact the medical spans before persisting, or hold the raw bytes only in the isolated encrypted-at-rest vault (once it exists) and persist a redacted derivative plus a `medicalContentRedacted` provenance flag. A file that cannot be fully inspected is withheld the same way — **the boundary fails closed, never open.** The training prescription (sets/reps/load) still flows through the pipeline; only the sensitive raw content is withheld from ordinary storage.
 
-This keeps PlanIngestion consistent with the established health-data doctrine instead of carving a second path around it.
+This keeps PlanIngestion consistent with the established health-data doctrine instead of carving a second path around it, and never persists sensitive bytes it did not actually inspect.
 
 ---
 
@@ -57,7 +57,7 @@ source file (PDF/XLSX)
 
 ### Stage 3/4 resolution order
 
-1. **Local user-override table** (Drift) — user-confirmed mappings, scoped to this user
+1. **Local override table** (Drift) — user-confirmed mappings keyed by **coach/plan context**, not just user. An override auto-resolves only within its originating context; the same exercise label from a *different* coach or plan does not silently inherit it and goes to the ambiguity gate instead. This stops one coach's "row" (barbell) from auto-resolving another coach's "row" (machine).
 2. **Canonical ruleset** — repo-owned aliases and defaults
 3. **Ambiguity gate** — anything unresolved by 1 or 2
 
@@ -133,6 +133,8 @@ HevyWriteCommand        — individual outbound intent, idempotency-keyed
 
 The parser has **no direct write path**. A parser retry can never produce an outbound side effect.
 
+**Approval and command creation are atomic.** Persisting an `ApprovedMesocycle` and inserting all of its derived `HevyWriteCommand` records happen in **one transaction**, so approval can never leave an approved-but-unpublishable plan with no outbound work for the executor to recover. As a backstop, a deterministic recovery scan materializes missing commands for any approved plan that has none — commands derive deterministically from the immutable approved revision, so re-materialization is safe and idempotent.
+
 ---
 
 ## 6. Persistence & Provenance
@@ -172,7 +174,7 @@ The write direction **cannot assume idempotent transport.** PR B–E is read-dir
 planId + mesocycleWeek + sessionIndex + approvedRevision
 ```
 
-`planId` derives deterministically from `sourceFileHash`, so re-ingesting the identical file produces the identical plan identity, and an edited-and-reapproved plan (new `approvedRevision`) is distinguishable from a retry rather than colliding with it.
+`planId` is a **stable logical plan identity**, assigned once when a plan is first ingested — **not** derived from the file bytes. A corrected source file is ingested as a new *revision of the same `planId`* through an explicit `replaces` relationship (chosen at ingest: "new plan" vs. "correction of plan X"), so a fixed typo does not fork into a second plan. `sourceFileHash` is retained as **provenance only**, and additionally used to dedup *identical* re-ingests (same bytes → same revision — a retry, not a new revision). Because `planId` is stable across corrected files, the supersession lookup below reliably finds the previously-published routine instead of stranding it as a duplicate.
 
 **2. Remote reconciliation (Hevy-side).** The intent key is also persisted as a stable, machine-readable marker on the created Hevy object (embedded in a reserved namespace within the routine's notes/title), so it can be recovered by read-back. Before creating, the write executor reconciles the intent key against existing Hevy objects:
 
@@ -183,7 +185,7 @@ This makes create operations effectively idempotent even though Hevy exposes no 
 
 ### Serialized, single-owner execution
 
-The reconcile-then-create in layer 2 is **not atomic by itself**: two concurrent runners (e.g. a foreground action and a background retry) could both read "no match" and both create. Execution is therefore serialized per intent key. Each `HevyWriteCommand` is a leased state machine — `pending → leased → published` (or `failed`) — and **only the current lease holder may create**; a second runner for the same key observes the active lease and waits or no-ops rather than creating. Leases expire, and on expiry/restart recovery re-runs reconciliation by the remote marker *before* re-leasing, so a create that succeeded but whose response or local record was lost is adopted, not duplicated. The local key, the remote marker, and the lease together back the §10 zero-duplicate guarantee.
+The reconcile-then-create in layer 2 is **not atomic by itself**: two concurrent runners (e.g. a foreground action and a background retry) could both read "no match" and both create. Execution is therefore serialized on the **session slot** — `hevyAccountId + planId + mesocycleWeek + sessionIndex` — **not** the revision-specific intent key. This matters because two *different* revisions of one session (N and N+1) carry different intent keys and would otherwise take independent leases and both create; leasing by the slot forces them into a single ordered publisher. The slot lease is a state machine — `pending → leased → published` (or `failed`) — and **only the current lease holder may create or supersede**; any other runner for the same slot (a retry, a background pass, or a newer revision) observes the active lease and waits or no-ops. Leases expire, and on expiry/restart recovery re-runs reconciliation by the remote marker *before* re-leasing, so a create that succeeded but whose response or local record was lost is adopted, not duplicated. The stable `planId`, the remote marker, and the slot lease together back the §10 zero-duplicate guarantee.
 
 ### Superseding a published revision
 
@@ -205,7 +207,7 @@ A partial failure leaves the plan *not* marked fully published (§10) and is rec
 human resolves ambiguity
   → decision persisted as audit data
   → same plan revision reuses that decision
-  → user-scoped mapping written to the local override table
+  → context-scoped mapping (coach/plan) written to the local override table
   → optional rule-improvement candidate recorded
   → developer reviews and promotes it through a normal PR
 ```
@@ -248,9 +250,11 @@ Automatic promotion is explicitly rejected for v1: one coach-specific synonym or
 - [ ] Fuzzy matches with conflicting movement attributes route through review; only exact aliases/overrides or attribute-guarded matches auto-resolve
 - [ ] Exercise-template catalog is fetched/cached/refreshed; resolution draws candidates only from it plus aliases/overrides
 - [ ] Overrides, plans, and write commands are bound to a verified `hevyAccountId`; account switch segregates prior records
-- [ ] Concurrent/retried writes for one intent key cannot duplicate — serialized via a leased single-owner command transition
-- [ ] Republishing a corrected revision supersedes the prior routine — exactly one live routine per (planId, week, session)
-- [ ] Raw files screened for medical-tier content before persistence; flagged content redacted or withheld from ordinary storage
+- [ ] Approval + all derived write commands persist in one transaction (or a recovery scan re-materializes missing commands)
+- [ ] Concurrent/retried writes cannot duplicate — publication serialized by a lease on the session slot (account + planId + week + session), across revisions
+- [ ] `planId` is a stable logical identity; a corrected source file supersedes the prior routine instead of creating a second — exactly one live routine per (planId, week, session)
+- [ ] Overrides auto-resolve only within their originating coach/plan context; cross-context reuse routes through review
+- [ ] Raw files fully inspected (text + OCR attestation) before persistence; flagged or un-inspectable content redacted or withheld — boundary fails closed
 - [ ] Ruleset committed, versioned, with changelog section
 - [ ] No runtime dependency on an external AI-tool skill directory
 - [ ] No regressions to PR B–E Hevy cache/sync tests
@@ -270,8 +274,9 @@ Automatic promotion is explicitly rejected for v1: one coach-specific synonym or
 ## 12. Open Items for Implementation Review
 
 - Whether the YAML machine-readable companion is needed at v1, or markdown-plus-code suffices
-- Whether the local override table is user-scoped only, or also plan-scoped (same name meaning different things across two coaches)
 - Fuzzy-match threshold value — needs calibration against a real sample of coach plans before locking
+
+*(The earlier "user-scoped vs. plan-scoped override table" question is now resolved — overrides are keyed by coach/plan context; see §2.)*
 
 ### Raised in review (2026-07, PR #25)
 
@@ -281,15 +286,19 @@ Automatic promotion is explicitly rejected for v1: one coach-specific synonym or
 |---|---|
 | Write-side idempotency (transport not guaranteed) | §7 — two-layer contract |
 | Concurrent/retried create race (non-atomic check-then-create) | §7 — leased single-owner execution |
+| Cross-revision publication race (per-revision leases don't serialize) | §7 — lease on the session slot (account + planId + week + session) |
 | Supersede published routines after edits | §7 — supersession policy |
+| Stable plan ID across corrected source files | §7 — logical `planId`, `sourceFileHash` demoted to provenance |
+| Atomic approval → command handoff | §5 — one transaction + recovery scan |
 | Exercise-template catalog source | §2 — exercise-template catalog |
 | Load-unit normalization → `weight_kg` | §2 fields + §3 gate |
 | Preserve set type / timed / distance / rest | §2 — normalized prescription fields |
 | Domain validation of impossible parsed values | §3 — gate + pre-gate validation |
 | Semantic ambiguity in fuzzy matches | §3 — movement-attribute guard |
+| Override scoped to coach/plan context (no cross-coach bleed) | §2 — context-keyed override table |
 | Bind overrides/writes to the connected Hevy account | §6 — account binding |
 | Review surface must be able to resolve flagged items | §9 — resolving review UI |
-| Medical-tier boundary for imported files | §1 — medical-content boundary + §6 |
+| Medical-tier boundary + full-file screening attestation | §1 — screen whole file (text + OCR), fail closed |
 
 **Still open — P2, deferred to the implementation PR (do not gate safety, but track):**
 
