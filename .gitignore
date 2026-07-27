@@ -15,13 +15,13 @@ lib/data/database.g.dart
 # Firebase / Google config — contains project API keys and OAuth client IDs.
 # Keep out of version control; use google-services.json.example as a template.
 **/google-services.json
-**/android/**/gradle-wrapper.jar
 **/android/.gradle
 **/android/captures/
-**/android/gradlew
-**/android/gradlew.bat
 **/android/local.properties
 **/android/**/GeneratedPluginRegistrant.java
+
+# Gradle wrapper (gradlew, gradlew.bat, gradle-wrapper.jar) IS committed —
+# required for CI and any clone to build/test without a pre-installed Gradle.
 
 # iOS
 **/ios/**/*.mode1v3

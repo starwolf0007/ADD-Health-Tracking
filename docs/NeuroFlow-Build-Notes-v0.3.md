@@ -84,8 +84,11 @@ The §12.3 "extended-fields store keyed by googleTaskId" gets simpler. With nati
 
 - `pubspec.yaml` — dependency lock (workmanager added v0.2; uuid added v0.3).
 - `lib/domain/task.dart` — the canonical Task (spec §4.2) as an immutable Dart entity + enums. Pure domain, no Flutter/Drift imports.
+<!-- doc-path-check: ignore -->
 - `lib/domain/task_repository.dart` — repository interface (Executive/Presentation depend on this, not on Drift). `watchCompletedTodayCount()` added v0.3 for the heartbeat line.
+<!-- doc-path-check: ignore -->
 - `lib/platform/local/database.dart` — Drift schema: `Tasks` (full record incl. extended fields, `lastTouchedAt` for the sweep) + `SyncQueue` (pending Google mirror ops). Local-first source of truth. `@DataClassName('TaskRow')` avoids a name clash with the domain `Task`. `watchCompletedTodayCount()` query added v0.3.
+<!-- doc-path-check: ignore -->
 - `lib/platform/local/task_repository_impl.dart` *(v0.2)* — `DriftTaskRepository`: local-first writes, best-effort Google-mirror enqueue, archive-not-delete.
 - `lib/platform/notifications/notification_service.dart` *(v0.2)* — inexact local notifications; `NudgePayload` is the realized outbound-trigger contract.
 - `lib/platform/background/background_scheduler.dart` *(v0.2)* — WorkManager periodic jobs for the bad-day signal eval and the sweep/resurface pass. Actual DB/notification wiring inside the callback is marked `TODO(integration)` — needs the real platform DB path, not fakeable from chat.

@@ -6,6 +6,8 @@ analyzer:
     - "**/*.freezed.dart"
     - "build/**"
     - "android/**"
+    - "docs/**"
+    - "lib/**/prototypes/**"
 
 linter:
   rules:

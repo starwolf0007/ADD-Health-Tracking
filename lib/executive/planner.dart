@@ -8,7 +8,10 @@
 //   • TodayController (in providers.dart) is the SOLE call site for
 //     PlanAdvisor.refine(). Executive never calls Intelligence directly.
 //   • PlanAdvisor interface is always non-null; default is NoOpPlanAdvisor.
+//   • Quick Wins entry is derived from user state, never from the shape of
+//     the task list — see DayCapacity below and spec §6.
 
+import 'package:neuroflow/domain/mood.dart';
 import 'package:neuroflow/domain/task.dart';
 
 // ---------------------------------------------------------------------------
@@ -39,6 +42,43 @@ class Plan {
 }
 
 // ---------------------------------------------------------------------------
+// DayCapacity — the user-state signals Quick Wins entry is derived from (§6)
+//
+// Spec §6 is explicit that Quick Wins is "entered and exited automatically by
+// signal, never by tap", and that the low-energy filter "is just how
+// candidates are found". Those are two different jobs:
+//
+//   entry     ← how the person is doing        (this type)
+//   selection ← which tasks the mode shows     (energy + effort, capped)
+//
+// Collapsing the second into the first inverts the feature: the reduction
+// would arrive when the list happens to be light rather than when the person
+// is depleted, and could never arrive on a heavy day — precisely when it is
+// needed most.
+// ---------------------------------------------------------------------------
+
+class DayCapacity {
+  /// The most recent mood check-in logged today, or null if none has been.
+  ///
+  /// Per `domain/mood.dart` this is the real Quick Wins trigger: a check-in at
+  /// `low` or below reshapes Today until a better one lands or the day rolls.
+  final MoodLevel? latestMood;
+
+  const DayCapacity({this.latestMood});
+
+  /// No signal available. Treated as a normal day — absence of evidence that
+  /// the day is rough is not evidence that it is.
+  static const DayCapacity unknown = DayCapacity();
+
+  /// Whether the signals indicate a lighter day.
+  ///
+  /// Additional signals (inferred low engagement, sleep, resting HR) belong
+  /// here as they become available — §6 leaves the exact set open. They do not
+  /// belong in the task-list inspection below.
+  bool get indicatesLighterDay => latestMood?.triggersQuickWins ?? false;
+}
+
+// ---------------------------------------------------------------------------
 // PlanAdvisor seam (§14 AI tiering)
 //
 // Phase 1: NoOpPlanAdvisor — deterministic, never AI-dependent.
@@ -66,13 +106,23 @@ class NoOpPlanAdvisor implements PlanAdvisor {
 // ---------------------------------------------------------------------------
 
 class Executive {
-  // Thresholds for auto Quick Wins detection.
+  /// §6 locked invariant: the Quick Wins list is capped at three. The cap is
+  /// the mechanism — an uncapped low-energy list is still a shame pile.
   static const int _quickWinsMaxCount = 3;
-  static const EnergyLevel _quickWinsMaxEnergy = EnergyLevel.low;
 
-  /// Produce a deterministic Plan from the current pending task list.
-  /// This is intentionally synchronous and pure — no I/O, no AI.
-  Plan evaluate(List<Task> pending) {
+  /// §6: candidates are found by low energy. This selects what the mode shows;
+  /// it never decides whether the mode is entered.
+  static const EnergyLevel _quickWinCandidateEnergy = EnergyLevel.low;
+
+  /// Produce a deterministic Plan from the current pending task list and the
+  /// day's capacity signals.
+  ///
+  /// Intentionally synchronous and pure — no I/O, no AI. [capacity] defaults
+  /// to [DayCapacity.unknown], which yields a normal day.
+  Plan evaluate(
+    List<Task> pending, {
+    DayCapacity capacity = DayCapacity.unknown,
+  }) {
     if (pending.isEmpty) {
       return const Plan(
         mode: DayMode.normal,
@@ -81,13 +131,11 @@ class Executive {
       );
     }
 
-    // Auto Quick Wins: if all pending tasks are low-energy AND there are ≤3,
-    // swap to Quick Wins mode automatically (spec v1.3 §QW auto-mode).
-    final allLowEnergy = pending.every((t) => t.energy == _quickWinsMaxEnergy);
-    if (allLowEnergy && pending.length <= _quickWinsMaxCount) {
+    // Entry is a property of the person, not of the list (§6).
+    if (capacity.indicatesLighterDay) {
       return Plan(
         mode: DayMode.quickWins,
-        quickWins: pending,
+        quickWins: _quickWinSelection(pending),
         reason: 'Lighter load today — showing your easiest wins first.',
       );
     }
@@ -101,5 +149,37 @@ class Executive {
       primaryTask: sorted.first,
       reason: '',
     );
+  }
+
+  /// Which tasks the reshaped Today shows, once entry has already been decided.
+  ///
+  /// §6: low-energy candidates, lowest estimated effort first, capped at three.
+  /// When nothing qualifies on energy the cap still applies to the whole list —
+  /// containment is the feature, so a rough day never falls back to a full one.
+  List<Task> _quickWinSelection(List<Task> pending) {
+    final candidates = pending
+        .where((task) => task.energy == _quickWinCandidateEnergy)
+        .toList();
+    final pool = candidates.isNotEmpty ? candidates : List<Task>.from(pending);
+    pool.sort(_byEffortThenEnergy);
+    return pool.take(_quickWinsMaxCount).toList();
+  }
+
+  /// Lowest estimated effort first (§6: "the point is momentum, not
+  /// coverage"). Tasks with no estimate sort last — an unknown estimate is not
+  /// evidence of a small one. Ties break on energy, then creation order, so
+  /// the selection is stable across evaluations.
+  static int _byEffortThenEnergy(Task a, Task b) {
+    final aEffort = a.estimatedMinutes;
+    final bEffort = b.estimatedMinutes;
+    if (aEffort != bEffort) {
+      if (aEffort == null) return 1;
+      if (bEffort == null) return -1;
+      final byEffort = aEffort.compareTo(bEffort);
+      if (byEffort != 0) return byEffort;
+    }
+    final byEnergy = a.energy.index.compareTo(b.energy.index);
+    if (byEnergy != 0) return byEnergy;
+    return a.createdAt.compareTo(b.createdAt);
   }
 }

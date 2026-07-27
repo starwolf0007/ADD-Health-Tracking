@@ -1,122 +1,167 @@
-# NeuroFlow — Path to First Compile
+# NeuroFlow — Build & Verification Path
 
-**Use this with a tool that has real Flutter/Dart execution access** — Claude Code, VS Code with Copilot, or a terminal directly. Nothing in this project has been compiled or run yet; this is the concrete sequence to get there. Every status label below follows spec §16: Proposed / Implemented / **Verified** — nothing is Verified until this sequence actually succeeds.
+**Status of the question this document was written to answer: settled.**
+The project compiles, and `flutter test` passes. Android CI has run the full
+`pub get` → `build_runner` → `flutter test` sequence on every push and PR to
+`main`, and `main` has been green through the current head.
+
+This file used to be "Path to First Compile," written when nothing in the repo
+had ever been built and the native scaffolds did not exist. That milestone
+passed. What remains useful — and what this file is now — is the exact sequence
+to get a working tree building, what CI already guarantees, and the reporting
+discipline that got the project out of its earlier confident-but-uncompiled
+state. The history is preserved at the bottom rather than deleted.
 
 ---
 
-## 0. Get the reconciled repo state — safely, not just cleanly
+## The build sequence
 
-**Revised process (the direct force-push in an earlier draft of this doc had a real gap — no backup tag, no isolation before validating).** This version fixes both.
-
-```bash
-git clone https://github.com/starwolf0007/ADD-Health-Tracking.git repo
-cd repo
-
-# Backup FIRST — recoverable regardless of what happens next.
-git tag pre-reconciliation-backup origin/main
-git push origin pre-reconciliation-backup
-
-# Validate in isolation — don't touch main until the toolchain says it's clean.
-git checkout -b reconciliation-validation
-git remote add bundle-source /path/to/ADD-Health-Tracking-v1.12.bundle
-git fetch bundle-source
-git reset --hard bundle-source/main
-```
-
-Run the full sequence below (steps 1–5) **on this branch, not on `main`**. Only after `flutter analyze` and `flutter run` both succeed:
-
-```bash
-# BEFORE force-pushing, inspect what you're about to lose and gain:
-git log --oneline origin/main..reconciliation-validation  # commits you're adding
-git log --oneline reconciliation-validation..origin/main  # commits being replaced
-
-# Review both lists. If anything in the "being replaced" list needs to be kept, cherry-pick it now:
-git cherry-pick <commit-sha>  # repeat for each commit worth keeping
-
-# Only then proceed with the force-push:
-git checkout main
-git reset --hard reconciliation-validation
-git push origin main --force
-```
-
-**Why this matters:** If `origin/main` has recent commits (CI fixes, hotfixes, work from another session), you now have a chance to preserve them before they're abandoned. This adds ~60 seconds of review but prevents losing critical changes.
-
-This is the single reconciled lineage (spec §15) — the parallel `lib/data/` tree, the duplicate `providers.dart`, and everything else found diverged has been resolved into this one tree. Confirm after pushing:
-
-```bash
-git log --oneline           # should show one linear history, not two
-find lib -name "*.dart" | wc -l
-```
-
-## 1. Scaffold the native shells
-
-Never done — the repo has never had `android/`/`ios/` directories generated.
-
-```bash
-flutter create . --platforms=android,ios --org com.neuroflow
-```
-
-This will NOT overwrite existing `lib/` files (Flutter's create is additive for existing projects), but **check the diff on `pubspec.yaml` before committing** — `flutter create` sometimes touches it.
-
-## 2. Install dependencies
+Run from the repo root. Step 2 is not optional: `lib/data/database.g.dart` is
+gitignored, so a fresh clone does not compile until Drift codegen has run.
 
 ```bash
 flutter pub get
-```
 
-**Expected friction points, not surprises if they happen:**
-- `googleapis_auth`'s `AccessCredentials`/`AccessToken` constructor shape was written from confident-but-unverified knowledge (flagged in `calendar_service.dart`). If this doesn't compile, that's the first place to look.
-- `NetworkType.notRequired` vs `NetworkType.not_required` in `background_scheduler.dart` — flagged as an open disagreement between two prior implementations, not resolved. Whichever the installed `workmanager` version actually exports, fix it here.
+dart run build_runner build --delete-conflicting-outputs -d   # generates lib/data/database.g.dart
 
-## 3. Generate Drift code
-
-```bash
-dart run build_runner build -d
-```
-
-This generates `database.g.dart` from `lib/platform/local/database.dart` (schema v5: Tasks, SyncQueue, DailyStats, Habits, HabitCheckIns). If this fails, the schema itself has a real bug — report the exact error, don't guess a fix blind.
-
-**Verify Drift generated clean — check for warnings:**
-
-```bash
-dart run build_runner build -d 2>&1 | grep -i "warning\|error"
-```
-
-Drift sometimes generates code that passes the build but warns downstream. Catch and address these now, before step 4.
-
-## 4. Static analysis — the first real signal
-
-```bash
 flutter analyze
+flutter test
+
+flutter run -d <device-id>          # or: flutter build apk --release
 ```
 
-**This is the moment eleven-plus rounds of "written, not compiled" gets tested for real.** Expect some errors — that's normal and fine, not a crisis. Fix them file by file, verify with `flutter analyze` again after each fix rather than batch-guessing multiple fixes at once.
+Re-run `build_runner` after any edit to `lib/data/database.dart`.
 
-## 5. First run
+**Toolchain.** `pubspec.yaml` requires Dart `>=3.4.0 <4.0.0` and Flutter
+`>=3.22.0`. CI pins Flutter 3.44.6 with Java 17; Android builds target
+`minSdk 31` / `targetSdk 35`. If a build reproduces only locally, compare your
+Flutter version against the pin in `.github/workflows/android-ci.yml` first.
 
-```bash
-flutter run
-```
+**Firebase config.** `google-services.json` is deliberately untracked. The
+Gradle build detects its absence and skips Google Services processing rather
+than failing, so a local build works without it. CI builds the release APK only
+when the `GOOGLE_SERVICES_JSON` secret is present.
 
-Target: the app launches, shows the Today screen (empty state — "Today's clear" — is a completely valid first result, not a failure), and the capture sheet opens and creates a task.
+For device-side setup, notification permissions, and WorkManager timing
+behavior, see [`build-and-run.md`](build-and-run.md).
 
-## 6. What does NOT need to work yet
+## What CI already checks
 
-Don't chase these in pursuit of "first compile" — they're correctly dormant or deferred, not broken:
-- Google Tasks/Calendar sync (OAuth not activated — dormant by design, §12.2)
-- Health signal fetches (same — dormant until OAuth)
-- The Lexi on-device bridge (no stable package exists yet — §14 top build risk, expected gap)
-- `TodayContext`/4-element header visual assembly, `HabitsWidget` wired into the screen (state layer + widget exist; integration is the named next step, not part of "does it compile")
+`.github/workflows/android-ci.yml` runs on every push and PR to `main`:
+`flutter pub get`, `dart run build_runner build --delete-conflicting-outputs -d`,
+then `flutter test`. On pushes with the Firebase secret configured it also
+builds and uploads a release APK.
+
+So compile breakage and test failures surface on the PR without anyone
+remembering to check. Two things CI does **not** run, which still need a human
+or a device:
+
+- `flutter analyze` is not a CI step. Analyzer regressions can merge. Run it
+  locally before pushing — a green baseline was restored deliberately in
+  `chore: restore analyzer-green baseline (#27)` and is worth keeping.
+- `flutter run` on real hardware. Nothing in CI exercises notifications,
+  WorkManager, alarms, Health Connect, or the Wear surfaces.
+
+Two further workflows guard the repo rather than the build:
+`repo-hygiene.yml` (root clutter, committed artifacts, duplicate project trees)
+and `stale-branch-report.yml` (weekly stale-branch issue).
+
+## If you cannot run these commands
+
+Agent/cloud containers for this repo generally have **no `flutter` or `dart` on
+`PATH`**. That is expected, not a broken environment.
+
+When you cannot run a step, report «Not executed.» Do not infer analyzer, test,
+or build results from reading the code. This rule is the direct fix for the
+failure mode described in the history section below, and it is binding — see
+`AGENTS.md`, Verification Rules.
+
+## Reporting discipline
+
+Use exactly one of three words, per spec §16:
+
+- **Verified** — you ran the exact command and it succeeded. Quote the real output.
+- **Implemented, not yet Verified** — the code exists; this step was not reached.
+- **Proposed** — design only, nothing written.
+
+When something fails, paste the **actual** compiler or analyzer text, with file
+paths and line numbers. "It didn't compile" is not a status report. Fix one
+error at a time and re-run rather than batch-guessing several fixes, so you know
+which change actually worked.
+
+One distinction worth keeping precise: an editor's inline analyzer diagnostics
+carry the compiler's authority. An AI assistant's *generative* suggestions do
+not — those are inference until something actually compiles them.
+
+If an error claims a file or symbol does not exist, check whether the file is
+actually in the repo before concluding the design is broken. This project has a
+documented history of confident architecture descriptions that corresponded to
+no real file; a stale claim is the more likely explanation than a bug in
+something that was genuinely built.
+
+## What does not need to work
+
+Correctly dormant or deferred — not breakage to chase:
+
+- **Google Tasks/Calendar sync** — OAuth is not activated; dormant by design
+  (§12.2). Calendar awareness beyond the Tier 0 weekday rule is scoped but
+  unbuilt; see [`CALENDAR-INTEGRATION-SCOPE.md`](CALENDAR-INTEGRATION-SCOPE.md).
+- **The Lexi on-device bridge** — no stable Flutter package for on-device
+  inference exists yet. `MissingPluginException` on the `neuroflow/lexi` channel
+  is the expected Phase-1 behavior; the app falls back to `NoOpPlanAdvisor` and
+  stays fully usable. §14 top build risk.
+- **Alarms and Wear method channels** — the `dev.neuroflow` Kotlin bridges are
+  not registered in `MainActivity`, and `wear/` is not included in
+  `android/settings.gradle.kts`. The `neuroflow/alarms` and `neuroflow/wear`
+  channels therefore have no live native handler. Known seam, not a regression.
+- **Health Connect beyond Steps** — permission declaration, availability
+  mapping, and the permission lifecycle are implemented; bounded paged reads,
+  transport mapping, persistence, change tokens, and background sync are
+  accepted-but-unbuilt. See [ADR-007](adr/ADR-007-health-connect-ingestion-boundary.md).
 
 ---
 
-## Reporting back (per §16 discipline)
+## History — what this document originally tracked
 
-When this sequence runs, report status using the three labels, not prose confidence:
-- **Verified:** ran the exact command, it succeeded, paste the actual output.
-- **Implemented, not yet Verified:** code exists, this step wasn't reached yet.
-- If something fails: paste the **actual error text**, not a description of the error. "It didn't compile" is not a status report; the compiler's own output is.
+Kept because the reasoning still explains why the verification rules above are
+written the way they are.
 
-**One distinction worth holding onto:** Copilot's inline diagnostics (real analyzer squiggles) carry the compiler's authority — trust them. Copilot's *generative* suggestions (autocomplete, chat responses proposing code) don't — they're inference, same tier as any chat-based proposal, until something actually compiles them.
+**The reconciliation.** The first section of this file was a one-time procedure
+for replacing a diverged `origin/main` from a git bundle, with a backup tag and
+an isolation branch before any force-push. That operation is complete; the repo
+has had a single reconciled lineage since. The account of how the divergence
+happened is in [`archive/RECONCILIATION.md`](archive/RECONCILIATION.md).
 
-**Future step, not blocking this one:** once first compile succeeds, a real pre-commit hook (`dart analyze` before every commit) and eventually CI would make this kind of drift structurally harder to reproduce — worth doing, not worth setting up before there's ever been one successful local compile to protect.
+**The native scaffolds.** This file once recorded that `flutter create` had
+never been run and no `android/` or `ios/` directories existed. Both scaffolds
+now exist. Android is the only supported and CI-verified target; `ios/` is
+generated scaffolding that nothing tests or ships.
+
+**The two flagged friction points**, both written from confident-but-unverified
+knowledge and both now resolved by an actual compiler:
+
+- `googleapis_auth`'s `AccessCredentials`/`AccessToken` constructor shape in
+  <!-- doc-path-check: ignore -->
+  `lib/platform/calendar/calendar_service.dart` — resolved by removal. That file
+  does not exist; Calendar integration was descoped to a later tier before any
+  service was written.
+- `NetworkType.notRequired` vs `NetworkType.not_required` in
+  `lib/platform/background/background_scheduler.dart` — resolved as
+  `NetworkType.notRequired`, which is what the installed `workmanager` exports
+  and what compiles today.
+
+**The Drift schema.** The original text described generating from
+<!-- doc-path-check: ignore -->
+`lib/platform/local/database.dart` at schema v5 with five tables. The database
+now lives at `lib/data/database.dart` at **schemaVersion 7**, spanning tasks,
+habits, routines, notes and mood, the sync queue, scheduling rules, Hevy import
+tables, and the health-evidence family. Migrations are additive `onUpgrade`
+branches, and every schema bump needs a migration test — the pattern is
+`test/unit/health_v6_to_v7_migration_test.dart`.
+
+**The CI that did not exist.** The closing note proposed that a pre-commit
+analyzer hook and eventually CI "would make this kind of drift structurally
+harder to reproduce — worth doing, not worth setting up before there's ever been
+one successful local compile to protect." There has since been one, and CI now
+exists. The pre-commit hook still does not, which is why `flutter analyze`
+remains a local-discipline step rather than an enforced gate.

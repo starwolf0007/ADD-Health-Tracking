@@ -36,8 +36,10 @@ dependencies:
   # OCR capture
   google_mlkit_text_recognition: ^0.16.0
 
-  # IDs
+  # IDs and immutable domain contracts
   uuid: ^4.4.0
+  crypto: ^3.0.6
+  meta: ^1.16.0
 
   # NOTE: Two pieces intentionally have no stable package yet:
   #   1. On-device LLM / Lexi (Gemini Nano on Android) — no stable Flutter binding

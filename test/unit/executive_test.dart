@@ -4,6 +4,7 @@
 // Run with: dart test test/unit/executive_test.dart
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:neuroflow/domain/mood.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/executive/planner.dart';
 
@@ -68,62 +69,189 @@ void main() {
     });
   });
 
-  // ─── Quick Wins auto-mode (§QW) ───────────────────────────────────────────
+  // ─── Quick Wins entry — user state, never list shape (§6) ─────────────────
+  //
+  // These replace an earlier group that asserted the inverted behavior:
+  // entering Quick Wins because every pending task happened to be low-energy
+  // and there were ≤3 of them. Spec §6 enters the mode "automatically by
+  // signal", and treats the low-energy filter as candidate selection only.
+  // The old expectations are inverted below rather than deleted.
 
-  group('Quick Wins auto-mode', () {
-    test('triggers when all tasks low-energy and count ≤ 3', () {
+  group('Quick Wins entry', () {
+    test('does NOT trigger from task composition alone', () {
       final tasks = [
         _task('Reply to Slack', EnergyLevel.low),
         _task('Archive emails', EnergyLevel.low),
         _task('Mark yesterday done', EnergyLevel.low),
       ];
       final plan = executive.evaluate(tasks);
+      expect(plan.mode, DayMode.normal);
+    });
+
+    test('does NOT trigger when no capacity signal is available', () {
+      final plan = executive.evaluate(
+        [_task('Low task', EnergyLevel.low)],
+        capacity: DayCapacity.unknown,
+      );
+      expect(plan.mode, DayMode.normal);
+    });
+
+    test('triggers on a rough mood check-in', () {
+      final plan = executive.evaluate(
+        [_task('Big presentation', EnergyLevel.high)],
+        capacity: const DayCapacity(latestMood: MoodLevel.veryLow),
+      );
+      expect(plan.mode, DayMode.quickWins);
+    });
+
+    test('triggers on a low mood check-in', () {
+      final plan = executive.evaluate(
+        [_task('Big presentation', EnergyLevel.high)],
+        capacity: const DayCapacity(latestMood: MoodLevel.low),
+      );
+      expect(plan.mode, DayMode.quickWins);
+    });
+
+    test('does NOT trigger once the mood lifts', () {
+      const liftedMoods = [
+        MoodLevel.neutral,
+        MoodLevel.good,
+        MoodLevel.great,
+      ];
+      for (final mood in liftedMoods) {
+        final plan = executive.evaluate(
+          [_task('Low task', EnergyLevel.low)],
+          capacity: DayCapacity(latestMood: mood),
+        );
+        expect(plan.mode, DayMode.normal, reason: 'mood: $mood');
+      }
+    });
+
+    test('triggers on a heavy day — the day it is most needed', () {
+      final tasks = List.generate(8, (i) => _task('Big $i', EnergyLevel.high));
+      final plan = executive.evaluate(
+        tasks,
+        capacity: const DayCapacity(latestMood: MoodLevel.veryLow),
+      );
+      expect(plan.mode, DayMode.quickWins);
+    });
+
+    test('stays normal on an empty list even when the mood is rough', () {
+      final plan = executive.evaluate(
+        [],
+        capacity: const DayCapacity(latestMood: MoodLevel.veryLow),
+      );
+      expect(plan.mode, DayMode.normal);
+      expect(plan.quickWins, isEmpty);
+    });
+
+    test('has a non-empty reason in Quick Wins mode', () {
+      final plan = executive.evaluate(
+        [_task('Quick task', EnergyLevel.low)],
+        capacity: const DayCapacity(latestMood: MoodLevel.low),
+      );
+      expect(plan.reason, isNotEmpty);
+    });
+  });
+
+  // ─── Quick Wins selection — what the reshaped Today shows (§6) ────────────
+
+  group('Quick Wins selection', () {
+    test('caps the list at three', () {
+      final tasks = List.generate(7, (i) => _task('Low $i', EnergyLevel.low));
+      final plan = executive.evaluate(
+        tasks,
+        capacity: const DayCapacity(latestMood: MoodLevel.low),
+      );
+      expect(plan.quickWins.length, 3);
+    });
+
+    test('prefers low-energy candidates', () {
+      final low = _task('Quick reply', EnergyLevel.low);
+      final high = _task('Big presentation', EnergyLevel.high);
+      final plan = executive.evaluate(
+        [high, low],
+        capacity: const DayCapacity(latestMood: MoodLevel.low),
+      );
+      expect(plan.quickWins.map((t) => t.id), [low.id]);
+    });
+
+    test('orders by lowest estimated effort first', () {
+      final long = _task('Long', EnergyLevel.low, estimatedMinutes: 45);
+      final short = _task('Short', EnergyLevel.low, estimatedMinutes: 5);
+      final middle = _task('Middle', EnergyLevel.low, estimatedMinutes: 20);
+
+      final plan = executive.evaluate(
+        [long, short, middle],
+        capacity: const DayCapacity(latestMood: MoodLevel.low),
+      );
+      expect(
+        plan.quickWins.map((t) => t.title),
+        ['Short', 'Middle', 'Long'],
+      );
+    });
+
+    test('sorts tasks with no estimate last', () {
+      final unknown = _task('No estimate', EnergyLevel.low);
+      final known = _task('Estimated', EnergyLevel.low, estimatedMinutes: 30);
+
+      final plan = executive.evaluate(
+        [unknown, known],
+        capacity: const DayCapacity(latestMood: MoodLevel.low),
+      );
+      expect(plan.quickWins.map((t) => t.title), ['Estimated', 'No estimate']);
+    });
+
+    test('still contains the day when nothing qualifies on energy', () {
+      final tasks = List.generate(5, (i) => _task('Big $i', EnergyLevel.high));
+      final plan = executive.evaluate(
+        tasks,
+        capacity: const DayCapacity(latestMood: MoodLevel.veryLow),
+      );
       expect(plan.mode, DayMode.quickWins);
       expect(plan.quickWins.length, 3);
     });
 
-    test('does NOT trigger when count > 3, even if all low-energy', () {
-      final tasks = List.generate(4, (i) => _task('Low $i', EnergyLevel.low));
-      final plan = executive.evaluate(tasks);
-      expect(plan.mode, DayMode.normal);
-    });
-
-    test('does NOT trigger when any task is medium-energy', () {
-      final plan = executive.evaluate([
-        _task('Low task', EnergyLevel.low),
-        _task('Medium task', EnergyLevel.medium),
-      ]);
-      expect(plan.mode, DayMode.normal);
-    });
-
-    test('does NOT trigger when any task is high-energy', () {
-      final plan = executive.evaluate([
-        _task('Low task', EnergyLevel.low),
-        _task('High task', EnergyLevel.high),
-      ]);
-      expect(plan.mode, DayMode.normal);
-    });
-
-    test('quick wins list contains all input tasks', () {
+    test('is stable across repeated evaluations', () {
       final tasks = [
         _task('A', EnergyLevel.low),
         _task('B', EnergyLevel.low),
+        _task('C', EnergyLevel.low),
+        _task('D', EnergyLevel.low),
       ];
-      final plan = executive.evaluate(tasks);
-      expect(plan.mode, DayMode.quickWins);
+      const capacity = DayCapacity(latestMood: MoodLevel.low);
+      final first = executive.evaluate(tasks, capacity: capacity);
+      final second = executive.evaluate(tasks, capacity: capacity);
       expect(
-        plan.quickWins.map((t) => t.id).toSet(),
-        tasks.map((t) => t.id).toSet(),
+        first.quickWins.map((t) => t.id).toList(),
+        second.quickWins.map((t) => t.id).toList(),
       );
     });
+  });
 
-    test('has a non-empty reason in Quick Wins mode', () {
-      final plan = executive.evaluate([_task('Quick task', EnergyLevel.low)]);
-      expect(plan.reason, isNotEmpty);
+  // ─── DayCapacity ──────────────────────────────────────────────────────────
+
+  group('DayCapacity', () {
+    test('unknown does not indicate a lighter day', () {
+      expect(DayCapacity.unknown.indicatesLighterDay, isFalse);
+    });
+
+    test('mirrors the domain mood threshold', () {
+      for (final mood in MoodLevel.values) {
+        expect(
+          DayCapacity(latestMood: mood).indicatesLighterDay,
+          mood.triggersQuickWins,
+          reason: 'mood: $mood',
+        );
+      }
     });
   });
 }
 
 // Helpers
-Task _task(String title, EnergyLevel energy) =>
-    Task.create(title: title, energy: energy);
+Task _task(String title, EnergyLevel energy, {int? estimatedMinutes}) =>
+    Task.create(
+      title: title,
+      energy: energy,
+      estimatedMinutes: estimatedMinutes,
+    );

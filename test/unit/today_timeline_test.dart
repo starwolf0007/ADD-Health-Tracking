@@ -106,6 +106,27 @@ void main() {
         'You have one anchor and 2 flexible blocks left.');
   });
 
+  test('unscheduled tasks are flexible blocks with no fabricated start time',
+      () {
+    final task = Task(
+      id: 'no-due-date',
+      title: 'Write update',
+      energy: EnergyLevel.medium,
+      createdAt: day,
+    );
+
+    final items = const TodayTimelineBuilder().build(
+      day: day,
+      tasks: [task],
+      routines: const [],
+    );
+
+    final flexible = items.single;
+    expect(flexible.type, TimelineItemType.flexibleBlock);
+    expect(flexible.start, isNull);
+    expect(flexible.end, isNull);
+  });
+
   test('summary omits item types with no remaining work', () {
     final data = TodayTimelineData(
       items: [
