@@ -106,6 +106,7 @@ Thresholds are configuration, versioned with the ruleset, and covered by tests. 
 
 ## 4. Canonical Ruleset
 
+<!-- doc-path-check: ignore -->
 **Location:** `docs/skills/plan_ingestion_rules.md` (human-readable policy and edge cases)
 **Optional companion:** `assets/plan_ingestion/plan_ingestion_rules.yaml` (machine-readable aliases/defaults, if runtime needs strict determinism)
 
