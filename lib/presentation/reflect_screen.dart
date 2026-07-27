@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:neuroflow/app/mood_providers.dart';
 import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/domain/mood.dart';
 import 'package:neuroflow/presentation/theme.dart';
@@ -188,15 +189,10 @@ class _TodayMoodBlock extends ConsumerWidget {
   ) async {
     HapticFeedback.selectionClick();
     final note = await _optionalNoteSheet(context);
-    // null note controller cancel → still allow log without note if sheet
-    // returns empty string; only abort if user dismissed without confirming.
-    // We treat returned null as cancel of the whole flow only when we use
-    // a explicit cancel; optional note uses empty = no note.
     try {
       await ref.read(moodRepositoryProvider).log(
             MoodLog.create(level, note: note),
           );
-      // Today’s Executive capacity depends on latest mood.
       ref.invalidate(todayControllerProvider);
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -219,8 +215,6 @@ class _TodayMoodBlock extends ConsumerWidget {
     }
   }
 
-  /// Returns trimmed note or null if empty. Cancel leaves note as null and
-  /// still proceeds with level-only log from the chip path.
   Future<String?> _optionalNoteSheet(BuildContext context) async {
     final controller = TextEditingController();
     final result = await showModalBottomSheet<String>(
