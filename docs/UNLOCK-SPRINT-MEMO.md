@@ -48,20 +48,25 @@ These hard rules are **not** relaxed:
 
 Any temporary layer leak or pragmatic stub introduced for speed must be documented in the PR / report and marked for later cleanup.
 
+**Important:** Documented pragmatic seams are not permission to break hard dependency boundaries (e.g. Executive → Intelligence). Temporary incomplete behavior is fine; layer violations are not.
+
 ## Working method
 
 - One surface at a time.
 - After each surface is unlocked and verified, stop and confirm before moving to the next.
 - Preferred order (subject to owner direction):
-  1. Notes
+  1. Notes — **see `docs/UNLOCK-SPRINT-NOTES.md` for Tier 1/2/3 scope, inspection checklist, and required stop**
   2. Reflect
   3. Settings / Connected Services / Health Integrations (make every control do something visible)
   4. Lexi conversation surface (mock or lightweight path so the companion feel is present)
   5. Remaining capture / Today / Routines dead-ends if any
 
+Surface-specific briefs (when present) override generic “make it usable” language with explicit Tier boundaries. Agents must not auto-advance to the next surface.
+
 ## How other agents should behave
 
 - Read this memo before large presentation or feature work.
+- For Notes, also read `docs/UNLOCK-SPRINT-NOTES.md` before implementing or reviewing.
 - Prefer shipping a usable, honest surface over preserving every process constraint from the earlier spine phase.
 - When in doubt, ask: “Does this change make the app more usable for daily dogfooding without breaking hard architectural invariants?”
 - Continue to report accurately. Continue to keep Executive pure.
@@ -72,6 +77,7 @@ Any temporary layer leak or pragmatic stub introduced for speed must be document
 - This memo is the temporary override authority for process rules during the Unlock Sprint.
 - Hard architecture (ADRs, Executive purity, Intelligence optional) is unchanged.
 - See also the short note added to `AGENTS.md` and the entry in `docs/DECISIONS.md`.
+- Notes surface brief: `docs/UNLOCK-SPRINT-NOTES.md`
 
 ---
 
