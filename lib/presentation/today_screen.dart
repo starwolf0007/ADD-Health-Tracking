@@ -134,6 +134,7 @@ class _TodayTimelineBody extends ConsumerStatefulWidget {
   final GlobalKey currentKey;
 
   const _TodayTimelineBody({
+    super.key,
     required this.data,
     required this.now,
     required this.viewedDay,

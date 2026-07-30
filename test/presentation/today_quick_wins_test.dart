@@ -278,6 +278,10 @@ class _FakeMoodRepository implements MoodRepository {
   }
 
   @override
+  Stream<List<MoodLog>> watchRecent({int days = 14}) =>
+      Stream.value(const <MoodLog>[]);
+
+  @override
   Future<void> log(MoodLog entry) async => level = entry.level;
 }
 
