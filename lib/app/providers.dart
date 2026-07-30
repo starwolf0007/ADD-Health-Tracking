@@ -419,6 +419,10 @@ final activeRoutinesProvider = StreamProvider<List<Routine>>((ref) {
 });
 
 final dueRoutinesProvider = FutureProvider<List<Routine>>((ref) {
+  // "Due now" is clock-dependent, so this must re-derive when the calendar
+  // day rolls over — otherwise a set computed earlier is served stale after
+  // midnight. Mirrors timelineForDayProvider below, which also watches this.
+  ref.watch(currentDayProvider);
   return ref.watch(routineRepositoryProvider).fetchDueNow();
 });
 
