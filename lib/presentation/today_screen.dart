@@ -7,12 +7,14 @@ import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/domain/date_key.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
+import 'package:neuroflow/executive/planner.dart';
 import 'package:neuroflow/presentation/lexi_conversation_screen.dart';
 import 'package:neuroflow/presentation/settings_screen.dart';
 import 'package:neuroflow/presentation/theme.dart';
 import 'package:neuroflow/presentation/today/lexi_avatar.dart';
 import 'package:neuroflow/executive/timeline_logic.dart';
 import 'package:neuroflow/presentation/widgets/capture_sheet.dart';
+import 'package:neuroflow/presentation/widgets/quick_wins_panel.dart';
 
 class TodayScreen extends ConsumerStatefulWidget {
   final DateTime? now;
@@ -119,6 +121,10 @@ class _TodayTimelineBody extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final plan = ref.watch(todayControllerProvider).value;
+    final quickWinsMode =
+        isViewingToday && plan?.mode == DayMode.quickWins;
+
     final recommended = data.recommendedTask;
     final dayItems = data.items
         .where((item) => item.type != TimelineItemType.flexibleBlock)
@@ -130,7 +136,10 @@ class _TodayTimelineBody extends ConsumerWidget {
       (item) => item.phaseAt(now) != TimelinePhase.past,
     );
     return RefreshIndicator(
-      onRefresh: () async => ref.refresh(todayTimelineProvider.future),
+      onRefresh: () async {
+        ref.invalidate(todayControllerProvider);
+        await ref.refresh(todayTimelineProvider.future);
+      },
       child: ListView(
         controller: scrollController,
         padding: EdgeInsets.fromLTRB(
@@ -150,36 +159,44 @@ class _TodayTimelineBody extends ConsumerWidget {
             const SizedBox(height: AppSpace.md),
             const _CalendarPermissionNotice(),
           ],
-          if (recommended != null) ...[
+          if (quickWinsMode) ...[
             const SizedBox(height: AppSpace.lg),
-            _ActiveTaskCard(task: recommended),
-          ],
-          const SizedBox(height: AppSpace.xl),
-          Text(
-            isViewingToday ? 'Your day' : 'Schedule for this day',
-            style: AppTextStyles.titleMedium,
-          ),
-          const SizedBox(height: AppSpace.md),
-          if (data.items.isEmpty)
-            const _EmptyDayState()
-          else ...[
-            if (dayItems.isEmpty)
-              const Text('Nothing scheduled yet.',
-                  style: AppTextStyles.bodySmall),
-            for (var index = 0; index < dayItems.length; index++) ...[
-              if (index == markerIndex)
-                _CurrentTimeMarker(key: currentKey, now: now),
-              _TimelineRow(item: dayItems[index], now: now),
+            QuickWinsPanel(
+              tasks: plan?.quickWins ?? const [],
+              reason: plan?.reason ?? '',
+            ),
+          ] else ...[
+            if (recommended != null) ...[
+              const SizedBox(height: AppSpace.lg),
+              _ActiveTaskCard(task: recommended),
             ],
-            if (markerIndex == -1 && dayItems.isNotEmpty)
-              _CurrentTimeMarker(key: currentKey, now: now),
-          ],
-          if (flexibleItems.isNotEmpty) ...[
             const SizedBox(height: AppSpace.xl),
-            const Text('Flexible tasks', style: AppTextStyles.titleMedium),
+            Text(
+              isViewingToday ? 'Your day' : 'Schedule for this day',
+              style: AppTextStyles.titleMedium,
+            ),
             const SizedBox(height: AppSpace.md),
-            for (final item in flexibleItems)
-              _TimelineRow(item: item, now: now),
+            if (data.items.isEmpty)
+              const _EmptyDayState()
+            else ...[
+              if (dayItems.isEmpty)
+                const Text('Nothing scheduled yet.',
+                    style: AppTextStyles.bodySmall),
+              for (var index = 0; index < dayItems.length; index++) ...[
+                if (index == markerIndex)
+                  _CurrentTimeMarker(key: currentKey, now: now),
+                _TimelineRow(item: dayItems[index], now: now),
+              ],
+              if (markerIndex == -1 && dayItems.isNotEmpty)
+                _CurrentTimeMarker(key: currentKey, now: now),
+            ],
+            if (flexibleItems.isNotEmpty) ...[
+              const SizedBox(height: AppSpace.xl),
+              const Text('Flexible tasks', style: AppTextStyles.titleMedium),
+              const SizedBox(height: AppSpace.md),
+              for (final item in flexibleItems)
+                _TimelineRow(item: item, now: now),
+            ],
           ],
         ],
       ),
@@ -276,9 +293,6 @@ class _DaySummaryCard extends ConsumerWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(AppSpace.radiusCard),
         onTap: () {
-          // Explicit, user-initiated trigger for TodayController's opt-in
-          // Lexi refinement (ADR-001) — never called automatically. Tapping
-          // this card to open Lexi is the one intended explicit action.
           if (data.lexiAvailable) {
             unawaited(
               ref
@@ -680,8 +694,6 @@ class _TimelineRow extends ConsumerWidget {
       TimelineItemType.task => Icons.check_box_outline_blank_rounded,
       TimelineItemType.openSpace => Icons.air_rounded,
     };
-    // Muted type colors are a secondary signal only. Icon, marker geometry,
-    // visible type label, and semantics keep every type distinct in grayscale.
     final color = switch (item.type) {
       TimelineItemType.calendarEvent => AppColors.calendar,
       TimelineItemType.fixedAnchor => AppColors.accent,
