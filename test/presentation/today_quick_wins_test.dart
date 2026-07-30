@@ -55,6 +55,7 @@ void main() {
 
   testWidgets('the reduced view suppresses the full day but keeps commitments',
       (tester) async {
+    _tallView(tester);
     await tester.pumpWidget(_app(mood: MoodLevel.low, now: now));
     await tester.pump(const Duration(milliseconds: 500));
 
@@ -73,6 +74,7 @@ void main() {
 
   testWidgets('the full day stays one deliberate tap away, and is reversible',
       (tester) async {
+    _tallView(tester);
     await tester.pumpWidget(_app(mood: MoodLevel.low, now: now));
     await tester.pump(const Duration(milliseconds: 500));
 
@@ -146,6 +148,7 @@ void main() {
 
   testWidgets('a new Quick Wins session starts reduced, not disclosed',
       (tester) async {
+    _tallView(tester);
     final moods = _FakeMoodRepository(MoodLevel.low);
     await tester.pumpWidget(
       _app(mood: null, now: now, moodRepository: moods),
@@ -194,6 +197,19 @@ void main() {
 
 ProviderContainer _container(WidgetTester tester) =>
     ProviderScope.containerOf(tester.element(find.byType(TodayScreen)));
+
+/// Widget tests default to an 800x600 surface. The reduced Quick Wins view
+/// (the card, the "Still fixed today" commitments, and the "Show the full
+/// day" disclosure) is taller than that, so its lower rows fall outside the
+/// lazily-built ListView and are never created — making them unfindable and
+/// un-`ensureVisible`-able. Give the tests that assert on that lower content a
+/// tall surface so every row is laid out. Reset after each test.
+void _tallView(WidgetTester tester) {
+  tester.view.physicalSize = const Size(1080, 3200);
+  tester.view.devicePixelRatio = 1.0;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
 
 Widget _app({
   required MoodLevel? mood,
