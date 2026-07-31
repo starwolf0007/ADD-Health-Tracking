@@ -53,6 +53,12 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
     final selectedDay = ref.watch(selectedDayProvider);
     final currentDay = ref.watch(currentDayProvider);
     final isViewingToday = isSameDay(selectedDay, currentDay);
+    // Watch the Quick Wins decision at the screen level (not only inside the
+    // body): the body is built lazily inside timeline.when(data:), so relying
+    // on its watch alone lets the controller start resolving a frame late and
+    // the reduced view lag behind the timeline. Watching here keeps it eager
+    // and rebuilds Today when the mode flips.
+    ref.watch(todayControllerProvider);
     final realNow = widget.now ?? DateTime.now();
     final phaseNow = isViewingToday
         ? realNow
