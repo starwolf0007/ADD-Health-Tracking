@@ -14,6 +14,7 @@ import 'package:neuroflow/presentation/today/lexi_avatar.dart';
 import 'package:neuroflow/executive/planner.dart';
 import 'package:neuroflow/executive/timeline_logic.dart';
 import 'package:neuroflow/presentation/widgets/capture_sheet.dart';
+import 'package:neuroflow/presentation/widgets/due_routines_card.dart';
 
 class TodayScreen extends ConsumerStatefulWidget {
   final DateTime? now;
@@ -180,6 +181,7 @@ class _TodayTimelineBody extends ConsumerWidget {
       // screen. Pull-to-refresh means "re-derive this screen".
       onRefresh: () async {
         ref.invalidate(todayControllerProvider);
+        ref.invalidate(dueRoutinesProvider);
         await ref.refresh(todayTimelineProvider.future);
       },
       child: ListView(
@@ -206,6 +208,16 @@ class _TodayTimelineBody extends ConsumerWidget {
           if (!data.hasCalendarPermission) ...[
             const SizedBox(height: AppSpace.md),
             const _CalendarPermissionNotice(),
+          ],
+          // Gate 1: due routines one-tap start (PR #51). Today only —
+          // browsing another day must not surface "due now" for the current
+          // clock. Shown in both Quick Wins and normal mode: a routine
+          // reduces decision load exactly when it's needed most (confirmed
+          // with Bryan 2026-08-01) — same precedent as fixed commitments
+          // staying visible during the reshape.
+          if (isViewingToday) ...[
+            const SizedBox(height: AppSpace.md),
+            const DueRoutinesCard(),
           ],
           if (isQuickWins) ...[
             // Reduced Quick Wins state: the capped list, real commitments, and

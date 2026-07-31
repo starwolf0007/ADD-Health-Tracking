@@ -259,6 +259,10 @@ class TodayController extends AsyncNotifier<TodayState> {
 
   @override
   Future<TodayState> build() async {
+    // Quick Wins mode is clock-dependent (derived from today's mood check-in)
+    // and must not carry into tomorrow just because this Notifier hasn't
+    // rebuilt yet. Same fix as dueRoutinesProvider (#54) — mirrored here.
+    ref.watch(currentDayProvider);
     final pending = await ref
         .watch(taskRepositoryProvider)
         .watchPending()
