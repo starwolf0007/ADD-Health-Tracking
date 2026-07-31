@@ -53,10 +53,6 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
     final selectedDay = ref.watch(selectedDayProvider);
     final currentDay = ref.watch(currentDayProvider);
     final isViewingToday = isSameDay(selectedDay, currentDay);
-    final isQuickWins = _quickWinsActive(
-      ref.watch(todayControllerProvider).value,
-      isViewingToday: isViewingToday,
-    );
     final realNow = widget.now ?? DateTime.now();
     final phaseNow = isViewingToday
         ? realNow
@@ -84,13 +80,11 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
         data: (data) {
           _scrollNearNow();
           return _TodayTimelineBody(
-            // The full-day disclosure inside Quick Wins is per-session view
-            // state. Keying on the viewed day and on mode activation means a
-            // new Quick Wins session always begins reduced, instead of
-            // inheriting a disclosure from an earlier one.
+            // Fresh subtree per viewed day. Quick Wins entry/exit is the
+            // Executive's decision (read inside the body), not view state —
+            // there is no per-session disclosure to preserve or reset.
             key: ValueKey(
-              'today-body-${dateOnly(selectedDay).toIso8601String()}'
-              '-${isQuickWins ? 'quick-wins' : 'full'}',
+              'today-body-${dateOnly(selectedDay).toIso8601String()}',
             ),
             data: data,
             now: phaseNow,
@@ -125,7 +119,7 @@ bool _quickWinsActive(TodayState? state, {required bool isViewingToday}) =>
     state.mode == DayMode.quickWins &&
     state.quickWins.isNotEmpty;
 
-class _TodayTimelineBody extends ConsumerStatefulWidget {
+class _TodayTimelineBody extends ConsumerWidget {
   final TodayTimelineData data;
   final DateTime now;
   final DateTime viewedDay;
@@ -144,26 +138,7 @@ class _TodayTimelineBody extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<_TodayTimelineBody> createState() => _TodayTimelineBodyState();
-}
-
-class _TodayTimelineBodyState extends ConsumerState<_TodayTimelineBody> {
-  /// Ephemeral disclosure for Quick Wins mode (issue #37).
-  ///
-  /// Quick Wins is a *reduction*, so the full day is not shown alongside it —
-  /// it stays exactly one deliberate tap away (§6: the full list is never
-  /// exposed unless it is asked for). This is view state only: never
-  /// persisted, never authoritative (derived-not-stored). Mode entry and exit
-  /// remain the Executive's job, driven by the mood signal; nothing in this
-  /// widget can enter or leave Quick Wins.
-  bool _showFullDay = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final data = widget.data;
-    final now = widget.now;
-    final isViewingToday = widget.isViewingToday;
-
+  Widget build(BuildContext context, WidgetRef ref) {
     final recommended = data.recommendedTask;
     final dayItems = data.items
         .where((item) => item.type != TimelineItemType.flexibleBlock)
@@ -175,15 +150,15 @@ class _TodayTimelineBodyState extends ConsumerState<_TodayTimelineBody> {
       (item) => item.phaseAt(now) != TimelinePhase.past,
     );
 
-    // Quick Wins reshape (#37). Entry is already decided in the Executive by
-    // TodayController via DayCapacity(latestMood:) — Presentation only reads
-    // that decision, it never derives it.
+    // Quick Wins reshape (#37). Entry AND exit are the Executive's job, driven
+    // by the mood signal; Presentation only reads the decision. Per the LOCKED
+    // v1.3 spec (§158/§170) there is no manual toggle and no user action to
+    // enter, leave, or maintain the reduced state.
     final todayState = ref.watch(todayControllerProvider).value;
     final isQuickWins =
         _quickWinsActive(todayState, isViewingToday: isViewingToday);
     final quickWinTasks =
         isQuickWins ? todayState!.quickWins : const <Task>[];
-    final reduced = isQuickWins && !_showFullDay;
 
     // Commitments stay visible even in the reduced view. Hiding a real shift
     // or appointment would make a calm screen a dishonest one.
@@ -203,7 +178,7 @@ class _TodayTimelineBodyState extends ConsumerState<_TodayTimelineBody> {
         await ref.refresh(todayTimelineProvider.future);
       },
       child: ListView(
-        controller: widget.scrollController,
+        controller: scrollController,
         padding: EdgeInsets.fromLTRB(
           AppSpace.lg,
           AppSpace.sm,
@@ -212,7 +187,7 @@ class _TodayTimelineBodyState extends ConsumerState<_TodayTimelineBody> {
         ),
         children: [
           _DateNavigator(
-            selectedDay: widget.viewedDay,
+            selectedDay: viewedDay,
             isViewingToday: isViewingToday,
           ),
           const SizedBox(height: AppSpace.md),
@@ -221,7 +196,10 @@ class _TodayTimelineBodyState extends ConsumerState<_TodayTimelineBody> {
             const SizedBox(height: AppSpace.md),
             const _CalendarPermissionNotice(),
           ],
-          if (reduced) ...[
+          if (isQuickWins) ...[
+            // Reduced Quick Wins state: the capped list, real commitments, and
+            // the permission-to-stop label — and nothing else. No full-day
+            // access; exit is automatic when the signal lifts (§158/§170).
             const SizedBox(height: AppSpace.lg),
             _QuickWinsCard(tasks: quickWinTasks),
             if (fixedItems.isNotEmpty) ...[
@@ -231,27 +209,7 @@ class _TodayTimelineBodyState extends ConsumerState<_TodayTimelineBody> {
               for (final item in fixedItems)
                 _TimelineRow(item: item, now: now),
             ],
-            const SizedBox(height: AppSpace.lg),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                key: const ValueKey('quick-wins-show-full-day'),
-                onPressed: () => setState(() => _showFullDay = true),
-                child: const Text('Show the full day'),
-              ),
-            ),
           ] else ...[
-            if (isQuickWins) ...[
-              const SizedBox(height: AppSpace.lg),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  key: const ValueKey('quick-wins-return'),
-                  onPressed: () => setState(() => _showFullDay = false),
-                  child: const Text('Back to Quick Wins'),
-                ),
-              ),
-            ],
             if (recommended != null) ...[
               const SizedBox(height: AppSpace.lg),
               _ActiveTaskCard(task: recommended),
@@ -270,11 +228,11 @@ class _TodayTimelineBodyState extends ConsumerState<_TodayTimelineBody> {
                     style: AppTextStyles.bodySmall),
               for (var index = 0; index < dayItems.length; index++) ...[
                 if (index == markerIndex)
-                  _CurrentTimeMarker(key: widget.currentKey, now: now),
+                  _CurrentTimeMarker(key: currentKey, now: now),
                 _TimelineRow(item: dayItems[index], now: now),
               ],
               if (markerIndex == -1 && dayItems.isNotEmpty)
-                _CurrentTimeMarker(key: widget.currentKey, now: now),
+                _CurrentTimeMarker(key: currentKey, now: now),
             ],
             if (flexibleItems.isNotEmpty) ...[
               const SizedBox(height: AppSpace.xl),
@@ -329,8 +287,8 @@ class _QuickWinsCard extends StatelessWidget {
           ),
           const SizedBox(height: AppSpace.sm),
           const Text(
-            'A lighter shape for today. Pick one, or none — the rest of your '
-            'day is still here.',
+            'A lighter shape for today. Tap a win to mark it done. '
+            'Nothing else is tracked today.',
             style: AppTextStyles.bodySmall,
           ),
           const SizedBox(height: AppSpace.md),
@@ -348,25 +306,22 @@ class _QuickWinRow extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final isActive = task.status == TaskStatus.inProgress;
     return Semantics(
       container: true,
-      button: !isActive,
-      label: 'Quick win, ${task.title}${isActive ? ', running' : ''}',
+      button: true,
+      label: 'Quick win, ${task.title}, tap when done',
       child: InkWell(
         key: ValueKey('quick-win-${task.id}'),
         borderRadius: BorderRadius.circular(AppSpace.radiusInput),
-        onTap: isActive ? null : () => _start(context, ref),
+        onTap: () => _complete(context, ref),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
           child: Row(
             children: [
-              Icon(
-                isActive
-                    ? Icons.play_arrow_rounded
-                    : Icons.check_box_outline_blank_rounded,
+              const Icon(
+                Icons.check_box_outline_blank_rounded,
                 size: 18,
-                color: isActive ? AppColors.accent : AppColors.textSecondary,
+                color: AppColors.textSecondary,
               ),
               const SizedBox(width: AppSpace.md),
               Expanded(
@@ -382,14 +337,13 @@ class _QuickWinRow extends ConsumerWidget {
     );
   }
 
-  Future<void> _start(BuildContext context, WidgetRef ref) async {
+  // §167: a Quick Win is one-tap *done*. Completing removes it from the
+  // pending pool, so the Executive re-derives and the capped list refills
+  // with the next low-effort candidate. There is no "start"/timer step here —
+  // the point is momentum, not task management.
+  Future<void> _complete(BuildContext context, WidgetRef ref) async {
     try {
-      final actions = ref.read(taskActionControllerProvider);
-      if (task.status == TaskStatus.paused) {
-        await actions.resume(task.id);
-      } else {
-        await actions.start(task.id);
-      }
+      await ref.read(taskActionControllerProvider).complete(task.id);
     } on TaskActionFailure catch (error) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
