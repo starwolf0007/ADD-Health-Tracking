@@ -7,14 +7,13 @@ import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/domain/task.dart';
 import 'package:neuroflow/domain/date_key.dart';
 import 'package:neuroflow/domain/reentry_note.dart';
-import 'package:neuroflow/executive/planner.dart';
 import 'package:neuroflow/presentation/lexi_conversation_screen.dart';
 import 'package:neuroflow/presentation/settings_screen.dart';
 import 'package:neuroflow/presentation/theme.dart';
 import 'package:neuroflow/presentation/today/lexi_avatar.dart';
+import 'package:neuroflow/executive/planner.dart';
 import 'package:neuroflow/executive/timeline_logic.dart';
 import 'package:neuroflow/presentation/widgets/capture_sheet.dart';
-import 'package:neuroflow/presentation/widgets/quick_wins_panel.dart';
 
 class TodayScreen extends ConsumerStatefulWidget {
   final DateTime? now;
@@ -54,6 +53,10 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
     final selectedDay = ref.watch(selectedDayProvider);
     final currentDay = ref.watch(currentDayProvider);
     final isViewingToday = isSameDay(selectedDay, currentDay);
+    final isQuickWins = _quickWinsActive(
+      ref.watch(todayControllerProvider).value,
+      isViewingToday: isViewingToday,
+    );
     final realNow = widget.now ?? DateTime.now();
     final phaseNow = isViewingToday
         ? realNow
@@ -81,6 +84,14 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
         data: (data) {
           _scrollNearNow();
           return _TodayTimelineBody(
+            // The full-day disclosure inside Quick Wins is per-session view
+            // state. Keying on the viewed day and on mode activation means a
+            // new Quick Wins session always begins reduced, instead of
+            // inheriting a disclosure from an earlier one.
+            key: ValueKey(
+              'today-body-${dateOnly(selectedDay).toIso8601String()}'
+              '-${isQuickWins ? 'quick-wins' : 'full'}',
+            ),
             data: data,
             now: phaseNow,
             viewedDay: selectedDay,
@@ -102,7 +113,19 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
   }
 }
 
-class _TodayTimelineBody extends ConsumerWidget {
+/// Single definition of Quick Wins activation.
+///
+/// Both the reduced view in [_TodayTimelineBody] and the reset key in
+/// [_TodayScreenState] read this, so the two can never disagree about whether
+/// the mode is on. Scoped to the day the mood signal is about: browsing
+/// another day always shows that day's real schedule.
+bool _quickWinsActive(TodayState? state, {required bool isViewingToday}) =>
+    isViewingToday &&
+    state != null &&
+    state.mode == DayMode.quickWins &&
+    state.quickWins.isNotEmpty;
+
+class _TodayTimelineBody extends ConsumerStatefulWidget {
   final TodayTimelineData data;
   final DateTime now;
   final DateTime viewedDay;
@@ -111,6 +134,7 @@ class _TodayTimelineBody extends ConsumerWidget {
   final GlobalKey currentKey;
 
   const _TodayTimelineBody({
+    super.key,
     required this.data,
     required this.now,
     required this.viewedDay,
@@ -120,10 +144,25 @@ class _TodayTimelineBody extends ConsumerWidget {
   });
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final plan = ref.watch(todayControllerProvider).value;
-    final quickWinsMode =
-        isViewingToday && plan?.mode == DayMode.quickWins;
+  ConsumerState<_TodayTimelineBody> createState() => _TodayTimelineBodyState();
+}
+
+class _TodayTimelineBodyState extends ConsumerState<_TodayTimelineBody> {
+  /// Ephemeral disclosure for Quick Wins mode (issue #37).
+  ///
+  /// Quick Wins is a *reduction*, so the full day is not shown alongside it —
+  /// it stays exactly one deliberate tap away (§6: the full list is never
+  /// exposed unless it is asked for). This is view state only: never
+  /// persisted, never authoritative (derived-not-stored). Mode entry and exit
+  /// remain the Executive's job, driven by the mood signal; nothing in this
+  /// widget can enter or leave Quick Wins.
+  bool _showFullDay = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final data = widget.data;
+    final now = widget.now;
+    final isViewingToday = widget.isViewingToday;
 
     final recommended = data.recommendedTask;
     final dayItems = data.items
@@ -135,13 +174,36 @@ class _TodayTimelineBody extends ConsumerWidget {
     final markerIndex = dayItems.indexWhere(
       (item) => item.phaseAt(now) != TimelinePhase.past,
     );
+
+    // Quick Wins reshape (#37). Entry is already decided in the Executive by
+    // TodayController via DayCapacity(latestMood:) — Presentation only reads
+    // that decision, it never derives it.
+    final todayState = ref.watch(todayControllerProvider).value;
+    final isQuickWins =
+        _quickWinsActive(todayState, isViewingToday: isViewingToday);
+    final quickWinTasks =
+        isQuickWins ? todayState!.quickWins : const <Task>[];
+    final reduced = isQuickWins && !_showFullDay;
+
+    // Commitments stay visible even in the reduced view. Hiding a real shift
+    // or appointment would make a calm screen a dishonest one.
+    final fixedItems = [
+      for (final item in dayItems)
+        if (item.type == TimelineItemType.fixedAnchor ||
+            item.type == TimelineItemType.calendarEvent)
+          item,
+    ];
+
     return RefreshIndicator(
+      // Quick Wins mode comes from todayControllerProvider, so refreshing only
+      // the timeline could leave a stale reduction (or a stale full day) on
+      // screen. Pull-to-refresh means "re-derive this screen".
       onRefresh: () async {
         ref.invalidate(todayControllerProvider);
         await ref.refresh(todayTimelineProvider.future);
       },
       child: ListView(
-        controller: scrollController,
+        controller: widget.scrollController,
         padding: EdgeInsets.fromLTRB(
           AppSpace.lg,
           AppSpace.sm,
@@ -150,7 +212,7 @@ class _TodayTimelineBody extends ConsumerWidget {
         ),
         children: [
           _DateNavigator(
-            selectedDay: viewedDay,
+            selectedDay: widget.viewedDay,
             isViewingToday: isViewingToday,
           ),
           const SizedBox(height: AppSpace.md),
@@ -159,13 +221,37 @@ class _TodayTimelineBody extends ConsumerWidget {
             const SizedBox(height: AppSpace.md),
             const _CalendarPermissionNotice(),
           ],
-          if (quickWinsMode) ...[
+          if (reduced) ...[
             const SizedBox(height: AppSpace.lg),
-            QuickWinsPanel(
-              tasks: plan?.quickWins ?? const [],
-              reason: plan?.reason ?? '',
+            _QuickWinsCard(tasks: quickWinTasks),
+            if (fixedItems.isNotEmpty) ...[
+              const SizedBox(height: AppSpace.xl),
+              const Text('Still fixed today', style: AppTextStyles.titleMedium),
+              const SizedBox(height: AppSpace.md),
+              for (final item in fixedItems)
+                _TimelineRow(item: item, now: now),
+            ],
+            const SizedBox(height: AppSpace.lg),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                key: const ValueKey('quick-wins-show-full-day'),
+                onPressed: () => setState(() => _showFullDay = true),
+                child: const Text('Show the full day'),
+              ),
             ),
           ] else ...[
+            if (isQuickWins) ...[
+              const SizedBox(height: AppSpace.lg),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  key: const ValueKey('quick-wins-return'),
+                  onPressed: () => setState(() => _showFullDay = false),
+                  child: const Text('Back to Quick Wins'),
+                ),
+              ),
+            ],
             if (recommended != null) ...[
               const SizedBox(height: AppSpace.lg),
               _ActiveTaskCard(task: recommended),
@@ -184,11 +270,11 @@ class _TodayTimelineBody extends ConsumerWidget {
                     style: AppTextStyles.bodySmall),
               for (var index = 0; index < dayItems.length; index++) ...[
                 if (index == markerIndex)
-                  _CurrentTimeMarker(key: currentKey, now: now),
+                  _CurrentTimeMarker(key: widget.currentKey, now: now),
                 _TimelineRow(item: dayItems[index], now: now),
               ],
               if (markerIndex == -1 && dayItems.isNotEmpty)
-                _CurrentTimeMarker(key: currentKey, now: now),
+                _CurrentTimeMarker(key: widget.currentKey, now: now),
             ],
             if (flexibleItems.isNotEmpty) ...[
               const SizedBox(height: AppSpace.xl),
@@ -201,6 +287,115 @@ class _TodayTimelineBody extends ConsumerWidget {
         ],
       ),
     );
+  }
+}
+
+/// The Quick Wins surface (#37): at most three low-effort options, already
+/// selected and capped by the Executive.
+///
+/// Deliberately carries no count, score, or progress figure — §13 forbids
+/// visible numeric self-judgment, and the short list is the whole message.
+class _QuickWinsCard extends StatelessWidget {
+  final List<Task> tasks;
+
+  const _QuickWinsCard({required this.tasks});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('quick-wins-card'),
+      padding: const EdgeInsets.all(AppSpace.lg),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceRaised,
+        borderRadius: BorderRadius.circular(AppSpace.radiusCard),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const LexiAvatar(
+                visualState: LexiVisualState.idle,
+                assetPath: 'assets/lexi/public/lexi-canonical-face.jpg',
+                size: 30,
+              ),
+              const SizedBox(width: AppSpace.sm),
+              Expanded(
+                child: Text('Quick Wins',
+                    style:
+                        AppTextStyles.label.copyWith(color: AppColors.accent)),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpace.sm),
+          const Text(
+            'A lighter shape for today. Pick one, or none — the rest of your '
+            'day is still here.',
+            style: AppTextStyles.bodySmall,
+          ),
+          const SizedBox(height: AppSpace.md),
+          for (final task in tasks) _QuickWinRow(task: task),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickWinRow extends ConsumerWidget {
+  final Task task;
+
+  const _QuickWinRow({required this.task});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isActive = task.status == TaskStatus.inProgress;
+    return Semantics(
+      container: true,
+      button: !isActive,
+      label: 'Quick win, ${task.title}${isActive ? ', running' : ''}',
+      child: InkWell(
+        key: ValueKey('quick-win-${task.id}'),
+        borderRadius: BorderRadius.circular(AppSpace.radiusInput),
+        onTap: isActive ? null : () => _start(context, ref),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+          child: Row(
+            children: [
+              Icon(
+                isActive
+                    ? Icons.play_arrow_rounded
+                    : Icons.check_box_outline_blank_rounded,
+                size: 18,
+                color: isActive ? AppColors.accent : AppColors.textSecondary,
+              ),
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Text(task.title,
+                    style: AppTextStyles.bodyMedium,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _start(BuildContext context, WidgetRef ref) async {
+    try {
+      final actions = ref.read(taskActionControllerProvider);
+      if (task.status == TaskStatus.paused) {
+        await actions.resume(task.id);
+      } else {
+        await actions.start(task.id);
+      }
+    } on TaskActionFailure catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not ${error.action}. Try again.')),
+      );
+    }
   }
 }
 
@@ -293,6 +488,9 @@ class _DaySummaryCard extends ConsumerWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(AppSpace.radiusCard),
         onTap: () {
+          // Explicit, user-initiated trigger for TodayController's opt-in
+          // Lexi refinement (ADR-001) — never called automatically. Tapping
+          // this card to open Lexi is the one intended explicit action.
           if (data.lexiAvailable) {
             unawaited(
               ref
@@ -694,6 +892,8 @@ class _TimelineRow extends ConsumerWidget {
       TimelineItemType.task => Icons.check_box_outline_blank_rounded,
       TimelineItemType.openSpace => Icons.air_rounded,
     };
+    // Muted type colors are a secondary signal only. Icon, marker geometry,
+    // visible type label, and semantics keep every type distinct in grayscale.
     final color = switch (item.type) {
       TimelineItemType.calendarEvent => AppColors.calendar,
       TimelineItemType.fixedAnchor => AppColors.accent,

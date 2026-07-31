@@ -93,6 +93,10 @@ class _MoodRepository implements MoodRepository {
   Stream<MoodLog?> watchTodayLatest() => Stream.value(null);
 
   @override
+  Stream<List<MoodLog>> watchRecent({int days = 14}) =>
+      Stream.value(const <MoodLog>[]);
+
+  @override
   Future<void> log(MoodLog entry) async {}
 }
 
