@@ -23,6 +23,8 @@ Each ADR should contain:
 | [ADR-004](ADR-004-intent-driven-controller-apis.md) | Intent-driven controller APIs | Accepted |
 | [ADR-005](ADR-005-passive-presentation-layer.md) | Passive presentation layer | Accepted |
 | [ADR-006](ADR-006-intelligence-is-optional.md) | Intelligence is optional | Accepted |
+| [ADR-007](ADR-007-health-connect-ingestion-boundary.md) | Health Connect ingestion boundary | Accepted |
+| [ADR-009](ADR-009-today-surface-contract.md) | Today Surface Contract | Proposed |
 
 Note: An earlier dependency-modernization decision lives in `docs/DECISIONS.md` (also labeled ADR-006 there). New formal records use this directory; numbering here is independent and focused on core layer boundaries.
 
