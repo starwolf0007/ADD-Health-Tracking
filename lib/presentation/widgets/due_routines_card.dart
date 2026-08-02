@@ -40,7 +40,7 @@ class DueRoutinesCard extends ConsumerWidget {
   }
 }
 
-class _DueRoutineTile extends StatelessWidget {
+class _DueRoutineTile extends ConsumerWidget {
   final Routine routine;
 
   const _DueRoutineTile({required this.routine});
@@ -52,14 +52,14 @@ class _DueRoutineTile extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return Material(
       color: AppColors.surfaceRaised,
       borderRadius: BorderRadius.circular(AppSpace.radiusCard),
       child: InkWell(
         key: ValueKey('due-routine-${routine.id}'),
         borderRadius: BorderRadius.circular(AppSpace.radiusCard),
-        onTap: () => launchRoutine(context, routine),
+        onTap: () => _launch(context, ref),
         child: Padding(
           padding: const EdgeInsets.all(AppSpace.lg),
           child: Row(
@@ -84,7 +84,7 @@ class _DueRoutineTile extends StatelessWidget {
                 ),
               ),
               FilledButton(
-                onPressed: () => launchRoutine(context, routine),
+                onPressed: () => _launch(context, ref),
                 child: const Text('Start'),
               ),
             ],
@@ -92,5 +92,10 @@ class _DueRoutineTile extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _launch(BuildContext context, WidgetRef ref) async {
+    await launchRoutine(context, routine);
+    ref.invalidate(dueRoutinesProvider);
   }
 }
