@@ -758,7 +758,7 @@ class _ActiveTaskCard extends ConsumerWidget {
       }
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Saved. Your return point is ready.')),
+        const SnackBar(content: Text('Saved. Ready when you are.')),
       );
     } finally {
       noteController.dispose();

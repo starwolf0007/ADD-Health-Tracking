@@ -210,7 +210,7 @@ void main() {
 
     expect(repository.task.status, TaskStatus.paused);
     expect(repository.task.reentryNote, isNull);
-    expect(find.text('Saved. Your return point is ready.'), findsOneWidget);
+    expect(find.text('Saved. Ready when you are.'), findsOneWidget);
   });
 
   testWidgets('save for later persists an optional return time',
