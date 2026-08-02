@@ -24,8 +24,7 @@ import 'package:neuroflow/presentation/today_screen.dart';
 void main() {
   final now = DateTime(2026, 7, 10, 12);
 
-  testWidgets('a low check-in reshapes Today into Quick Wins',
-      (tester) async {
+  testWidgets('a low check-in reshapes Today into Quick Wins', (tester) async {
     await tester.pumpWidget(_app(mood: MoodLevel.low, now: now));
     await tester.pump(const Duration(milliseconds: 500));
 
@@ -125,6 +124,7 @@ void main() {
     // Tomorrow's real schedule, not today's mood signal.
     expect(find.byKey(const ValueKey('quick-wins-card')), findsNothing);
     expect(find.text('Schedule for this day'), findsOneWidget);
+    expect(find.textContaining('Lighter load today'), findsNothing);
   });
 
   testWidgets('re-deriving Today picks up a signal that arrived later',

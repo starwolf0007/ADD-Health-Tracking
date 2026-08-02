@@ -163,8 +163,7 @@ class _TodayTimelineBody extends ConsumerWidget {
     final todayState = ref.watch(todayControllerProvider).value;
     final isQuickWins =
         _quickWinsActive(todayState, isViewingToday: isViewingToday);
-    final quickWinTasks =
-        isQuickWins ? todayState!.quickWins : const <Task>[];
+    final quickWinTasks = isQuickWins ? todayState!.quickWins : const <Task>[];
 
     // Commitments stay visible even in the reduced view. Hiding a real shift
     // or appointment would make a calm screen a dishonest one.
@@ -197,7 +196,13 @@ class _TodayTimelineBody extends ConsumerWidget {
             isViewingToday: isViewingToday,
           ),
           const SizedBox(height: AppSpace.md),
-          _DaySummaryCard(data: data),
+          _DaySummaryCard(
+            data: data,
+            // The Executive plan is derived for Today. Browsing another date
+            // must not carry today's capacity explanation into that day's
+            // otherwise-independent schedule.
+            reason: isViewingToday ? todayState?.reason ?? '' : '',
+          ),
           if (!data.hasCalendarPermission) ...[
             const SizedBox(height: AppSpace.md),
             const _CalendarPermissionNotice(),
@@ -212,8 +217,7 @@ class _TodayTimelineBody extends ConsumerWidget {
               const SizedBox(height: AppSpace.xl),
               const Text('Still fixed today', style: AppTextStyles.titleMedium),
               const SizedBox(height: AppSpace.md),
-              for (final item in fixedItems)
-                _TimelineRow(item: item, now: now),
+              for (final item in fixedItems) _TimelineRow(item: item, now: now),
             ],
           ] else ...[
             if (recommended != null) ...[
@@ -437,11 +441,12 @@ class _DateNavigator extends ConsumerWidget {
 
 class _DaySummaryCard extends ConsumerWidget {
   final TodayTimelineData data;
-  const _DaySummaryCard({required this.data});
+  final String reason;
+
+  const _DaySummaryCard({required this.data, required this.reason});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final reason = ref.watch(todayControllerProvider).value?.reason ?? '';
     return Semantics(
       button: true,
       label: 'Open Lexi conversation',

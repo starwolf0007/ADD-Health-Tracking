@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:neuroflow/app/mood_providers.dart';
 import 'package:neuroflow/app/providers.dart';
 import 'package:neuroflow/domain/mood.dart';
+import 'package:neuroflow/executive/planner.dart';
 import 'package:neuroflow/presentation/theme.dart';
 
 class ReflectScreen extends ConsumerWidget {
@@ -19,6 +20,7 @@ class ReflectScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final todayAsync = ref.watch(todayMoodProvider);
     final recentAsync = ref.watch(recentMoodsProvider);
+    final todayPlan = ref.watch(todayControllerProvider).value;
 
     return Scaffold(
       appBar: AppBar(
@@ -55,7 +57,10 @@ class ReflectScreen extends ConsumerWidget {
               'Could not load today’s check-in.\n$e',
               style: AppTextStyles.bodySmall,
             ),
-            data: (today) => _TodayMoodBlock(today: today),
+            data: (today) => _TodayMoodBlock(
+              today: today,
+              quickWinsAvailable: _quickWinsAvailable(todayPlan),
+            ),
           ),
           const SizedBox(height: AppSpace.xxl),
           const Text('RECENT', style: AppTextStyles.label),
@@ -98,8 +103,12 @@ class ReflectScreen extends ConsumerWidget {
 
 class _TodayMoodBlock extends ConsumerWidget {
   final MoodLog? today;
+  final bool quickWinsAvailable;
 
-  const _TodayMoodBlock({required this.today});
+  const _TodayMoodBlock({
+    required this.today,
+    required this.quickWinsAvailable,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -137,7 +146,7 @@ class _TodayMoodBlock extends ConsumerWidget {
                     ],
                   ),
                 ),
-                if (today!.level.triggersQuickWins)
+                if (today!.level.triggersQuickWins && quickWinsAvailable)
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: AppSpace.sm,
@@ -194,12 +203,24 @@ class _TodayMoodBlock extends ConsumerWidget {
             MoodLog.create(level, note: note),
           );
       ref.invalidate(todayControllerProvider);
+      TodayState? derivedPlan;
+      try {
+        derivedPlan = await ref.read(todayControllerProvider.future);
+      } catch (error, stackTrace) {
+        // The mood was saved successfully. A plan-refresh failure must not
+        // turn that successful check-in into a false save-error message.
+        debugPrint('Could not refresh Today after mood check-in: $error');
+        debugPrintStack(stackTrace: stackTrace);
+      }
       if (!context.mounted) return;
+      final quickWinsAvailable = _quickWinsAvailable(derivedPlan);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             level.triggersQuickWins
-                ? 'Logged ${level.label}. Today will lean toward Quick Wins.'
+                ? quickWinsAvailable
+                    ? 'Logged ${level.label}. Today will lean toward Quick Wins.'
+                    : 'Logged ${level.label}. Nothing is pending right now.'
                 : 'Logged ${level.label}.',
           ),
           duration: const Duration(seconds: 2),
@@ -257,8 +278,7 @@ class _TodayMoodBlock extends ConsumerWidget {
                   ),
                   const Spacer(),
                   FilledButton(
-                    onPressed: () =>
-                        Navigator.pop(ctx, controller.text.trim()),
+                    onPressed: () => Navigator.pop(ctx, controller.text.trim()),
                     child: const Text('Save'),
                   ),
                 ],
@@ -280,6 +300,11 @@ class _TodayMoodBlock extends ConsumerWidget {
     return '$h:$m $period';
   }
 }
+
+bool _quickWinsAvailable(TodayState? state) =>
+    state != null &&
+    state.mode == DayMode.quickWins &&
+    state.quickWins.isNotEmpty;
 
 class _MoodChip extends StatelessWidget {
   final MoodLevel level;
