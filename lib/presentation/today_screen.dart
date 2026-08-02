@@ -542,6 +542,13 @@ class _DaySummaryCard extends ConsumerWidget {
 }
 
 class _ActiveTaskCard extends ConsumerWidget {
+  static const _pauseContexts = <String, String>{
+    'Missing information': 'Paused because information was missing.',
+    'Energy dropped': 'Paused because energy dropped.',
+    'Got interrupted': 'Paused because you got interrupted.',
+    'Lost the thread': 'Paused because you lost the thread.',
+  };
+
   final Task task;
   const _ActiveTaskCard({required this.task});
 
@@ -568,7 +575,7 @@ class _ActiveTaskCard extends ConsumerWidget {
               ),
               SizedBox(width: AppSpace.sm),
               Expanded(
-                child: Text('Recommended now', style: AppTextStyles.label),
+                child: Text('Start here', style: AppTextStyles.label),
               ),
             ],
           ),
@@ -581,6 +588,10 @@ class _ActiveTaskCard extends ConsumerWidget {
           if (task.notes?.isNotEmpty ?? false) ...[
             const SizedBox(height: AppSpace.xs),
             Text(task.notes!, style: AppTextStyles.bodySmall),
+          ],
+          if (task.reentryNote != null && !task.reentryNote!.isEmpty) ...[
+            const SizedBox(height: AppSpace.md),
+            _ReentryNoteSummary(note: task.reentryNote!),
           ],
           const SizedBox(height: AppSpace.lg),
           Wrap(
@@ -622,7 +633,15 @@ class _ActiveTaskCard extends ConsumerWidget {
                 child: const Text('Save for later'),
               ),
               TextButton(
-                onPressed: () => actions.notNow(task.id),
+                onPressed: () async {
+                  await actions.notNow(task.id);
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Okay. Iâ€™ll bring this back later.'),
+                    ),
+                  );
+                },
                 child: const Text('Not now'),
               ),
             ],
@@ -633,8 +652,8 @@ class _ActiveTaskCard extends ConsumerWidget {
   }
 
   Future<void> _saveForLater(BuildContext context, WidgetRef ref) async {
-    final last = TextEditingController();
-    final next = TextEditingController();
+    final noteController = TextEditingController();
+    String? selectedContext;
     DateTime? returnAt;
     try {
       final saved = await showDialog<bool>(
@@ -647,20 +666,36 @@ class _ActiveTaskCard extends ConsumerWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    'A note can make returning easier, but every field is optional.',
+                    'Pause now. Add a return point only if it helps.',
                     style: AppTextStyles.bodySmall,
                   ),
                   const SizedBox(height: AppSpace.md),
-                  TextField(
-                    controller: last,
-                    decoration: const InputDecoration(
-                      labelText: 'Last completed step (Optional)',
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Wrap(
+                      spacing: AppSpace.sm,
+                      runSpacing: AppSpace.sm,
+                      children: [
+                        for (final contextLabel in _pauseContexts.keys)
+                          ChoiceChip(
+                            key: ValueKey('pause-context-$contextLabel'),
+                            label: Text(contextLabel),
+                            selected: selectedContext == contextLabel,
+                            onSelected: (selected) => setDialogState(
+                              () => selectedContext =
+                                  selected ? contextLabel : null,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
+                  const SizedBox(height: AppSpace.md),
                   TextField(
-                    controller: next,
+                    key: const ValueKey('pause-note-field'),
+                    controller: noteController,
                     decoration: const InputDecoration(
-                      labelText: 'Exact next action (Optional)',
+                      labelText: 'Note to future me (Optional)',
+                      hintText: 'Say or type the next useful detail',
                     ),
                   ),
                   ListTile(
@@ -687,7 +722,7 @@ class _ActiveTaskCard extends ConsumerWidget {
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(context, true),
-                child: const Text('Save and pause'),
+                child: const Text('Pause safely'),
               ),
             ],
           ),
@@ -695,16 +730,17 @@ class _ActiveTaskCard extends ConsumerWidget {
       );
       if (saved != true) return;
 
-      final lastStep = last.text.trim();
-      final nextAction = next.text.trim();
+      final nextAction = noteController.text.trim();
+      final pauseContext =
+          selectedContext == null ? null : _pauseContexts[selectedContext];
       final hasNote =
-          lastStep.isNotEmpty || nextAction.isNotEmpty || returnAt != null;
+          pauseContext != null || nextAction.isNotEmpty || returnAt != null;
       try {
         await ref.read(taskActionControllerProvider).saveForLater(
               task.id,
               hasNote
                   ? ReentryNote(
-                      lastCompletedStep: lastStep.isEmpty ? null : lastStep,
+                      lastCompletedStep: pauseContext,
                       nextAction: nextAction.isEmpty ? null : nextAction,
                       returnAt: returnAt,
                       updatedAt: DateTime.now(),
@@ -718,10 +754,14 @@ class _ActiveTaskCard extends ConsumerWidget {
             content: Text('Could not ${error.action}. Try again.'),
           ),
         );
+        return;
       }
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Saved. Your return point is ready.')),
+      );
     } finally {
-      last.dispose();
-      next.dispose();
+      noteController.dispose();
     }
   }
 
@@ -762,6 +802,51 @@ class _ActiveTaskCard extends ConsumerWidget {
   }
 }
 
+class _ReentryNoteSummary extends StatelessWidget {
+  final ReentryNote note;
+
+  const _ReentryNoteSummary({required this.note});
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      label: 'Saved return point',
+      child: Container(
+        key: const ValueKey('saved-return-point'),
+        width: double.infinity,
+        padding: const EdgeInsets.all(AppSpace.md),
+        decoration: BoxDecoration(
+          color: AppColors.accentWash,
+          borderRadius: BorderRadius.circular(AppSpace.radiusInput),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Return point',
+              style: AppTextStyles.label.copyWith(color: AppColors.accent),
+            ),
+            if (note.lastCompletedStep?.isNotEmpty == true) ...[
+              const SizedBox(height: AppSpace.xs),
+              Text(note.lastCompletedStep!, style: AppTextStyles.bodySmall),
+            ],
+            if (note.nextAction?.isNotEmpty == true) ...[
+              const SizedBox(height: AppSpace.xs),
+              Text(note.nextAction!, style: AppTextStyles.bodySmall),
+            ],
+            if (note.returnAt != null) ...[
+              const SizedBox(height: AppSpace.xs),
+              Text('Return ${_time(note.returnAt)}',
+                  style: AppTextStyles.bodySmall),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ActiveTaskTimer extends StatelessWidget {
   final DateTime startedAt;
 
@@ -783,23 +868,48 @@ class _ActiveTaskTimer extends StatelessWidget {
                 '${seconds.toString().padLeft(2, '0')}'
             : '${minutes.toString().padLeft(2, '0')}:'
                 '${seconds.toString().padLeft(2, '0')}';
-        return Semantics(
-          liveRegion: true,
-          label: 'Task running for $value',
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.timer_outlined,
-                  size: 18, color: AppColors.accent),
-              const SizedBox(width: AppSpace.xs),
-              Text(value,
-                  key: const ValueKey('active-task-timer'),
-                  style: AppTextStyles.label.copyWith(
+        final focusWindowSeconds = const Duration(minutes: 25).inSeconds;
+        final focusValue =
+            (safeElapsed.inSeconds % focusWindowSeconds) / focusWindowSeconds;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(
+              liveRegion: true,
+              label: 'Task running for $value',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.timer_outlined,
+                      size: 18, color: AppColors.accent),
+                  const SizedBox(width: AppSpace.xs),
+                  Text(value,
+                      key: const ValueKey('active-task-timer'),
+                      style: AppTextStyles.label.copyWith(
+                        color: AppColors.accent,
+                        fontFeatures: const [FontFeature.tabularFigures()],
+                      )),
+                ],
+              ),
+            ),
+            const SizedBox(height: AppSpace.xs),
+            Semantics(
+              container: true,
+              label: 'Gentle focus-time cue',
+              child: ExcludeSemantics(
+                child: SizedBox(
+                  width: 180,
+                  child: LinearProgressIndicator(
+                    key: const ValueKey('gentle-focus-time-cue'),
+                    value: focusValue,
+                    minHeight: 3,
+                    backgroundColor: AppColors.divider,
                     color: AppColors.accent,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  )),
-            ],
-          ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         );
       },
     );
