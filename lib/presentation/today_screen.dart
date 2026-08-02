@@ -638,7 +638,7 @@ class _ActiveTaskCard extends ConsumerWidget {
                   if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(
-                      content: Text('Okay. Iâ€™ll bring this back later.'),
+                      content: Text('Okay. I\'ll bring this back later.'),
                     ),
                   );
                 },

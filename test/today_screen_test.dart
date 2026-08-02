@@ -265,7 +265,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.text('Second suggestion'), findsOneWidget);
-    expect(find.text('Okay. Iâ€™ll bring this back later.'), findsOneWidget);
+    expect(find.text('Okay. I\'ll bring this back later.'), findsOneWidget);
     expect(repository.statusUpdates, isEmpty);
     expect(repository.tasks.every((task) => task.status == TaskStatus.pending),
         isTrue);
