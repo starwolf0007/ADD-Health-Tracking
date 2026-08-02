@@ -1,6 +1,6 @@
 // test/unit/habit_test.dart
 //
-// Unit tests for Habit domain model — streak computation and today-check logic.
+// Unit tests for Habit domain model — check-in, rolling rate, skip budget.
 // Run with: dart test test/unit/habit_test.dart
 
 import 'package:flutter_test/flutter_test.dart';
@@ -31,53 +31,77 @@ void main() {
     });
   });
 
-  // ─── currentStreak ────────────────────────────────────────────────────────
+  // ─── completionRate30d ────────────────────────────────────────────────────
 
-  group('currentStreak', () {
+  group('completionRate30d', () {
     test('is 0 with no check-ins', () {
-      expect(_habit([]).currentStreak, 0);
+      expect(_habit([]).completionRate30d, 0.0);
     });
 
-    test('is 1 when only today is checked', () {
-      final habit = _habit([_checkIn(0, completed: true)]);
-      expect(habit.currentStreak, 1);
+    test('is 1.0 when every applicable day in window is complete', () {
+      final checkIns = [
+        for (var i = 0; i < 30; i++) _checkIn(i, completed: true),
+      ];
+      expect(_habit(checkIns).completionRate30d, 1.0);
     });
 
-    test('counts consecutive days ending today', () {
+    test('reflects partial completion without zeroing on a miss', () {
+      // Today + yesterday complete; day-before missed — rate stays > 0.
       final habit = _habit([
         _checkIn(0, completed: true),
         _checkIn(1, completed: true),
-        _checkIn(2, completed: true),
+        // day 2 absent = miss
       ]);
-      expect(habit.currentStreak, 3);
+      final rate = habit.completionRate30d;
+      expect(rate, greaterThan(0.0));
+      expect(rate, lessThan(1.0));
     });
 
-    test('breaks at a missed day', () {
-      final habit = _habit([
-        _checkIn(0, completed: true),
-        // day 1 missed
-        _checkIn(2, completed: true),
-        _checkIn(3, completed: true),
-      ]);
-      expect(habit.currentStreak, 1); // only today counts
-    });
-
-    test('is 0 when today is not checked even if yesterday was', () {
-      final habit = _habit([_checkIn(1, completed: true)]);
-      expect(habit.currentStreak, 0);
-    });
-
-    test('does not count uncompleted check-ins in streak', () {
-      final habit = _habit([
-        _checkIn(0, completed: false),
-        _checkIn(1, completed: true),
-      ]);
-      expect(habit.currentStreak, 0);
+    test('a single miss does not collapse the whole history', () {
+      final checkIns = [
+        for (var i = 0; i < 10; i++)
+          if (i != 3) _checkIn(i, completed: true),
+      ];
+      final rate = _habit(checkIns).completionRate30d;
+      // 9 of 30 applicable days if daily → 0.3; importantly not 0.
+      expect(rate, greaterThan(0.2));
+      expect(rate, lessThan(0.5));
     });
   });
 
-  // ─── Routine domain helpers ───────────────────────────────────────────────
-  // (Basic sanity — full routine tests live in routine_test.dart)
+  // ─── skipsRemainingThisMonth ──────────────────────────────────────────────
+
+  group('skipsRemainingThisMonth', () {
+    test('starts at full budget with no misses recorded this month', () {
+      // Completing every day so far this month leaves full budget.
+      final now = DateTime.now();
+      final dayOfMonth = now.day;
+      final checkIns = [
+        for (var i = 0; i < dayOfMonth; i++) _checkIn(i, completed: true),
+      ];
+      expect(
+        _habit(checkIns).skipsRemainingThisMonth,
+        Habit.monthlySkipBudget,
+      );
+    });
+
+    test('decrements for each applicable miss this month', () {
+      final now = DateTime.now();
+      // Leave today and yesterday incomplete; complete the rest of the month.
+      final checkIns = <HabitCheckIn>[
+        for (var i = 2; i < now.day; i++) _checkIn(i, completed: true),
+      ];
+      final remaining = _habit(checkIns).skipsRemainingThisMonth;
+      expect(remaining, lessThan(Habit.monthlySkipBudget));
+      expect(remaining, greaterThanOrEqualTo(0));
+    });
+
+    test('never goes below zero', () {
+      // Far more misses than the budget.
+      final habit = _habit([]);
+      expect(habit.skipsRemainingThisMonth, greaterThanOrEqualTo(0));
+    });
+  });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────

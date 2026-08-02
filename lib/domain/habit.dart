@@ -4,8 +4,10 @@
 //
 // ADHD UX intent:
 //   • A habit is a single daily intention, not a complex tracker.
-//   • Streaks are shown but breaking one resets to 0 — no shame messaging in code.
-//   • Check-ins are binary: done or not. No "partial" states that invite over-analysis.
+//   • Completion uses a rolling 30-day rate + monthly skip budget
+//     (forgiveness), never a consecutive-day counter that zeros on a miss.
+//   • Check-ins are binary: done or not. No "partial" states that invite
+//     over-analysis.
 //   • Habits are meant to be few (3 max surfaced per day) to avoid overwhelm.
 
 import 'package:uuid/uuid.dart';
@@ -70,6 +72,11 @@ class Habit {
   // Computed at query time — not stored
   final List<HabitCheckIn> recentCheckIns; // last 30 days, descending
 
+  /// Applicable misses allowed in the current calendar month before the
+  /// forgiveness budget is exhausted. Internal metric only — never shown
+  /// as a raw count in the UI (§13).
+  static const int monthlySkipBudget = 5;
+
   const Habit({
     required this.id,
     required this.name,
@@ -122,46 +129,48 @@ class Habit {
     return recentCheckIns.any((c) => _sameDay(c.date, today) && c.completed);
   }
 
-  /// Current streak — consecutive applicable days completed, counting back from today.
-  int get currentStreak {
-    if (recentCheckIns.isEmpty) return 0;
+  /// Rolling completion rate over the last 30 calendar days, counting only
+  /// days that apply for this habit's frequency. Returns 0.0 when there are
+  /// no applicable days yet.
+  double get completionRate30d {
+    final today = _today();
+    var applicable = 0;
+    var completed = 0;
 
-    final sorted = List<HabitCheckIn>.from(recentCheckIns)
-      ..sort((a, b) => b.date.compareTo(a.date));
-
-    int streak = 0;
-    DateTime cursor = _today();
-
-    for (final checkIn in sorted) {
-      if (!_sameDay(checkIn.date, cursor)) break;
-      if (!checkIn.completed) break;
-      streak++;
-      cursor = cursor.subtract(const Duration(days: 1));
-      // Skip non-applicable days (weekday/weekend filtering)
-      while (!_isApplicable(cursor)) {
-        cursor = cursor.subtract(const Duration(days: 1));
-      }
+    for (var i = 0; i < 30; i++) {
+      final day = today.subtract(Duration(days: i));
+      if (!_isApplicable(day)) continue;
+      applicable++;
+      final hit = recentCheckIns.any(
+        (c) => _sameDay(c.date, day) && c.completed,
+      );
+      if (hit) completed++;
     }
-    return streak;
+
+    if (applicable == 0) return 0.0;
+    return completed / applicable;
   }
 
-  /// Longest streak ever (from recentCheckIns — capped at 30 days).
-  int get longestStreak {
-    if (recentCheckIns.isEmpty) return 0;
-    final sorted = List<HabitCheckIn>.from(recentCheckIns)
-      ..sort((a, b) => a.date.compareTo(b.date));
+  /// Remaining skips in the current calendar month (budget minus applicable
+  /// days that were not completed). Clamped at 0. Internal only.
+  int get skipsRemainingThisMonth {
+    final now = DateTime.now();
+    final monthStart = DateTime(now.year, now.month, 1);
+    final today = _today();
 
-    int best = 0;
-    int current = 0;
-    for (final c in sorted) {
-      if (c.completed && _isApplicable(c.date)) {
-        current++;
-        if (current > best) best = current;
-      } else {
-        current = 0;
-      }
+    var misses = 0;
+    for (var day = monthStart;
+        !day.isAfter(today);
+        day = day.add(const Duration(days: 1))) {
+      if (!_isApplicable(day)) continue;
+      final hit = recentCheckIns.any(
+        (c) => _sameDay(c.date, day) && c.completed,
+      );
+      if (!hit) misses++;
     }
-    return best;
+
+    final remaining = monthlySkipBudget - misses;
+    return remaining < 0 ? 0 : remaining;
   }
 
   bool _isApplicable(DateTime date) {

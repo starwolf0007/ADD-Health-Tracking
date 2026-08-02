@@ -2,12 +2,14 @@
 //
 // Habit check-in widget — embeds in Today screen below the task area.
 // Shows up to 3 active habits (ADHD: fewer is better).
-// Each row: habit name + streak count + tap-to-check circle.
+// Each row: habit name + tap-to-check circle.
 //
 // Design rules:
-//   • Streak is shown as a number + flame glyph, not a progress bar (no anxiety).
+//   • No raw streak numbers or progress bars (§13 / #32).
 //   • Checking is reversible (tap again to uncheck) — no permanence pressure.
 //   • No guilt language anywhere in this file.
+//
+// Not mounted by any screen yet — keep compliant before integration.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -66,7 +68,6 @@ class _HabitRow extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final checked = habit.isCheckedToday;
-    final streak = habit.currentStreak;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 4),
@@ -100,7 +101,7 @@ class _HabitRow extends ConsumerWidget {
               ),
             ),
             const SizedBox(width: 12),
-            // Name
+            // Name — no streak count (§13 / #32)
             Expanded(
               child: Text(
                 habit.name,
@@ -114,9 +115,6 @@ class _HabitRow extends ConsumerWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            const SizedBox(width: 8),
-            // Streak
-            if (streak > 0) _StreakBadge(streak: streak),
           ],
         ),
       ),
@@ -130,32 +128,5 @@ class _HabitRow extends ConsumerWidget {
     } else {
       await repo.checkIn(habit.id);
     }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Streak badge
-// ---------------------------------------------------------------------------
-
-class _StreakBadge extends StatelessWidget {
-  final int streak;
-
-  const _StreakBadge({required this.streak});
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        // Flame-like glyph — monochrome per §13 (no colour coding)
-        const Icon(Icons.local_fire_department_outlined,
-            size: 13, color: AppColors.textMuted),
-        const SizedBox(width: 2),
-        Text(
-          '$streak',
-          style: AppTextStyles.monoSmall,
-        ),
-      ],
-    );
   }
 }
