@@ -24,8 +24,7 @@ import 'package:neuroflow/presentation/today_screen.dart';
 void main() {
   final now = DateTime(2026, 7, 10, 12);
 
-  testWidgets('a low check-in reshapes Today into Quick Wins',
-      (tester) async {
+  testWidgets('a low check-in reshapes Today into Quick Wins', (tester) async {
     await tester.pumpWidget(_app(mood: MoodLevel.low, now: now));
     await tester.pump(const Duration(milliseconds: 500));
 
@@ -72,28 +71,27 @@ void main() {
     expect(find.text('Calendar sync'), findsOneWidget);
   });
 
-  testWidgets('the full day stays one deliberate tap away, and is reversible',
+  testWidgets('Quick Wins has no manual escape to the full day (§158 locked)',
       (tester) async {
     _tallView(tester);
     await tester.pumpWidget(_app(mood: MoodLevel.low, now: now));
     await tester.pump(const Duration(milliseconds: 500));
 
-    final disclose = find.byKey(const ValueKey('quick-wins-show-full-day'));
-    await tester.ensureVisible(disclose);
-    await tester.pump();
-    await tester.tap(disclose);
-    await tester.pump(const Duration(milliseconds: 300));
+    // §158/§170: containment is the feature — no manual toggle, no user action
+    // to leave or maintain the reduced state. The full day returns only when
+    // the signal lifts, automatically. So there is no disclosure control and no
+    // "Your day" section reachable from here.
+    expect(
+        find.byKey(const ValueKey('quick-wins-show-full-day')), findsNothing);
+    expect(find.text('Show the full day'), findsNothing);
+    expect(find.text('Back to Quick Wins'), findsNothing);
+    expect(find.text('Your day'), findsNothing);
 
-    expect(find.byKey(const ValueKey('quick-wins-card')), findsNothing);
-    expect(find.text('Your day'), findsOneWidget);
-
-    final back = find.byKey(const ValueKey('quick-wins-return'));
-    await tester.ensureVisible(back);
-    await tester.pump();
-    await tester.tap(back);
-    await tester.pump(const Duration(milliseconds: 300));
-
-    expect(find.byKey(const ValueKey('quick-wins-card')), findsOneWidget);
+    // §163: the status label ends with the explicit permission to stop.
+    expect(
+      find.textContaining('Nothing else is tracked today.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a neutral check-in leaves Today unchanged', (tester) async {
@@ -126,6 +124,7 @@ void main() {
     // Tomorrow's real schedule, not today's mood signal.
     expect(find.byKey(const ValueKey('quick-wins-card')), findsNothing);
     expect(find.text('Schedule for this day'), findsOneWidget);
+    expect(find.textContaining('Lighter load today'), findsNothing);
   });
 
   testWidgets('re-deriving Today picks up a signal that arrived later',
@@ -146,37 +145,21 @@ void main() {
     expect(find.byKey(const ValueKey('quick-wins-card')), findsOneWidget);
   });
 
-  testWidgets('a new Quick Wins session starts reduced, not disclosed',
+  testWidgets('tapping a Quick Win marks it done — one-tap done (§167)',
       (tester) async {
-    _tallView(tester);
-    final moods = _FakeMoodRepository(MoodLevel.low);
+    final tasks = _FakeTaskRepository(_pending());
     await tester.pumpWidget(
-      _app(mood: null, now: now, moodRepository: moods),
+      _app(mood: MoodLevel.veryLow, now: now, taskRepository: tasks),
     );
     await tester.pump(const Duration(milliseconds: 500));
 
-    final disclose = find.byKey(const ValueKey('quick-wins-show-full-day'));
-    await tester.ensureVisible(disclose);
-    await tester.pump();
-    await tester.tap(disclose);
+    // The row is a done control, not a start button: one tap completes the
+    // task (which drops it from the pending pool so the capped list refills),
+    // rather than starting a timer that leaves it stuck as "running".
+    await tester.tap(find.byKey(const ValueKey('quick-win-t10')));
     await tester.pump(const Duration(milliseconds: 300));
-    expect(find.text('Your day'), findsOneWidget);
 
-    // Mode goes off...
-    moods.level = MoodLevel.good;
-    _container(tester).invalidate(todayControllerProvider);
-    await tester.pump(const Duration(milliseconds: 500));
-    expect(find.byKey(const ValueKey('quick-wins-card')), findsNothing);
-
-    // ...and comes back. The earlier disclosure must not be inherited: a
-    // rough day should never open on the full day because of a tap made
-    // during an earlier rough patch.
-    moods.level = MoodLevel.veryLow;
-    _container(tester).invalidate(todayControllerProvider);
-    await tester.pump(const Duration(milliseconds: 500));
-
-    expect(find.byKey(const ValueKey('quick-wins-card')), findsOneWidget);
-    expect(find.text('Your day'), findsNothing);
+    expect(tasks.completed, contains('t10'));
   });
 
   testWidgets('Quick Wins renders no score, count, or progress figure',
@@ -199,11 +182,11 @@ ProviderContainer _container(WidgetTester tester) =>
     ProviderScope.containerOf(tester.element(find.byType(TodayScreen)));
 
 /// Widget tests default to an 800x600 surface. The reduced Quick Wins view
-/// (the card, the "Still fixed today" commitments, and the "Show the full
-/// day" disclosure) is taller than that, so its lower rows fall outside the
-/// lazily-built ListView and are never created — making them unfindable and
-/// un-`ensureVisible`-able. Give the tests that assert on that lower content a
-/// tall surface so every row is laid out. Reset after each test.
+/// (the card, the "Still fixed today" commitments, and the status label) is
+/// taller than that, so its lower rows fall outside the lazily-built ListView
+/// and are never created — making them unfindable. Give the tests that assert
+/// on that lower content a tall surface so every row is laid out. Reset after
+/// each test.
 void _tallView(WidgetTester tester) {
   tester.view.physicalSize = const Size(1080, 3200);
   tester.view.devicePixelRatio = 1.0;
@@ -215,10 +198,12 @@ Widget _app({
   required MoodLevel? mood,
   required DateTime now,
   _FakeMoodRepository? moodRepository,
+  _FakeTaskRepository? taskRepository,
 }) {
   return ProviderScope(
     overrides: [
-      taskRepositoryProvider.overrideWithValue(_FakeTaskRepository(_pending())),
+      taskRepositoryProvider
+          .overrideWithValue(taskRepository ?? _FakeTaskRepository(_pending())),
       moodRepositoryProvider
           .overrideWithValue(moodRepository ?? _FakeMoodRepository(mood)),
       wearSyncServiceProvider.overrideWithValue(_FakeWearSyncService()),
@@ -308,6 +293,7 @@ class _FakeWearSyncService extends WearSyncService {
 
 class _FakeTaskRepository implements TaskRepository {
   List<Task> tasks;
+  final completed = <String>{};
 
   _FakeTaskRepository(this.tasks);
 
@@ -328,7 +314,7 @@ class _FakeTaskRepository implements TaskRepository {
   Future<void> save(Task task) async {}
 
   @override
-  Future<void> markComplete(String id) async {}
+  Future<void> markComplete(String id) async => completed.add(id);
 
   @override
   Future<void> updateStatus(String id, TaskStatus status) async {}
