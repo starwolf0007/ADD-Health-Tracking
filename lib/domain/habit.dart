@@ -132,8 +132,10 @@ class Habit {
   /// Rolling completion rate over the last 30 calendar days, counting only
   /// days that apply for this habit's frequency. Returns 0.0 when there are
   /// no applicable days yet.
-  double get completionRate30d {
-    final today = _today();
+  double get completionRate30d => getCompletionRate30dAt(DateTime.now());
+
+  double getCompletionRate30dAt(DateTime referenceDate) {
+    final today = DateTime(referenceDate.year, referenceDate.month, referenceDate.day);
     var applicable = 0;
     var completed = 0;
 
@@ -153,10 +155,11 @@ class Habit {
 
   /// Remaining skips in the current calendar month (budget minus applicable
   /// days that were not completed). Clamped at 0. Internal only.
-  int get skipsRemainingThisMonth {
-    final now = DateTime.now();
+  int get skipsRemainingThisMonth => getSkipsRemainingAt(DateTime.now());
+
+  int getSkipsRemainingAt(DateTime now) {
     final monthStart = DateTime(now.year, now.month, 1);
-    final today = _today();
+    final today = DateTime(now.year, now.month, now.day);
 
     var misses = 0;
     for (var day = monthStart;
@@ -174,6 +177,9 @@ class Habit {
   }
 
   bool _isApplicable(DateTime date) {
+    final createdDate = DateTime(createdAt.year, createdAt.month, createdAt.day);
+    if (date.isBefore(createdDate)) return false;
+
     switch (frequency) {
       case HabitFrequency.daily:
         return true;
