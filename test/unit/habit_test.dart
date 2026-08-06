@@ -101,6 +101,23 @@ void main() {
       final habit = _habit([]);
       expect(habit.skipsRemainingThisMonth, greaterThanOrEqualTo(0));
     });
+
+    test('brand new habit does not charge skips for days before it was created',
+        () {
+      final habit = Habit(
+        id: 'new-habit',
+        name: 'New Habit',
+        frequency: HabitFrequency.daily,
+        createdAt: DateTime(2026, 8, 15), // fixed — guarantees a real gap
+        // from month start regardless
+        // of when this test runs
+        recentCheckIns: [],
+      );
+      // Only Aug 15 is applicable under the fix; Aug 1–14 must not count
+      // as misses even though they're within the month.
+      expect(habit.getSkipsRemainingAt(DateTime(2026, 8, 15)),
+          Habit.monthlySkipBudget - 1);
+    });
   });
 }
 
