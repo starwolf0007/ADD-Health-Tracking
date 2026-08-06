@@ -60,7 +60,7 @@ void main() {
 
     // Reduction is the feature: the recommended-task card, the full timeline
     // heading, and the flexible-task pile must all be absent.
-    expect(find.text('Recommended now'), findsNothing);
+    expect(find.text('Start here'), findsNothing);
     expect(find.text('Your day'), findsNothing);
     expect(find.text('Flexible tasks'), findsNothing);
 
@@ -100,7 +100,7 @@ void main() {
 
     expect(find.byKey(const ValueKey('quick-wins-card')), findsNothing);
     expect(find.text('Your day'), findsOneWidget);
-    expect(find.text('Recommended now'), findsOneWidget);
+    expect(find.text('Start here'), findsOneWidget);
   });
 
   testWidgets('no check-in at all is treated as a normal day', (tester) async {

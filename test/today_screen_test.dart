@@ -151,7 +151,30 @@ void main() {
     expect(find.text('Hey, Bryan'), findsOneWidget);
   });
 
-  testWidgets('save for later persists full note and pauses task',
+  for (final context in const {
+    'Missing information': 'Paused because information was missing.',
+    'Energy dropped': 'Paused because energy dropped.',
+    'Got interrupted': 'Paused because you got interrupted.',
+    'Lost the thread': 'Paused because you lost the thread.',
+  }.entries) {
+    testWidgets('pause context ${context.key} maps to calm re-entry copy',
+        (tester) async {
+      final repository = _FakeTaskRepository(_task());
+      await tester.pumpWidget(_interactiveApp(repository, now));
+      await tester.pump(const Duration(milliseconds: 300));
+
+      await _openSaveDialog(tester);
+      await tester.tap(find.byKey(ValueKey('pause-context-${context.key}')));
+      await tester.tap(find.text('Pause safely'));
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(repository.task.status, TaskStatus.paused);
+      expect(repository.task.reentryNote?.lastCompletedStep, context.value);
+      expect(repository.task.reentryNote?.nextAction, isNull);
+    });
+  }
+
+  testWidgets('custom pause note persists and remains visible after resume',
       (tester) async {
     final repository = _FakeTaskRepository(_task());
     await tester.pumpWidget(_interactiveApp(repository, now));
@@ -159,37 +182,21 @@ void main() {
 
     await _openSaveDialog(tester);
     await tester.enterText(
-        find.widgetWithText(TextField, 'Last completed step (Optional)'),
-        'Outlined the section');
-    await tester.enterText(
-        find.widgetWithText(TextField, 'Exact next action (Optional)'),
-        'Write the first paragraph');
-    await tester.tap(find.text('Save and pause'));
-    await tester.pump(const Duration(milliseconds: 400));
-
-    expect(repository.task.status, TaskStatus.paused);
-    expect(
-        repository.task.reentryNote?.lastCompletedStep, 'Outlined the section');
-    expect(
-        repository.task.reentryNote?.nextAction, 'Write the first paragraph');
-    expect(find.text('Resume'), findsOneWidget);
-  });
-
-  testWidgets('save for later accepts only next action', (tester) async {
-    final repository = _FakeTaskRepository(_task());
-    await tester.pumpWidget(_interactiveApp(repository, now));
-    await tester.pump(const Duration(milliseconds: 300));
-
-    await _openSaveDialog(tester);
-    await tester.enterText(
-        find.widgetWithText(TextField, 'Exact next action (Optional)'),
-        'Open the document');
-    await tester.tap(find.text('Save and pause'));
+        find.byKey(const ValueKey('pause-note-field')), 'Open the document');
+    await tester.tap(find.text('Pause safely'));
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(repository.task.status, TaskStatus.paused);
     expect(repository.task.reentryNote?.lastCompletedStep, isNull);
     expect(repository.task.reentryNote?.nextAction, 'Open the document');
+    expect(find.byKey(const ValueKey('saved-return-point')), findsOneWidget);
+    expect(find.text('Open the document'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(FilledButton, 'Resume'));
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(repository.task.status, TaskStatus.inProgress);
+    expect(find.byKey(const ValueKey('saved-return-point')), findsOneWidget);
+    expect(find.text('Open the document'), findsOneWidget);
   });
 
   testWidgets('save for later with no note still pauses', (tester) async {
@@ -198,11 +205,32 @@ void main() {
     await tester.pump(const Duration(milliseconds: 300));
 
     await _openSaveDialog(tester);
-    await tester.tap(find.text('Save and pause'));
+    await tester.tap(find.text('Pause safely'));
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(repository.task.status, TaskStatus.paused);
     expect(repository.task.reentryNote, isNull);
+    expect(find.text('Saved. Ready when you are.'), findsOneWidget);
+  });
+
+  testWidgets('save for later persists an optional return time',
+      (tester) async {
+    final repository = _FakeTaskRepository(_task());
+    await tester.pumpWidget(_interactiveApp(repository, now));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await _openSaveDialog(tester);
+    await tester.tap(find.text('Return time (Optional)'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('OK'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('OK'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('Pause safely'));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(repository.task.status, TaskStatus.paused);
+    expect(repository.task.reentryNote?.returnAt, isNotNull);
   });
 
   testWidgets('cancel save for later leaves task unchanged', (tester) async {
@@ -218,7 +246,34 @@ void main() {
     expect(repository.task.reentryNote, isNull);
   });
 
-  testWidgets('starting a task shows a visible running timer', (tester) async {
+  testWidgets('Not now selects another task and promises resurfacing',
+      (tester) async {
+    final repository = _TaskListRepository([
+      _task().copyWith(title: 'First suggestion', energy: EnergyLevel.low),
+      Task(
+        id: 'second',
+        title: 'Second suggestion',
+        energy: EnergyLevel.medium,
+        createdAt: DateTime(2026, 7, 10, 9),
+      ),
+    ]);
+    await tester.pumpWidget(_notNowApp(repository, now));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text('First suggestion'), findsOneWidget);
+    await tester.tap(find.text('Not now'));
+    await tester.pump(const Duration(milliseconds: 500));
+
+    expect(find.text('Second suggestion'), findsOneWidget);
+    expect(find.text('Okay. I\'ll bring this back later.'), findsOneWidget);
+    expect(repository.statusUpdates, isEmpty);
+    expect(repository.tasks.every((task) => task.status == TaskStatus.pending),
+        isTrue);
+  });
+
+  testWidgets('starting a task shows elapsed time and a gentle focus cue',
+      (tester) async {
+    final semantics = tester.ensureSemantics();
     final repository = _FakeTaskRepository(_task());
     await tester.pumpWidget(_interactiveApp(repository, DateTime.now()));
     await tester.pump(const Duration(milliseconds: 300));
@@ -231,7 +286,11 @@ void main() {
 
     expect(repository.task.status, TaskStatus.inProgress);
     expect(find.byKey(const ValueKey('active-task-timer')), findsOneWidget);
+    expect(find.byKey(const ValueKey('gentle-focus-time-cue')), findsOneWidget);
+    expect(find.bySemanticsLabel('Gentle focus-time cue'), findsOneWidget);
+    expect(find.textContaining('%'), findsNothing);
     expect(find.text('Running'), findsOneWidget);
+    semantics.dispose();
   });
 
   testWidgets('timeline item semantics announce type and phase',
@@ -285,6 +344,46 @@ void main() {
         find.byKey(const ValueKey('task-editor-clear-time')), findsOneWidget);
     expect(find.byKey(const ValueKey('task-editor-save')), findsOneWidget);
   });
+
+  testWidgets('capture FAB focuses task input above the keyboard inset',
+      (tester) async {
+    tester.view.physicalSize = const Size(800, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+
+    final repository = _FakeTaskRepository(_task());
+    await tester.pumpWidget(_interactiveApp(repository, now));
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await tester.tap(find.byTooltip('Add task'));
+    await tester.pump(const Duration(milliseconds: 500));
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await tester.pump(const Duration(milliseconds: 500));
+
+    final captureField = find.byWidgetPredicate(
+      (widget) =>
+          widget is TextField &&
+          widget.decoration?.hintText == "What's on your mind?",
+    );
+    expect(captureField, findsOneWidget);
+    final editable = find.descendant(
+      of: captureField,
+      matching: find.byType(EditableText),
+    );
+    expect(tester.widget<EditableText>(editable).focusNode.hasFocus, isTrue);
+    expect(tester.testTextInput.hasAnyClients, isTrue);
+
+    final submit = find.widgetWithText(ElevatedButton, 'Add to today');
+    expect(submit, findsOneWidget);
+    final logicalHeight =
+        tester.view.physicalSize.height / tester.view.devicePixelRatio;
+    final keyboardHeight =
+        tester.view.viewInsets.bottom / tester.view.devicePixelRatio;
+    expect(tester.getRect(submit).bottom,
+        lessThanOrEqualTo(logicalHeight - keyboardHeight));
+  });
 }
 
 Future<void> _openSaveDialog(WidgetTester tester) async {
@@ -296,7 +395,7 @@ Future<void> _openSaveDialog(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 100));
   await tester.tap(button);
   await tester.pump(const Duration(milliseconds: 300));
-  expect(find.text('Save and pause'), findsOneWidget);
+  expect(find.text('Pause safely'), findsOneWidget);
 }
 
 Widget _app(TodayTimelineData data, DateTime now) {
@@ -332,6 +431,31 @@ Widget _interactiveApp(_FakeTaskRepository repository, DateTime now) {
             ),
           ],
           recommendedTask: task,
+          hasCalendarPermission: true,
+          lexiAvailable: false,
+        );
+      }),
+    ],
+    child: MaterialApp(
+      theme: AppTheme.dark(),
+      home: TodayScreen(now: now),
+    ),
+  );
+}
+
+Widget _notNowApp(_TaskListRepository repository, DateTime now) {
+  return ProviderScope(
+    overrides: [
+      taskRepositoryProvider.overrideWithValue(repository),
+      moodRepositoryProvider.overrideWithValue(const _FakeMoodRepository()),
+      wearSyncServiceProvider.overrideWithValue(_FakeWearSyncService()),
+      displayNameProvider.overrideWith((ref) async => 'Bryan'),
+      todayTimelineProvider.overrideWith((ref) async {
+        final recommended =
+            ref.watch(todayControllerProvider).value?.primaryTask;
+        return TodayTimelineData(
+          items: const [],
+          recommendedTask: recommended,
           hasCalendarPermission: true,
           lexiAvailable: false,
         );
@@ -506,6 +630,57 @@ class _FakeTaskRepository implements TaskRepository {
 
   @override
   Future<void> delete(String id) async => deleted = true;
+}
+
+class _TaskListRepository implements TaskRepository {
+  final List<Task> tasks;
+  final List<(String, TaskStatus)> statusUpdates = [];
+
+  _TaskListRepository(this.tasks);
+
+  @override
+  Stream<List<Task>> watchPending() => Stream.value(tasks);
+
+  @override
+  Stream<List<Task>> watchTimelineForDay(
+    DateTime day, {
+    required bool includeFlexibleTasks,
+  }) =>
+      Stream.value(tasks);
+
+  @override
+  Stream<int> watchCompletedTodayCount() => Stream.value(0);
+
+  @override
+  Future<void> save(Task task) async {}
+
+  @override
+  Future<void> markComplete(String id) async {}
+
+  @override
+  Future<void> updateStatus(String id, TaskStatus status) async {
+    statusUpdates.add((id, status));
+  }
+
+  @override
+  Future<void> saveReentryNote(String id, ReentryNote note) async {}
+
+  @override
+  Future<void> clearReentryNote(String id) async {}
+
+  @override
+  Future<ReentryNote?> getReentryNote(String id) async => null;
+
+  @override
+  Future<Task?> getById(String id) async {
+    for (final task in tasks) {
+      if (task.id == id) return task;
+    }
+    return null;
+  }
+
+  @override
+  Future<void> delete(String id) async {}
 }
 
 class _RecordingTodayController extends TodayController {
