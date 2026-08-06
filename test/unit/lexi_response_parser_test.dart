@@ -24,6 +24,117 @@ void main() {
     expect(result.response.proposal?.payload['taskId'], 'task-1');
   });
 
+  test('accepts a typed task-breakdown draft', () {
+    final result = parser.parseRaw('''
+      {
+        "dialogue": "That task is too big as written. Here is a starting path.",
+        "proposal": {
+          "type": "break_down_task_draft",
+          "requiresConfirmation": true,
+          "confirmationPrompt": "Use these steps?",
+          "payload": {
+            "taskId": "garage-1",
+            "title": "Clean the garage",
+            "steps": [
+              {"title": "Get one trash bag and one empty bin", "estimatedMinutes": 3},
+              {"title": "Throw away the obvious trash", "estimatedMinutes": 10},
+              {"title": "Clear one shelf", "estimatedMinutes": 15}
+            ],
+            "suggestedFirstStepIndex": 0,
+            "totalEstimatedMinutes": 28,
+            "strategy": "activation_first"
+          }
+        }
+      }
+    ''');
+
+    expect(result.isValid, isTrue);
+    final proposal = result.response.proposal;
+    expect(proposal?.type, LexiProposalType.breakDownTaskDraft);
+    expect(proposal?.taskBreakdownDraft?.taskId, 'garage-1');
+    expect(proposal?.taskBreakdownDraft?.title, 'Clean the garage');
+    expect(proposal?.taskBreakdownDraft?.steps, hasLength(3));
+    expect(
+      proposal?.taskBreakdownDraft?.steps.first.title,
+      'Get one trash bag and one empty bin',
+    );
+    expect(proposal?.taskBreakdownDraft?.suggestedFirstStepIndex, 0);
+    expect(proposal?.taskBreakdownDraft?.strategy, 'activation_first');
+  });
+
+  test('rejects task breakdowns with fewer than two steps', () {
+    final result = parser.parseRaw('''
+      {
+        "dialogue": "I made the change.",
+        "proposal": {
+          "type": "break_down_task_draft",
+          "requiresConfirmation": true,
+          "confirmationPrompt": "Use this step?",
+          "payload": {
+            "title": "Clean the garage",
+            "steps": [{"title": "Get a trash bag"}],
+            "suggestedFirstStepIndex": 0,
+            "strategy": "activation_first"
+          }
+        }
+      }
+    ''');
+
+    expect(result.isValid, isFalse);
+    expect(result.response.proposal, isNull);
+    expect(result.response.dialogue, contains('remain safe'));
+  });
+
+  test('rejects nested task breakdown steps', () {
+    final result = parser.parseRaw('''
+      {
+        "dialogue": "Here are the steps.",
+        "proposal": {
+          "type": "break_down_task_draft",
+          "requiresConfirmation": true,
+          "confirmationPrompt": "Use these steps?",
+          "payload": {
+            "title": "Clean the garage",
+            "steps": [
+              {"title": "Sort tools", "subtasks": [{"title": "Find hammer"}]},
+              {"title": "Sweep the floor"}
+            ],
+            "suggestedFirstStepIndex": 0,
+            "strategy": "activation_first"
+          }
+        }
+      }
+    ''');
+
+    expect(result.isValid, isFalse);
+    expect(result.response.proposal, isNull);
+  });
+
+  test('rejects an out-of-range suggested first step', () {
+    final result = parser.parseRaw('''
+      {
+        "dialogue": "Here are the steps.",
+        "proposal": {
+          "type": "break_down_task_draft",
+          "requiresConfirmation": true,
+          "confirmationPrompt": "Use these steps?",
+          "payload": {
+            "title": "Clean the garage",
+            "steps": [
+              {"title": "Get a trash bag"},
+              {"title": "Throw away obvious trash"}
+            ],
+            "suggestedFirstStepIndex": 2,
+            "strategy": "activation_first"
+          }
+        }
+      }
+    ''');
+
+    expect(result.isValid, isFalse);
+    expect(result.response.proposal, isNull);
+  });
+
   test('replaces dialogue when an unknown proposal could claim unsafe action',
       () {
     final result = parser.parseRaw('''
