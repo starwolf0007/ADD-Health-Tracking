@@ -1,0 +1,59 @@
+diff --git a/lib/presentation/today_screen.dart b/lib/presentation/today_screen.dart
+index 92a799b..5618b17 100644
+--- a/lib/presentation/today_screen.dart
++++ b/lib/presentation/today_screen.dart
+@@ -15,6 +15,7 @@ import 'package:neuroflow/executive/planner.dart';
+ import 'package:neuroflow/executive/timeline_logic.dart';
+ import 'package:neuroflow/presentation/widgets/capture_sheet.dart';
+ import 'package:neuroflow/presentation/widgets/due_routines_card.dart';
++import 'package:neuroflow/presentation/widgets/mood_check_in.dart';
+ 
+ class TodayScreen extends ConsumerStatefulWidget {
+   final DateTime? now;
+@@ -219,6 +220,14 @@ class _TodayTimelineBody extends ConsumerWidget {
+             const SizedBox(height: AppSpace.md),
+             const DueRoutinesCard(),
+           ],
++          // Mood check-in strip (PR #38). Same signal as Reflect; second
++          // entry point so a rough day does not require navigating away to
++          // reshape Today. Collapses to whole-row summary after log; reopen
++          // via expand_more. Shown in both modes — revision stays possible.
++          if (isViewingToday) ...[
++            const SizedBox(height: AppSpace.md),
++            const MoodCheckInStrip(),
++          ],
+           if (isQuickWins) ...[
+             // Reduced Quick Wins state: the capped list, real commitments, and
+             // the permission-to-stop label — and nothing else. No full-day
+diff --git a/test/today_screen_test.dart b/test/today_screen_test.dart
+index 23284b7..5b019fa 100644
+--- a/test/today_screen_test.dart
++++ b/test/today_screen_test.dart
+@@ -1,6 +1,7 @@
+ import 'package:flutter/material.dart';
+ import 'package:flutter_riverpod/flutter_riverpod.dart';
+ import 'package:flutter_test/flutter_test.dart';
++import 'package:neuroflow/app/mood_providers.dart';
+ import 'package:neuroflow/app/providers.dart';
+ import 'package:neuroflow/data/task_repository.dart';
+ import 'package:neuroflow/domain/mood.dart';
+@@ -304,6 +305,9 @@ Widget _app(TodayTimelineData data, DateTime now) {
+     overrides: [
+       todayTimelineProvider.overrideWith((ref) async => data),
+       displayNameProvider.overrideWith((ref) async => 'Bryan'),
++      // Check-in strip watches this; without override the real Drift path
++      // opens and its timers outlive the test.
++      todayMoodProvider.overrideWith((ref) => Stream<MoodLog?>.value(null)),
+     ],
+     child: MaterialApp(
+       theme: AppTheme.dark(),
+@@ -318,6 +322,9 @@ Widget _interactiveApp(_FakeTaskRepository repository, DateTime now) {
+       taskRepositoryProvider.overrideWithValue(repository),
+       advisorTierProvider.overrideWith(() => AdvisorTierNotifier()),
+       displayNameProvider.overrideWith((ref) async => 'Bryan'),
++      // As in _app: the check-in strip watches this, and without an override
++      // it opens the real Drift database, whose timers outlive the test.
++      todayMoodProvider.overrideWith((ref) => Stream<MoodLog?>.value(null)),
+       todayTimelineProvider.overrideWith((ref) async {
+         final task = await repository.getById('task');
+         return TodayTimelineData(
