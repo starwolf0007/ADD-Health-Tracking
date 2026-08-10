@@ -35,11 +35,31 @@ android {
         versionName = flutter.versionName
     }
 
+    // Test-build signing: CI provides TEST_KEYSTORE_PATH/PASSWORD/ALIAS to sign
+    // with the stable test key so app updates install cleanly between runs.
+    // Falls back to debug signing when those env vars aren't set, so local
+    // `flutter run --release` keeps working unmodified.
+    signingConfigs {
+        create("test") {
+            val keystorePath = System.getenv("TEST_KEYSTORE_PATH")
+            if (keystorePath != null) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("TEST_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("TEST_KEY_ALIAS")
+                keyPassword = System.getenv("TEST_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (System.getenv("TEST_KEYSTORE_PATH") != null) {
+                signingConfigs.getByName("test")
+            } else {
+                // Signing with the debug keys for now, so `flutter run --release` works.
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

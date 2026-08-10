@@ -23,6 +23,11 @@ lib/data/database.g.dart
 # Gradle wrapper (gradlew, gradlew.bat, gradle-wrapper.jar) IS committed —
 # required for CI and any clone to build/test without a pre-installed Gradle.
 
+# Signing key material — never commit a keystore or its passwords.
+*.jks
+*.keystore
+key.properties
+
 # iOS
 **/ios/**/*.mode1v3
 **/ios/**/*.mode2v3
