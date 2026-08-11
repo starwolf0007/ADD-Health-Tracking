@@ -35,11 +35,32 @@ android {
         versionName = flutter.versionName
     }
 
+    // Stable signing identity for manually-distributed test builds (see
+    // .github/workflows/test-build.yml). Only active when TEST_KEYSTORE_PATH
+    // is set in the environment; local/default CI builds are unaffected and
+    // keep using debug signing below.
+    signingConfigs {
+        create("test") {
+            val keystorePath = System.getenv("TEST_KEYSTORE_PATH")
+            if (keystorePath != null) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("TEST_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("TEST_KEY_ALIAS")
+                keyPassword = System.getenv("TEST_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Signing with the debug keys for now, so `flutter run --release` works,
+            // unless a test-build keystore is provided via TEST_KEYSTORE_PATH.
+            signingConfig = if (System.getenv("TEST_KEYSTORE_PATH") != null) {
+                signingConfigs.getByName("test")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }
