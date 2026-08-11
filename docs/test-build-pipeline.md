@@ -24,6 +24,7 @@ history or process listings:
 ```bash
 read -s -p "Enter a new strong password (won't echo): " KEYSTORE_PASS
 echo
+export KEYSTORE_PASS
 keytool -genkeypair -v \
   -keystore neuroflow-test.jks \
   -storetype JKS \
@@ -34,28 +35,35 @@ keytool -genkeypair -v \
   -dname "CN=NeuroFlow Test, OU=Personal, O=Bryan, L=Oakland, ST=CA, C=US"
 ```
 
-Back up `neuroflow-test.jks` itself now — a base64 blob in a password manager
-or encrypted note, not just the password. GitHub Secrets are write-only; if
-the file is lost, no future update-compatible build can ever be produced:
+Back up `neuroflow-test.jks` itself now, not just the password. GitHub Secrets
+are write-only; if the file is lost, no future update-compatible build can
+ever be produced. Create and verify a backup file without printing its contents
+to terminal scrollback:
 
 ```bash
-base64 -w 0 neuroflow-test.jks | pbcopy 2>/dev/null || base64 -w 0 neuroflow-test.jks
-# paste that output into your password manager as "NeuroFlow test keystore (base64)"
+base64 -w 0 neuroflow-test.jks > neuroflow-test.jks.backup.b64
+base64 -d neuroflow-test.jks.backup.b64 > /tmp/neuroflow-test-restored.jks
+cmp --silent neuroflow-test.jks /tmp/neuroflow-test-restored.jks
+rm /tmp/neuroflow-test-restored.jks
 ```
+
+Download `neuroflow-test.jks.backup.b64` through the Codespaces file browser
+and store it in a durable private location. Confirm the downloaded backup is
+present before deleting either local keystore file. Never print or paste the
+base64 blob into a terminal or agent conversation.
 
 ## 2. Push the keystore + password to GitHub Secrets
 
 ```bash
-base64 -w 0 neuroflow-test.jks > neuroflow-test.jks.b64
-gh secret set TEST_KEYSTORE_BASE64 < neuroflow-test.jks.b64
+gh secret set TEST_KEYSTORE_BASE64 < neuroflow-test.jks.backup.b64
 gh secret set TEST_KEYSTORE_PASSWORD < <(printf '%s' "$KEYSTORE_PASS")
 gh secret set TEST_KEY_ALIAS -b "neuroflow-test"
 
-rm neuroflow-test.jks.b64          # keep neuroflow-test.jks locally until the backup is confirmed
 unset KEYSTORE_PASS
 ```
 
-Only delete the local `neuroflow-test.jks` after confirming the base64 backup
+Only delete the local `neuroflow-test.jks` and
+`neuroflow-test.jks.backup.b64` after confirming the downloaded backup
 actually landed somewhere durable.
 
 ## 3. One-time Firebase App Distribution setup
@@ -119,9 +127,6 @@ after that upgrades cleanly since the signing key stays constant.
   first upload (see step 3).
 - `main`-only trigger, no arbitrary-ref input — deliberate, keeps the
   pipeline simple while secrets are involved.
-- Firebase upload uses the third-party `wzieba/Firebase-Distribution-Github-Action`,
-  which receives the service-account JSON. Swap for the official
-  `firebase-tools` CLI (`firebase appdistribution:distribute <apk> --app
-  <FIREBASE_APP_ID> --groups testers` with `GOOGLE_APPLICATION_CREDENTIALS`
-  pointed at the decoded service-account JSON) if avoiding a third-party
-  Action is preferred — same trust boundary, one less external dependency.
+- Firebase upload uses the official `firebase-tools` CLI pinned to the version
+  recorded in `.github/workflows/test-build.yml`. Update that pin deliberately
+  after reviewing Firebase CLI release notes.
