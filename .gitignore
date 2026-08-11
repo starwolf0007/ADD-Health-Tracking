@@ -23,6 +23,12 @@ lib/data/database.g.dart
 # Gradle wrapper (gradlew, gradlew.bat, gradle-wrapper.jar) IS committed —
 # required for CI and any clone to build/test without a pre-installed Gradle.
 
+# Test-build signing keystore — decoded from the TEST_KEYSTORE_BASE64 secret
+# at CI time (see .github/workflows/test-build.yml). Never commit the real key.
+*.jks
+*.keystore
+key.properties
+
 # iOS
 **/ios/**/*.mode1v3
 **/ios/**/*.mode2v3
