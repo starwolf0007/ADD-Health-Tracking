@@ -47,6 +47,8 @@ dependencies:
   # Both are Phase 2 / §14 items. Stubs are in executive/planner.dart.
 
   firebase_core: ^4.11.0
+  firebase_crashlytics: ^5.2.7
+  firebase_analytics: ^12.4.6
 
 dev_dependencies:
   flutter_test:
