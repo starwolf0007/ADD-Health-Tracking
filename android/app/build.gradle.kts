@@ -5,12 +5,13 @@ plugins {
 }
 
 // google-services.json is intentionally untracked. Configured developer/CI
-// builds still get Firebase resources; local offline-capable builds do not fail
-// merely because the optional Firebase configuration is absent.
+// builds get Firebase resources plus Crashlytics mapping support; local
+// offline-capable builds do not fail merely because Firebase config is absent.
 if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
+    apply(plugin = "com.google.firebase.crashlytics")
 } else {
-    logger.lifecycle("google-services.json not found; Google Services processing is disabled.")
+    logger.lifecycle("google-services.json not found; Google Services and Crashlytics processing are disabled.")
 }
 
 android {
