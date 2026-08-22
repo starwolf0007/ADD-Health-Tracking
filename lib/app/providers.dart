@@ -314,9 +314,18 @@ class TodayController extends AsyncNotifier<TodayState> {
     await ref.read(taskActionControllerProvider).complete(taskId);
   }
 
-  void snoozeForSession(String taskId) {
+  Future<void> snoozeForSession(String taskId) async {
     _snoozedIds.add(taskId);
-    ref.invalidateSelf();
+    final pending = await ref.read(taskRepositoryProvider).watchPending().first;
+    final todayMood =
+        await ref.read(moodRepositoryProvider).watchTodayLatest().first;
+    state = AsyncData(
+      await _computeState(
+        pending,
+        DayCapacity(latestMood: todayMood?.level),
+        refine: false,
+      ),
+    );
   }
 
   /// Explicit, user-initiated Lexi refinement of the current plan's reason.
@@ -539,8 +548,8 @@ class TaskActionController {
     }
   }
 
-  void notNow(String id) {
-    ref.read(todayControllerProvider.notifier).snoozeForSession(id);
+  Future<void> notNow(String id) async {
+    await ref.read(todayControllerProvider.notifier).snoozeForSession(id);
     ref.invalidate(todayTimelineProvider);
   }
 
