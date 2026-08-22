@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:neuroflow/app/bootstrap.dart';
+import 'package:neuroflow/core/diagnostics/startup_diagnostics.dart';
 import 'package:neuroflow/presentation/app_shell.dart';
 import 'package:neuroflow/presentation/theme.dart';
 import 'package:neuroflow/presentation/widgets/achievement_toast.dart';
@@ -21,6 +22,9 @@ Future<void> main() async {
   // Firebase config is intentionally optional for offline/local builds. CI and
   // distributed test builds restore google-services.json before compilation.
   final crashReportingReady = await _initFirebaseCrashReporting();
+  StartupDiagnostics.configure(enabled: crashReportingReady);
+  await StartupDiagnostics.recordBuildMetadata();
+  await StartupDiagnostics.checkpoint('firebase', status: 'ready');
 
   // Create the shared container for early-initialization.
   final container = ProviderContainer();
@@ -31,12 +35,16 @@ Future<void> main() async {
     await AppBootstrap.init(container);
   } catch (error, stack) {
     if (crashReportingReady) {
-      await FirebaseCrashlytics.instance.recordError(
-        error,
-        stack,
-        fatal: true,
-        reason: 'AppBootstrap.init failed during startup',
-      );
+      try {
+        await FirebaseCrashlytics.instance.recordError(
+          error,
+          stack,
+          fatal: true,
+          reason: 'AppBootstrap.init failed during startup',
+        );
+      } catch (_) {
+        // Diagnostics must never replace or mask the original startup failure.
+      }
     }
     rethrow;
   }
