@@ -21,5 +21,9 @@ final firestoreBackendProvider = Provider<FirestoreBackend>((ref) {
 
 final cloudSyncAvailableProvider = Provider<bool>((ref) {
   if (!FirebaseAuthService.isFirebaseReady) return false;
-  return ref.watch(firebaseUserProvider).valueOrNull != null;
+  return ref.watch(firebaseUserProvider).when(
+        data: (user) => user != null,
+        loading: () => false,
+        error: (_, __) => false,
+      );
 });
