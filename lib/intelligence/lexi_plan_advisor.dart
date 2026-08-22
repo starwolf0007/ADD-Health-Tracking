@@ -6,12 +6,16 @@
 //   • On-device by default. Cloud Gemini requires explicit user opt-in.
 //   • NEVER throws — always returns plan unchanged on any error.
 //   • Falls back to NoOpPlanAdvisor behaviour silently if Gemini Nano
-//     is unavailable (device doesn't support it, SDK not yet stable, etc.)
+//     is unavailable (device doesn't support it, model not downloaded,
+//     unsupported hardware, etc.)
 //
-// Status: Gemini Nano has no stable Flutter package as of spec v1.4.
-//   The platform channel bridge below is the intended integration point.
-//   Until the SDK stabilises, LexiPlanAdvisor returns NoOp results.
-//   Swap _callOnDeviceLLM() when the package lands.
+// Status: Implemented. LexiBridge.kt (android/app/.../lexi/) wires a real
+//   com.google.ai.edge.aicore GenerativeModel session — this is not a NoOp.
+//   Not independently Verified on-device in this environment: Gemini Nano/
+//   AICore requires specific Pixel hardware with the feature available, which
+//   this Windows dev environment cannot provide. `flutter analyze`/`flutter
+//   test` and a native Gradle compile+unit-test pass are the verification
+//   that exists; on-device inference behavior itself needs a real device run.
 //
 // See: https://ai.google.dev/edge/mediapipe/solutions/genai/llm_inference/android
 
