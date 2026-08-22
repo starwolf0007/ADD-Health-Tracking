@@ -10,7 +10,8 @@ import 'package:neuroflow/platform/google/google_sign_in_bootstrap.dart';
 /// shared GoogleSignIn singleton out when FirebaseAuth signs out, because that
 /// singleton is also used by the independent Google Tasks integration.
 class FirebaseAuthService {
-  FirebaseAuthService({FirebaseAuth? auth}) : _auth = auth ?? FirebaseAuth.instance;
+  FirebaseAuthService({FirebaseAuth? auth})
+      : _auth = auth ?? FirebaseAuth.instance;
 
   final FirebaseAuth _auth;
 
@@ -62,7 +63,10 @@ class FirebaseAuthService {
       throw StateError('Google Sign-In is not supported on this platform.');
     }
 
-    final GoogleSignInAccount account = await signIn.authenticate();
+    final account = await signIn.authenticate();
+    if (account == null) {
+      throw StateError('Google Sign-In did not return an account.');
+    }
     final GoogleSignInAuthentication authentication = account.authentication;
     final idToken = authentication.idToken;
     if (idToken == null || idToken.isEmpty) {
