@@ -52,37 +52,48 @@ class HevyRepository implements HevyWorkoutSink, HevySyncMetadataSink {
           ),
         );
 
+    final exercises = <HevyExercisesCompanion>[];
+    final sets = <HevySetsCompanion>[];
     for (final exercise in workout.exercises) {
       final exerciseId = '${workout.id}:${exercise.index}';
-      await _database.into(_database.hevyExercises).insert(
-            HevyExercisesCompanion.insert(
-              id: exerciseId,
-              workoutId: workout.id,
-              position: exercise.index,
-              title: exercise.title,
-              notes: Value(exercise.notes),
-              exerciseTemplateId: exercise.exerciseTemplateId,
-              supersetId: Value(exercise.supersetId),
-            ),
-          );
+      exercises.add(
+        HevyExercisesCompanion.insert(
+          id: exerciseId,
+          workoutId: workout.id,
+          position: exercise.index,
+          title: exercise.title,
+          notes: Value(exercise.notes),
+          exerciseTemplateId: exercise.exerciseTemplateId,
+          supersetId: Value(exercise.supersetId),
+        ),
+      );
       for (final set in exercise.sets) {
-        await _database.into(_database.hevySets).insert(
-              HevySetsCompanion.insert(
-                id: '$exerciseId:${set.index}',
-                exerciseId: exerciseId,
-                position: set.index,
-                type: set.type,
-                weightKg: Value(set.weightKg?.toDouble()),
-                reps: Value(set.reps),
-                distanceMeters: Value(set.distanceMeters),
-                durationSeconds: Value(set.durationSeconds),
-                rpe: Value(set.rpe?.toDouble()),
-                customMetric: Value(set.customMetric),
-                rawJson: jsonEncode(set.raw),
-              ),
-            );
+        sets.add(
+          HevySetsCompanion.insert(
+            id: '$exerciseId:${set.index}',
+            exerciseId: exerciseId,
+            position: set.index,
+            type: set.type,
+            weightKg: Value(set.weightKg?.toDouble()),
+            reps: Value(set.reps),
+            distanceMeters: Value(set.distanceMeters),
+            durationSeconds: Value(set.durationSeconds),
+            rpe: Value(set.rpe?.toDouble()),
+            customMetric: Value(set.customMetric),
+            rawJson: jsonEncode(set.raw),
+          ),
+        );
       }
     }
+
+    await _database.batch((batch) {
+      if (exercises.isNotEmpty) {
+        batch.insertAll(_database.hevyExercises, exercises);
+      }
+      if (sets.isNotEmpty) {
+        batch.insertAll(_database.hevySets, sets);
+      }
+    });
   }
 
   Future<List<HevyWorkoutRow>> getWorkouts() =>
@@ -90,23 +101,31 @@ class HevyRepository implements HevyWorkoutSink, HevySyncMetadataSink {
             ..orderBy([(row) => OrderingTerm.desc(row.startTime)]))
           .get();
 
-  Stream<int> watchImportedWorkoutCount() => _database
-      .select(_database.hevyWorkouts)
-      .watch()
-      .map((rows) => rows.length);
+  Stream<int> watchImportedWorkoutCount() {
+    final query = _database.customSelect(
+      'SELECT COUNT(*) AS workout_count FROM hevy_workouts',
+      readsFrom: {_database.hevyWorkouts},
+    );
+    return query.watchSingle().map((row) => row.read<int>('workout_count'));
+  }
 
   Stream<List<HevyWorkoutSummary>> watchRecentWorkouts({int limit = 10}) {
     final query = _database.customSelect(
       '''
+      WITH recent_workouts AS (
+        SELECT id, title, start_time, end_time
+          FROM hevy_workouts
+         ORDER BY start_time DESC
+         LIMIT ?
+      )
       SELECT w.id, w.title, w.start_time, w.end_time,
              COUNT(DISTINCT e.id) AS exercise_count,
              COUNT(s.id) AS set_count
-        FROM hevy_workouts w
+        FROM recent_workouts w
         LEFT JOIN hevy_exercises e ON e.workout_id = w.id
         LEFT JOIN hevy_sets s ON s.exercise_id = e.id
-       GROUP BY w.id
+       GROUP BY w.id, w.title, w.start_time, w.end_time
        ORDER BY w.start_time DESC
-       LIMIT ?
       ''',
       variables: [Variable.withInt(limit)],
       readsFrom: {
