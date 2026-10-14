@@ -1,6 +1,7 @@
 import 'dart:async' show unawaited;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:neuroflow/app/providers.dart';
@@ -54,11 +55,6 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
     final selectedDay = ref.watch(selectedDayProvider);
     final currentDay = ref.watch(currentDayProvider);
     final isViewingToday = isSameDay(selectedDay, currentDay);
-    // Watch the Quick Wins decision at the screen level (not only inside the
-    // body): the body is built lazily inside timeline.when(data:), so relying
-    // on its watch alone lets the controller start resolving a frame late and
-    // the reduced view lag behind the timeline. Watching here keeps it eager
-    // and rebuilds Today when the mode flips.
     ref.watch(todayControllerProvider);
     final realNow = widget.now ?? DateTime.now();
     final phaseNow = isViewingToday
@@ -87,9 +83,6 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
         data: (data) {
           _scrollNearNow();
           return _TodayTimelineBody(
-            // Fresh subtree per viewed day. Quick Wins entry/exit is the
-            // Executive's decision (read inside the body), not view state —
-            // there is no per-session disclosure to preserve or reset.
             key: ValueKey(
               'today-body-${dateOnly(selectedDay).toIso8601String()}',
             ),
@@ -114,12 +107,6 @@ class _TodayScreenState extends ConsumerState<TodayScreen> {
   }
 }
 
-/// Single definition of Quick Wins activation.
-///
-/// Both the reduced view in [_TodayTimelineBody] and the reset key in
-/// [_TodayScreenState] read this, so the two can never disagree about whether
-/// the mode is on. Scoped to the day the mood signal is about: browsing
-/// another day always shows that day's real schedule.
 bool _quickWinsActive(TodayState? state, {required bool isViewingToday}) =>
     isViewingToday &&
     state != null &&
@@ -157,17 +144,11 @@ class _TodayTimelineBody extends ConsumerWidget {
       (item) => item.phaseAt(now) != TimelinePhase.past,
     );
 
-    // Quick Wins reshape (#37). Entry AND exit are the Executive's job, driven
-    // by the mood signal; Presentation only reads the decision. Per the LOCKED
-    // v1.3 spec (§158/§170) there is no manual toggle and no user action to
-    // enter, leave, or maintain the reduced state.
     final todayState = ref.watch(todayControllerProvider).value;
     final isQuickWins =
         _quickWinsActive(todayState, isViewingToday: isViewingToday);
     final quickWinTasks = isQuickWins ? todayState!.quickWins : const <Task>[];
 
-    // Commitments stay visible even in the reduced view. Hiding a real shift
-    // or appointment would make a calm screen a dishonest one.
     final fixedItems = [
       for (final item in dayItems)
         if (item.type == TimelineItemType.fixedAnchor ||
@@ -176,9 +157,6 @@ class _TodayTimelineBody extends ConsumerWidget {
     ];
 
     return RefreshIndicator(
-      // Quick Wins mode comes from todayControllerProvider, so refreshing only
-      // the timeline could leave a stale reduction (or a stale full day) on
-      // screen. Pull-to-refresh means "re-derive this screen".
       onRefresh: () async {
         ref.invalidate(todayControllerProvider);
         ref.invalidate(dueRoutinesProvider);
@@ -200,29 +178,17 @@ class _TodayTimelineBody extends ConsumerWidget {
           const SizedBox(height: AppSpace.md),
           _DaySummaryCard(
             data: data,
-            // The Executive plan is derived for Today. Browsing another date
-            // must not carry today's capacity explanation into that day's
-            // otherwise-independent schedule.
             reason: isViewingToday ? todayState?.reason ?? '' : '',
           ),
           if (!data.hasCalendarPermission) ...[
             const SizedBox(height: AppSpace.md),
             const _CalendarPermissionNotice(),
           ],
-          // Gate 1: due routines one-tap start (PR #51). Today only —
-          // browsing another day must not surface "due now" for the current
-          // clock. Shown in both Quick Wins and normal mode: a routine
-          // reduces decision load exactly when it's needed most (confirmed
-          // with Bryan 2026-08-01) — same precedent as fixed commitments
-          // staying visible during the reshape.
           if (isViewingToday) ...[
             const SizedBox(height: AppSpace.md),
             const DueRoutinesCard(),
           ],
           if (isQuickWins) ...[
-            // Reduced Quick Wins state: the capped list, real commitments, and
-            // the permission-to-stop label — and nothing else. No full-day
-            // access; exit is automatic when the signal lifts (§158/§170).
             const SizedBox(height: AppSpace.lg),
             _QuickWinsCard(tasks: quickWinTasks),
             if (fixedItems.isNotEmpty) ...[
@@ -270,11 +236,6 @@ class _TodayTimelineBody extends ConsumerWidget {
   }
 }
 
-/// The Quick Wins surface (#37): at most three low-effort options, already
-/// selected and capped by the Executive.
-///
-/// Deliberately carries no count, score, or progress figure — §13 forbids
-/// visible numeric self-judgment, and the short list is the whole message.
 class _QuickWinsCard extends StatelessWidget {
   final List<Task> tasks;
 
@@ -288,16 +249,34 @@ class _QuickWinsCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.surfaceRaised,
         borderRadius: BorderRadius.circular(AppSpace.radiusCard),
+        border: Border.all(
+          color: AppColors.accent.withValues(alpha: 0.22),
+          width: 1,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x0F000000),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const LexiAvatar(
-                visualState: LexiVisualState.idle,
-                assetPath: 'assets/lexi/public/lexi-canonical-face.jpg',
-                size: 30,
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: AppColors.accentWash,
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.bolt_rounded,
+                  size: 16,
+                  color: AppColors.accent,
+                ),
               ),
               const SizedBox(width: AppSpace.sm),
               Expanded(
@@ -314,7 +293,10 @@ class _QuickWinsCard extends StatelessWidget {
             style: AppTextStyles.bodySmall,
           ),
           const SizedBox(height: AppSpace.md),
-          for (final task in tasks) _QuickWinRow(task: task),
+          for (var i = 0; i < tasks.length; i++) ...[
+            if (i > 0) const SizedBox(height: AppSpace.sm),
+            _QuickWinRow(task: tasks[i]),
+          ],
         ],
       ),
     );
@@ -332,38 +314,48 @@ class _QuickWinRow extends ConsumerWidget {
       container: true,
       button: true,
       label: 'Quick win, ${task.title}, tap when done',
-      child: InkWell(
-        key: ValueKey('quick-win-${task.id}'),
+      child: Material(
+        color: AppColors.surfaceGlass,
         borderRadius: BorderRadius.circular(AppSpace.radiusInput),
-        onTap: () => _complete(context, ref),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
-          child: Row(
-            children: [
-              const Icon(
-                Icons.check_box_outline_blank_rounded,
-                size: 18,
-                color: AppColors.textSecondary,
+        child: InkWell(
+          key: ValueKey('quick-win-${task.id}'),
+          borderRadius: BorderRadius.circular(AppSpace.radiusInput),
+          onTap: () => _complete(context, ref),
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpace.md,
+              vertical: AppSpace.md,
+            ),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppSpace.radiusInput),
+              border: Border.all(
+                color: AppColors.divider,
               ),
-              const SizedBox(width: AppSpace.md),
-              Expanded(
-                child: Text(task.title,
-                    style: AppTextStyles.bodyMedium,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis),
-              ),
-            ],
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.radio_button_unchecked_rounded,
+                  size: 20,
+                  color: AppColors.accent,
+                ),
+                const SizedBox(width: AppSpace.md),
+                Expanded(
+                  child: Text(task.title,
+                      style: AppTextStyles.bodyMedium,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis),
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  // §167: a Quick Win is one-tap *done*. Completing removes it from the
-  // pending pool, so the Executive re-derives and the capped list refills
-  // with the next low-effort candidate. There is no "start"/timer step here —
-  // the point is momentum, not task management.
   Future<void> _complete(BuildContext context, WidgetRef ref) async {
+    unawaited(HapticFeedback.lightImpact());
     try {
       await ref.read(taskActionControllerProvider).complete(task.id);
     } on TaskActionFailure catch (error) {
@@ -393,48 +385,66 @@ class _DateNavigator extends ConsumerWidget {
     final selected = ref.read(selectedDayProvider.notifier);
     return Semantics(
       label: 'Date navigation, $dateLabel',
-      child: Row(
-        children: [
-          IconButton(
-            key: const ValueKey('date-previous-day'),
-            tooltip: 'Previous day',
-            icon: const Icon(Icons.chevron_left_rounded),
-            onPressed: selected.previousDay,
-          ),
-          Expanded(
-            child: InkWell(
-              borderRadius: BorderRadius.circular(AppSpace.radiusInput),
-              onTap: () async {
-                final day = await showDatePicker(
-                  context: context,
-                  initialDate: selectedDay,
-                  firstDate: DateTime(2020),
-                  lastDate: DateTime(2035),
-                );
-                if (day != null) selected.select(day);
-              },
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
-                child: Text(
-                  dateLabel,
-                  textAlign: TextAlign.center,
-                  style: AppTextStyles.bodyMedium,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: AppSpace.xs),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceGlass,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: AppColors.divider),
+        ),
+        child: Row(
+          children: [
+            IconButton(
+              key: const ValueKey('date-previous-day'),
+              tooltip: 'Previous day',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.chevron_left_rounded),
+              onPressed: selected.previousDay,
+            ),
+            Expanded(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(AppSpace.radiusInput),
+                onTap: () async {
+                  final day = await showDatePicker(
+                    context: context,
+                    initialDate: selectedDay,
+                    firstDate: DateTime(2020),
+                    lastDate: DateTime(2035),
+                  );
+                  if (day != null) selected.select(day);
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+                  child: Text(
+                    dateLabel,
+                    textAlign: TextAlign.center,
+                    style: AppTextStyles.bodySmall.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-          IconButton(
-            key: const ValueKey('date-next-day'),
-            tooltip: 'Next day',
-            icon: const Icon(Icons.chevron_right_rounded),
-            onPressed: selected.nextDay,
-          ),
-          if (!isViewingToday)
-            TextButton(
-              onPressed: selected.goToToday,
-              child: const Text('Back to Today'),
+            IconButton(
+              key: const ValueKey('date-next-day'),
+              tooltip: 'Next day',
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.chevron_right_rounded),
+              onPressed: selected.nextDay,
             ),
-        ],
+            if (!isViewingToday)
+              Padding(
+                padding: const EdgeInsets.only(right: AppSpace.xs),
+                child: TextButton(
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  onPressed: selected.goToToday,
+                  child: const Text('Back to Today'),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -465,9 +475,6 @@ class _DaySummaryCard extends ConsumerWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(AppSpace.radiusCard),
         onTap: () {
-          // Explicit, user-initiated trigger for TodayController's opt-in
-          // Lexi refinement (ADR-001) — never called automatically. Tapping
-          // this card to open Lexi is the one intended explicit action.
           if (data.lexiAvailable) {
             unawaited(
               ref
@@ -484,6 +491,7 @@ class _DaySummaryCard extends ConsumerWidget {
           decoration: BoxDecoration(
             color: AppColors.surfaceGlass,
             borderRadius: BorderRadius.circular(AppSpace.radiusCard),
+            border: Border.all(color: AppColors.divider),
             boxShadow: const [
               BoxShadow(
                   color: Color(0x14000000),
@@ -492,12 +500,12 @@ class _DaySummaryCard extends ConsumerWidget {
             ],
           ),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               const LexiAvatar(
                 visualState: LexiVisualState.idle,
                 assetPath: 'assets/lexi/public/lexi-canonical-face.jpg',
-                size: 48,
+                size: 44,
                 subtleIdleAnimation: true,
               ),
               const SizedBox(width: AppSpace.md),
@@ -505,24 +513,32 @@ class _DaySummaryCard extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                        data.lexiAvailable
-                            ? 'A calm look ahead'
-                            : 'Your plan, on device',
-                        style: AppTextStyles.label
-                            .copyWith(color: AppColors.accent)),
-                    const SizedBox(height: AppSpace.sm),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                              data.lexiAvailable
+                                  ? 'A calm look ahead'
+                                  : 'Your plan, on device',
+                              style: AppTextStyles.label
+                                  .copyWith(color: AppColors.accent)),
+                        ),
+                        Text(
+                          data.lexiAvailable
+                              ? 'Tap to talk with Lexi'
+                              : 'Lexi is offline. Everything here still works.',
+                          style: AppTextStyles.bodySmall.copyWith(
+                            color: AppColors.textMuted,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpace.xs),
                     Text(const DaySummary().build(data),
                         style: AppTextStyles.bodyMedium),
-                    const SizedBox(height: AppSpace.sm),
-                    Text(
-                      data.lexiAvailable
-                          ? 'Tap to talk with Lexi'
-                          : 'Lexi is offline. Everything here still works.',
-                      style: AppTextStyles.bodySmall,
-                    ),
                     if (reason.isNotEmpty) ...[
-                      const SizedBox(height: AppSpace.sm),
+                      const SizedBox(height: AppSpace.xs),
                       Text(
                         reason,
                         style: AppTextStyles.bodySmall
@@ -532,6 +548,7 @@ class _DaySummaryCard extends ConsumerWidget {
                   ],
                 ),
               ),
+              const SizedBox(width: AppSpace.xs),
               const Icon(Icons.chevron_right, color: AppColors.textMuted),
             ],
           ),
@@ -550,416 +567,66 @@ class _ActiveTaskCard extends ConsumerWidget {
     final actions = ref.read(taskActionControllerProvider);
     final isPaused = task.status == TaskStatus.paused;
     final isActive = task.status == TaskStatus.inProgress;
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
       padding: const EdgeInsets.all(AppSpace.lg),
       decoration: BoxDecoration(
         color: AppColors.surfaceRaised,
         borderRadius: BorderRadius.circular(AppSpace.radiusCard),
+        border: Border.all(
+          color: isActive ? AppColors.accent : AppColors.divider,
+          width: isActive ? 1.5 : 1,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x12000000),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              LexiAvatar(
-                visualState: LexiVisualState.focus,
-                assetPath: 'assets/lexi/public/lexi-canonical-face.jpg',
-                size: 30,
-              ),
-              SizedBox(width: AppSpace.sm),
-              Expanded(
-                child: Text('Recommended now', style: AppTextStyles.label),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpace.md),
-          Text(task.title, style: AppTextStyles.titleMedium),
-          if (isActive && task.activeStartedAt != null) ...[
-            const SizedBox(height: AppSpace.sm),
-            _ActiveTaskTimer(startedAt: task.activeStartedAt!),
-          ],
-          if (task.notes?.isNotEmpty ?? false) ...[
-            const SizedBox(height: AppSpace.xs),
-            Text(task.notes!, style: AppTextStyles.bodySmall),
-          ],
-          const SizedBox(height: AppSpace.lg),
-          Wrap(
-            spacing: AppSpace.sm,
-            runSpacing: AppSpace.sm,
-            children: [
-              FilledButton.icon(
-                onPressed: isActive
-                    ? null
-                    : () async {
-                        try {
-                          if (isPaused) {
-                            await actions.resume(task.id);
-                          } else {
-                            await actions.start(task.id);
-                          }
-                          if (!context.mounted) return;
-                          unawaited(_showTimerPermissionHint(context, ref));
-                        } on TaskActionFailure catch (error) {
-                          if (!context.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content:
-                                  Text('Could not ${error.action}. Try again.'),
-                            ),
-                          );
-                        }
-                      },
-                icon: Icon(
-                    isPaused ? Icons.play_arrow_rounded : Icons.flag_outlined),
-                label: Text(isPaused
-                    ? 'Resume'
-                    : isActive
-                        ? 'Running'
-                        : 'Start'),
-              ),
-              OutlinedButton(
-                onPressed: () => _saveForLater(context, ref),
-                child: const Text('Save for later'),
-              ),
-              TextButton(
-                onPressed: () => actions.notNow(task.id),
-                child: const Text('Not now'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _saveForLater(BuildContext context, WidgetRef ref) async {
-    final last = TextEditingController();
-    final next = TextEditingController();
-    DateTime? returnAt;
-    try {
-      final saved = await showDialog<bool>(
-        context: context,
-        builder: (context) => StatefulBuilder(
-          builder: (context, setDialogState) => AlertDialog(
-            title: const Text('Save for later'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text(
-                    'A note can make returning easier, but every field is optional.',
-                    style: AppTextStyles.bodySmall,
-                  ),
-                  const SizedBox(height: AppSpace.md),
-                  TextField(
-                    controller: last,
-                    decoration: const InputDecoration(
-                      labelText: 'Last completed step (Optional)',
-                    ),
-                  ),
-                  TextField(
-                    controller: next,
-                    decoration: const InputDecoration(
-                      labelText: 'Exact next action (Optional)',
-                    ),
-                  ),
-                  ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.schedule_outlined),
-                    title: const Text('Return time (Optional)'),
-                    subtitle: Text(returnAt == null
-                        ? 'No return time'
-                        : '${returnAt!.month}/${returnAt!.day}  ${_time(returnAt)}'),
-                    onTap: () async {
-                      final picked = await _pickReturnTime(context);
-                      if (picked != null) {
-                        setDialogState(() => returnAt = picked);
-                      }
-                    },
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(context, true),
-                child: const Text('Save and pause'),
-              ),
-            ],
-          ),
-        ),
-      );
-      if (saved != true) return;
-
-      final lastStep = last.text.trim();
-      final nextAction = next.text.trim();
-      final hasNote =
-          lastStep.isNotEmpty || nextAction.isNotEmpty || returnAt != null;
-      try {
-        await ref.read(taskActionControllerProvider).saveForLater(
-              task.id,
-              hasNote
-                  ? ReentryNote(
-                      lastCompletedStep: lastStep.isEmpty ? null : lastStep,
-                      nextAction: nextAction.isEmpty ? null : nextAction,
-                      returnAt: returnAt,
-                      updatedAt: DateTime.now(),
-                    )
-                  : null,
-            );
-      } on TaskActionFailure catch (error) {
-        if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Could not ${error.action}. Try again.'),
-          ),
-        );
-      }
-    } finally {
-      last.dispose();
-      next.dispose();
-    }
-  }
-
-  Future<DateTime?> _pickReturnTime(BuildContext context) async {
-    final now = DateTime.now();
-    final date = await showDatePicker(
-      context: context,
-      initialDate: now,
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 365)),
-    );
-    if (date == null || !context.mounted) return null;
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.fromDateTime(now),
-    );
-    if (time == null) return null;
-    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
-  }
-
-  Future<void> _showTimerPermissionHint(
-      BuildContext context, WidgetRef ref) async {
-    final notifications = ref.read(notificationServiceProvider);
-    final enabled = await notifications.areNotificationsEnabled();
-    if (enabled != false || !context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: const Text(
-            'Allow notifications to see the task timer outside the app.'),
-        action: SnackBarAction(
-          label: 'Allow',
-          onPressed: () => unawaited(
-            notifications.requestNotificationPermission(),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ActiveTaskTimer extends StatelessWidget {
-  final DateTime startedAt;
-
-  const _ActiveTaskTimer({required this.startedAt});
-
-  @override
-  Widget build(BuildContext context) {
-    return StreamBuilder<int>(
-      stream: Stream<int>.periodic(const Duration(seconds: 1), (tick) => tick),
-      builder: (context, _) {
-        final elapsed = DateTime.now().difference(startedAt);
-        final safeElapsed = elapsed.isNegative ? Duration.zero : elapsed;
-        final hours = safeElapsed.inHours;
-        final minutes = safeElapsed.inMinutes.remainder(60);
-        final seconds = safeElapsed.inSeconds.remainder(60);
-        final value = hours > 0
-            ? '${hours.toString().padLeft(2, '0')}:'
-                '${minutes.toString().padLeft(2, '0')}:'
-                '${seconds.toString().padLeft(2, '0')}'
-            : '${minutes.toString().padLeft(2, '0')}:'
-                '${seconds.toString().padLeft(2, '0')}';
-        return Semantics(
-          liveRegion: true,
-          label: 'Task running for $value',
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.timer_outlined,
-                  size: 18, color: AppColors.accent),
-              const SizedBox(width: AppSpace.xs),
-              Text(value,
-                  key: const ValueKey('active-task-timer'),
-                  style: AppTextStyles.label.copyWith(
-                    color: AppColors.accent,
-                    fontFeatures: const [FontFeature.tabularFigures()],
-                  )),
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _TimelineRow extends ConsumerWidget {
-  final TimelineItem item;
-  final DateTime now;
-  const _TimelineRow({required this.item, required this.now});
-
-  Future<void> _editTask(BuildContext context) async {
-    final task = item.task;
-    if (task == null) return;
-    await showTaskEditSheet(context, task);
-  }
-
-  Future<void> _deleteTask(BuildContext context, WidgetRef ref) async {
-    final task = item.task;
-    if (task == null) return;
-    final shouldDelete = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete task?'),
-        content: Text('Delete “${task.title}” from your timeline?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (shouldDelete != true) return;
-
-    try {
-      if (task.status == TaskStatus.inProgress) {
-        await ref.read(taskActionControllerProvider).pause(task.id);
-      }
-      await ref.read(taskRepositoryProvider).delete(task.id);
-      ref.invalidate(todayControllerProvider);
-      ref.invalidate(todayTimelineProvider);
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Task deleted')),
-      );
-    } catch (_) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not delete task. Try again.')),
-      );
-    }
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final phase = item.phaseAt(now);
-    final dimmed = phase == TimelinePhase.past;
-    final icon = switch (item.type) {
-      TimelineItemType.calendarEvent => Icons.event_outlined,
-      TimelineItemType.fixedAnchor => Icons.anchor_rounded,
-      TimelineItemType.flexibleBlock => Icons.drag_indicator_rounded,
-      TimelineItemType.task => Icons.check_box_outline_blank_rounded,
-      TimelineItemType.openSpace => Icons.air_rounded,
-    };
-    // Muted type colors are a secondary signal only. Icon, marker geometry,
-    // visible type label, and semantics keep every type distinct in grayscale.
-    final color = switch (item.type) {
-      TimelineItemType.calendarEvent => AppColors.calendar,
-      TimelineItemType.fixedAnchor => AppColors.accent,
-      TimelineItemType.flexibleBlock => AppColors.textSecondary,
-      TimelineItemType.task => AppColors.textPrimary,
-      TimelineItemType.openSpace => AppColors.textMuted,
-    };
-    final typeLabel = _timelineTypeLabel(item.type);
-    return Semantics(
-      container: true,
-      button: item.task != null && !item.isCompleted,
-      label: '$typeLabel, ${item.title}, ${_phaseLabel(phase)}'
-          '${item.isPaused ? ', paused' : ''}',
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppSpace.radiusInput),
-        onTap: item.task == null || item.isCompleted
-            ? null
-            : () async {
-                final task = item.task!;
-                if (task.status == TaskStatus.inProgress) return;
-                try {
-                  final actions = ref.read(taskActionControllerProvider);
-                  if (task.status == TaskStatus.paused) {
-                    await actions.resume(task.id);
-                  } else {
-                    await actions.start(task.id);
-                  }
-                } on TaskActionFailure catch (error) {
-                  if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Could not ${error.action}. Try again.'),
-                    ),
-                  );
-                }
-              },
-        child: Opacity(
-          opacity: dimmed ? .55 : 1,
-          child: Padding(
-            padding: EdgeInsets.symmetric(vertical: item.isCompleted ? 4 : 7),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  width: 54,
-                  child:
-                      Text(_time(item.start), style: AppTextStyles.monoSmall),
-                ),
-                Column(
-                  children: [
-                    Container(width: 2, height: 8, color: AppColors.divider),
-                    _TimelineMarker(
-                      type: item.type,
-                      icon: item.isCompleted ? Icons.check_rounded : icon,
-                      color: color,
-                      completed: item.isCompleted,
-                    ),
-                    Container(
-                        width: 2,
-                        height: item.isCompleted ? 20 : 46,
-                        color: AppColors.divider),
-                  ],
-                ),
-                const SizedBox(width: AppSpace.md),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 7),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+         mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Row(
                           children: [
                             Expanded(
-                              child: Text(item.title,
-                                  style: item.isCompleted
-                                      ? AppTextStyles.bodySmall
-                                      : AppTextStyles.bodyMedium,
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis),
+                              child: Text(
+                                item.title,
+                                style: item.isCompleted
+                                    ? AppTextStyles.bodySmall.copyWith(
+                                        decoration: TextDecoration.lineThrough,
+                                      )
+                                    : AppTextStyles.bodyMedium,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
                             ),
                             if (item.isPaused)
-                              Text('Paused',
-                                  style: AppTextStyles.label
-                                      .copyWith(color: AppColors.warning)),
+                              Container(
+                                margin: const EdgeInsets.only(left: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color:
+                                      AppColors.warning.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text('Paused',
+                                    style: AppTextStyles.label
+                                        .copyWith(color: AppColors.warning)),
+                              ),
                             if (item.task != null) ...[
                               IconButton(
                                 key: ValueKey(
                                     'timeline-task-edit-${item.task!.id}'),
                                 tooltip: 'Edit timeline item',
+                                visualDensity: VisualDensity.compact,
+                                iconSize: 18,
+                                color: AppColors.textMuted,
                                 icon: const Icon(Icons.edit_outlined),
                                 onPressed: () => _editTask(context),
                               ),
@@ -967,6 +634,9 @@ class _TimelineRow extends ConsumerWidget {
                                 key: ValueKey(
                                     'timeline-task-delete-${item.task!.id}'),
                                 tooltip: 'Delete task',
+                                visualDensity: VisualDensity.compact,
+                                iconSize: 18,
+                                color: AppColors.textMuted,
                                 icon: const Icon(Icons.delete_outline),
                                 onPressed: () => _deleteTask(context, ref),
                               ),
@@ -982,9 +652,11 @@ class _TimelineRow extends ConsumerWidget {
                           ),
                         ),
                         if (!item.isCompleted &&
-                            item.subtitle?.isNotEmpty == true)
+                            item.subtitle?.isNotEmpty == true) ...[
+                          const SizedBox(height: 2),
                           Text(item.subtitle!,
                               style: AppTextStyles.bodySmall, maxLines: 2),
+                        ],
                       ],
                     ),
                   ),
@@ -1047,20 +719,23 @@ class _CurrentTimeMarker extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       label: 'Current time ${_time(now)}',
-      child: Row(
-        children: [
-          SizedBox(
-              width: 54,
-              child: Text(_time(now),
-                  style: AppTextStyles.monoSmall
-                      .copyWith(color: AppColors.accent))),
-          const CircleAvatar(radius: 5, backgroundColor: AppColors.accent),
-          const SizedBox(width: 6),
-          const Expanded(child: Divider(color: AppColors.accent)),
-          const SizedBox(width: 6),
-          Text('NOW',
-              style: AppTextStyles.label.copyWith(color: AppColors.accent)),
-        ],
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            SizedBox(
+                width: 56,
+                child: Text(_time(now),
+                    style: AppTextStyles.monoSmall
+                        .copyWith(color: AppColors.accent))),
+            const CircleAvatar(radius: 5, backgroundColor: AppColors.accent),
+            const SizedBox(width: 6),
+            const Expanded(child: Divider(color: AppColors.accent)),
+            const SizedBox(width: 6),
+            Text('NOW',
+                style: AppTextStyles.label.copyWith(color: AppColors.accent)),
+          ],
+        ),
       ),
     );
   }
@@ -1147,7 +822,6 @@ class _ErrorState extends StatelessWidget {
         ),
       );
 }
-
 String _time(DateTime? value) {
   if (value == null) return '';
   final hour = value.hour % 12 == 0 ? 12 : value.hour % 12;
