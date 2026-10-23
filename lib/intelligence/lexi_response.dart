@@ -9,6 +9,7 @@ enum LexiProposalType {
   setReminderDraft,
   preparePhoneCall,
   reduceInputMode,
+  breakDownTaskDraft,
 }
 
 extension LexiProposalTypeWireName on LexiProposalType {
@@ -21,6 +22,7 @@ extension LexiProposalTypeWireName on LexiProposalType {
         LexiProposalType.setReminderDraft => 'set_reminder_draft',
         LexiProposalType.preparePhoneCall => 'prepare_phone_call',
         LexiProposalType.reduceInputMode => 'reduce_input_mode',
+        LexiProposalType.breakDownTaskDraft => 'break_down_task_draft',
       };
 
   static LexiProposalType? fromWireName(String value) {
@@ -74,15 +76,45 @@ class LexiContextSnapshot {
       };
 }
 
+class LexiTaskBreakdownStep {
+  final String title;
+  final int? estimatedMinutes;
+
+  const LexiTaskBreakdownStep({
+    required this.title,
+    this.estimatedMinutes,
+  });
+}
+
+class LexiTaskBreakdownDraft {
+  final String? taskId;
+  final String title;
+  final List<LexiTaskBreakdownStep> steps;
+  final int suggestedFirstStepIndex;
+  final int? totalEstimatedMinutes;
+  final String strategy;
+
+  LexiTaskBreakdownDraft({
+    this.taskId,
+    required this.title,
+    required List<LexiTaskBreakdownStep> steps,
+    required this.suggestedFirstStepIndex,
+    this.totalEstimatedMinutes,
+    required this.strategy,
+  }) : steps = List.unmodifiable(steps);
+}
+
 class LexiProposal {
   final LexiProposalType type;
   final Map<String, Object?> payload;
   final String confirmationPrompt;
+  final LexiTaskBreakdownDraft? taskBreakdownDraft;
 
   const LexiProposal({
     required this.type,
     required this.payload,
     required this.confirmationPrompt,
+    this.taskBreakdownDraft,
   });
 }
 
@@ -122,7 +154,8 @@ class LexiResponseParseResult {
 class LexiResponseParser {
   static const _fallbackDialogue =
       'Lexi\'s response could not be parsed. Your tasks and local data remain safe.';
-
+  static const _maxStepTitleLength = 120;
+  static const _maxEstimatedMinutes = 480;
   const LexiResponseParser();
 
   LexiResponseParseResult parseRaw(String raw) {
@@ -155,8 +188,6 @@ class LexiResponseParser {
     } catch (error) {
       return LexiResponseParseResult(
         response: LexiResponse(
-          // A malformed or unknown proposal can be paired with text that
-          // wrongly claims an action happened. Do not display that claim.
           dialogue: _fallbackDialogue,
           contextUsedSummary: summary,
         ),
@@ -194,11 +225,12 @@ class LexiResponseParser {
       throw const FormatException('Proposal payload missing.');
     }
     final payload = Map<String, Object?>.from(payloadValue);
-    _validatePayload(type, payload);
+    final taskBreakdownDraft = _validatePayload(type, payload);
     return LexiProposal(
       type: type,
       payload: payload,
       confirmationPrompt: prompt.trim(),
+      taskBreakdownDraft: taskBreakdownDraft,
     );
   }
 
@@ -229,38 +261,136 @@ class LexiResponseParser {
         .toList();
   }
 
-  void _validatePayload(LexiProposalType type, Map<String, Object?> payload) {
+  LexiTaskBreakdownDraft? _validatePayload(
+    LexiProposalType type,
+    Map<String, Object?> payload,
+  ) {
     switch (type) {
       case LexiProposalType.startTask:
       case LexiProposalType.pauseTask:
         _requiredString(payload, 'taskId');
-        return;
+        return null;
       case LexiProposalType.createTaskDraft:
         _requiredString(payload, 'title');
-        return;
+        return null;
       case LexiProposalType.createRoutineDraft:
         _requiredString(payload, 'name');
-        return;
+        return null;
       case LexiProposalType.createReentryNote:
         _requiredString(payload, 'taskId');
         _requiredString(payload, 'nextAction');
-        return;
+        return null;
       case LexiProposalType.setReminderDraft:
         _requiredString(payload, 'title');
         _requiredString(payload, 'remindAt');
-        return;
+        return null;
       case LexiProposalType.preparePhoneCall:
         _requiredString(payload, 'title');
-        return;
+        return null;
       case LexiProposalType.reduceInputMode:
-        return;
+        return null;
+      case LexiProposalType.breakDownTaskDraft:
+        return _parseTaskBreakdown(payload);
     }
   }
 
-  void _requiredString(Map<String, Object?> payload, String key) {
+  LexiTaskBreakdownDraft _parseTaskBreakdown(Map<String, Object?> payload) {
+    final title = _requiredString(payload, 'title');
+    final taskId = _optionalString(payload, 'taskId');
+    final rawSteps = payload['steps'];
+    if (rawSteps is! List || rawSteps.length < 2 || rawSteps.length > 7) {
+      throw const FormatException('Task breakdown must contain 2 to 7 steps.');
+    }
+
+    final steps = <LexiTaskBreakdownStep>[];
+    for (final rawStep in rawSteps) {
+      if (rawStep is! Map) {
+        throw const FormatException('Task breakdown step was not an object.');
+      }
+      final step = Map<String, Object?>.from(rawStep);
+      if (step.containsKey('steps') || step.containsKey('subtasks')) {
+        throw const FormatException('Nested task breakdown steps are not supported.');
+      }
+      final stepTitle = _requiredString(step, 'title');
+      if (stepTitle.length > _maxStepTitleLength) {
+        throw const FormatException('Task breakdown step title is too long.');
+      }
+      final estimate = _boundedPositiveInt(
+        step['estimatedMinutes'],
+        'estimatedMinutes',
+        required: false,
+      );
+      steps.add(
+        LexiTaskBreakdownStep(
+          title: stepTitle,
+          estimatedMinutes: estimate,
+        ),
+      );
+    }
+
+    final firstStepIndex = _boundedPositiveInt(
+      payload['suggestedFirstStepIndex'],
+      'suggestedFirstStepIndex',
+      allowZero: true,
+      required: true,
+    )!;
+    if (firstStepIndex >= steps.length) {
+      throw const FormatException('Suggested first step index is out of range.');
+    }
+
+    final totalEstimate = _boundedPositiveInt(
+      payload['totalEstimatedMinutes'],
+      'totalEstimatedMinutes',
+      required: false,
+    );
+    final strategy = _optionalString(payload, 'strategy') ?? 'activation_first';
+    if (strategy != 'activation_first') {
+      throw const FormatException('Unsupported task breakdown strategy.');
+    }
+
+    return LexiTaskBreakdownDraft(
+      taskId: taskId,
+      title: title,
+      steps: steps,
+      suggestedFirstStepIndex: firstStepIndex,
+      totalEstimatedMinutes: totalEstimate,
+      strategy: strategy,
+    );
+  }
+
+  String _requiredString(Map<String, Object?> payload, String key) {
     final value = payload[key];
     if (value is! String || value.trim().isEmpty) {
       throw FormatException('Missing $key in proposal payload.');
     }
+    return value.trim();
+  }
+
+  String? _optionalString(Map<String, Object?> payload, String key) {
+    final value = payload[key];
+    if (value == null) return null;
+    if (value is! String || value.trim().isEmpty) {
+      throw FormatException('Invalid $key in proposal payload.');
+    }
+    return value.trim();
+  }
+
+  int? _boundedPositiveInt(
+    Object? value,
+    String key, {
+    required bool required,
+    bool allowZero = false,
+  }) {
+    if (value == null) {
+      if (required) throw FormatException('Missing $key in proposal payload.');
+      return null;
+    }
+    if (value is! int || value < (allowZero ? 0 : 1)) {
+      throw FormatException('Invalid $key in proposal payload.');
+    }
+    if (key != 'suggestedFirstStepIndex' && value > _maxEstimatedMinutes) {
+      throw FormatException('$key exceeds the supported maximum.');
+    }
+    return value;
   }
 }
