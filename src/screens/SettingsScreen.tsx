@@ -11,7 +11,11 @@ import {
   User as UserIcon,
   Cloud,
 } from 'lucide-react';
-import { AppSettings, settingsStorage } from '../lib/storage';
+import {
+  AppSettings,
+  settingsStorage,
+  resetCurrentLocalData,
+} from '../lib/storage';
 import { useFirebaseAuth } from '../lib/firebase';
 
 interface SettingsScreenProps {
@@ -33,7 +37,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [briefing, setBriefing] = useState(settings.morningBriefing);
   const [cloudGemini, setCloudGemini] = useState(settings.cloudGemini);
 
-  const { user, signInWithGoogle, signOut, syncStatus } = useFirebaseAuth();
+  const { user, signInWithGoogle, signOut, syncStatus, authError } =
+    useFirebaseAuth();
 
   const handleSaveName = (newName: string) => {
     setName(newName);
@@ -51,7 +56,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const handleToggleCloudGemini = () => {
     if (!cloudGemini) {
       const ok = window.confirm(
-        'Enable Cloud Gemini?\n\nTask titles and descriptions will be processed for smarter executive breakdown suggestions. Health data, energy logs, and private mood check-ins are NEVER shared and remain strictly on-device.\n\nYou can turn this off at any time.'
+        'Enable Cloud Gemini?\n\nMessages, conversation context, recorded audio, and location (when using Maps) are sent to Google Gemini. Do not include private health information in messages. Google sign-in is required.\n\nYou can turn this off at any time.',
       );
       if (!ok) return;
     }
@@ -64,10 +69,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const handleResetData = () => {
     if (
       window.confirm(
-        'Reset NeuroFlow data to initial clean state? This reloads the starter routines, habits, and tasks.'
+        'Reset this account’s local cache? Pending task/note uploads are retained. Cloud records will download again. Other accounts are unchanged.',
       )
     ) {
-      localStorage.clear();
+      resetCurrentLocalData();
       window.location.reload();
     }
   };
@@ -83,7 +88,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         </button>
         <div>
           <h2 className="text-lg font-semibold text-[#F0F0F0]">Settings</h2>
-          <p className="text-xs text-[#8A8A8E]">Preferences & Account Security</p>
+          <p className="text-xs text-[#8A8A8E]">
+            Preferences & Account Security
+          </p>
         </div>
       </div>
 
@@ -109,10 +116,14 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               )}
               <div>
                 <h4 className="text-sm font-medium text-[#F0F0F0]">
-                  {user ? user.displayName || 'Google Account' : 'Not signed in'}
+                  {user
+                    ? user.displayName || 'Google Account'
+                    : 'Not signed in'}
                 </h4>
                 <p className="text-xs text-[#8A8A8E]">
-                  {user ? user.email : 'Sign in to sync your tasks and habits with Firestore'}
+                  {user
+                    ? user.email
+                    : 'Tasks and notes sync after sign-in; other data stays on this device'}
                 </p>
               </div>
             </div>
@@ -140,7 +151,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <div className="pt-2 border-t border-[#232326] flex items-center justify-between text-xs text-[#8A8A8E]">
               <span className="flex items-center gap-1.5 text-[#2FB083]">
                 <Cloud className="w-3.5 h-3.5" />
-                Cloud Firestore connected
+                {syncStatus === 'synced'
+                  ? 'Tasks and notes synced'
+                  : syncStatus === 'error'
+                    ? 'Sync error — changes remain on device'
+                    : 'Syncing tasks and notes…'}
               </span>
               <span className="font-mono text-[10px] text-[#555559]">
                 UID: {user.uid.slice(0, 8)}…
@@ -150,13 +165,20 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         </div>
       </div>
 
+      {authError && (
+        <p role="alert" className="text-red-300 text-sm">
+          {authError}
+        </p>
+      )}
       {/* About you */}
       <div className="space-y-2">
         <span className="text-[11px] font-semibold tracking-wider text-[#555559] uppercase block">
           About you
         </span>
         <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326]">
-          <label className="text-xs text-[#8A8A8E] block mb-1">Display name</label>
+          <label className="text-xs text-[#8A8A8E] block mb-1">
+            Display name
+          </label>
           <input
             type="text"
             value={name}
@@ -183,7 +205,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 <CloudSync className="w-4 h-4" />
               </div>
               <div>
-                <h4 className="text-xs font-medium text-[#F0F0F0]">Connected Services</h4>
+                <h4 className="text-xs font-medium text-[#F0F0F0]">
+                  Connected Services
+                </h4>
                 <p className="text-[11px] text-[#8A8A8E]">
                   Google Tasks, Calendar, and Drive
                 </p>
@@ -201,7 +225,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 <Dumbbell className="w-4 h-4" />
               </div>
               <div>
-                <h4 className="text-xs font-medium text-[#F0F0F0]">Health Integrations</h4>
+                <h4 className="text-xs font-medium text-[#F0F0F0]">
+                  Health Integrations
+                </h4>
                 <p className="text-[11px] text-[#8A8A8E]">
                   Hevy connection and strength workouts
                 </p>
@@ -220,7 +246,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
 
         <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326] flex items-center justify-between">
           <div className="pr-4">
-            <h4 className="text-xs font-medium text-[#F0F0F0]">Morning briefing</h4>
+            <h4 className="text-xs font-medium text-[#F0F0F0]">
+              Morning briefing
+            </h4>
             <p className="text-[11px] text-[#8A8A8E] mt-0.5">
               A quiet nudge each morning showing how many tasks are waiting.
             </p>
@@ -249,9 +277,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326] space-y-3">
           <div className="flex items-center justify-between">
             <div className="pr-4">
-              <h4 className="text-xs font-medium text-[#F0F0F0]">Cloud Gemini breakdown</h4>
+              <h4 className="text-xs font-medium text-[#F0F0F0]">
+                Cloud Gemini breakdown
+              </h4>
               <p className="text-[11px] text-[#8A8A8E] mt-0.5">
-                Multi-model ADHD planning using gemini-4-argon, gemini-3.8-flash, and gemini-3.1-flash-lite.
+                Multi-model ADHD planning using gemini-4-argon,
+                gemini-3.8-flash, and gemini-3.1-flash-lite.
               </p>
             </div>
             <button
@@ -275,7 +306,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             </div>
             <div className="flex items-center justify-between">
               <span>Voice Transcription:</span>
-              <span className="text-[#2FB083] font-mono">gemini-3.5-transcribe</span>
+              <span className="text-[#2FB083] font-mono">
+                gemini-3.5-transcribe
+              </span>
             </div>
             <div className="flex items-center justify-between">
               <span>Search & Maps Grounding:</span>

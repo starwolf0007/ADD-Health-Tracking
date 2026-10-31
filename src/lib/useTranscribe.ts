@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { cloudFetch, requireCloudConsent } from './cloudClient';
+import { useState, useRef, useEffect } from 'react';
 
 export function useAudioTranscribe() {
   const [isRecording, setIsRecording] = useState(false);
@@ -11,9 +12,12 @@ export function useAudioTranscribe() {
   const startRecording = async (): Promise<boolean> => {
     setError(null);
     try {
+      requireCloudConsent();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '',
+        mimeType: MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : '',
       });
       mediaRecorderRef.current = mediaRecorder;
       chunksRef.current = [];
@@ -35,7 +39,10 @@ export function useAudioTranscribe() {
   };
 
   const stopAndTranscribe = async (): Promise<string | null> => {
-    if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') {
+    if (
+      !mediaRecorderRef.current ||
+      mediaRecorderRef.current.state === 'inactive'
+    ) {
       return null;
     }
 
@@ -55,13 +62,18 @@ export function useAudioTranscribe() {
 
           // Convert blob to base64
           const reader = new FileReader();
+          reader.onerror = () => {
+            setError('Could not read recorded audio.');
+            setIsTranscribing(false);
+            resolve(null);
+          };
           reader.readAsDataURL(blob);
           reader.onloadend = async () => {
             const base64Url = reader.result as string;
             const base64Data = base64Url.split(',')[1];
 
             try {
-              const res = await fetch('/api/gemini/transcribe', {
+              const res = await cloudFetch('/api/gemini/transcribe', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -98,14 +110,31 @@ export function useAudioTranscribe() {
   };
 
   const cancelRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stream.getTracks().forEach((track) => track.stop());
+    if (mediaRecorderRef.current) mediaRecorderRef.current.onstop = null;
+    if (
+      mediaRecorderRef.current &&
+      mediaRecorderRef.current.state !== 'inactive'
+    ) {
+      mediaRecorderRef.current.stream
+        .getTracks()
+        .forEach((track) => track.stop());
       mediaRecorderRef.current.stop();
     }
     chunksRef.current = [];
     setIsRecording(false);
     setIsTranscribing(false);
   };
+
+  useEffect(
+    () => () => {
+      const recorder = mediaRecorderRef.current;
+      if (recorder) {
+        recorder.onstop = null;
+        recorder.stream.getTracks().forEach((track) => track.stop());
+      }
+    },
+    [],
+  );
 
   return {
     isRecording,

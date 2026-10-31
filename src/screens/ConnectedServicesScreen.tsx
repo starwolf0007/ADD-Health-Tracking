@@ -1,3 +1,5 @@
+import { useFirebaseAuth } from '../lib/firebase';
+import { useNeuroStorage } from '../lib/storage';
 import React, { useState } from 'react';
 import {
   ArrowLeft,
@@ -15,61 +17,63 @@ interface ConnectedServicesScreenProps {
   onBack: () => void;
 }
 
-export const ConnectedServicesScreen: React.FC<ConnectedServicesScreenProps> = ({
-  onBack,
-}) => {
-  const [isConnected, setIsConnected] = useState(true);
-  const email = 'starwolf0007@gmail.com';
-  const name = 'Bryan';
+export const ConnectedServicesScreen: React.FC<
+  ConnectedServicesScreenProps
+> = ({ onBack }) => {
+  const { user, signInWithGoogle, signOut, authError } = useFirebaseAuth();
+  const { settings } = useNeuroStorage();
+  const isConnected = !!user;
+  const email = user?.email || 'Guest account';
+  const name = user?.displayName || 'Signed in';
 
   const services = [
     {
       name: 'Google Tasks',
       desc: 'Spine sync — 2-way task synchronization',
       icon: CheckCircle2,
-      status: 'Connected',
+      status: 'Not implemented',
       color: 'text-[#2FB083]',
     },
     {
       name: 'Google Calendar',
       desc: 'Absorbs scheduled times into calendar blocks',
       icon: Calendar,
-      status: 'Connected (read-only)',
+      status: 'Not implemented',
       color: 'text-[#7AA7A0]',
     },
     {
       name: 'Google Drive',
       desc: 'Lasting-value attachments & behavioral backup',
       icon: Cloud,
-      status: 'Available',
+      status: 'Not implemented',
       color: 'text-[#8A8A8E]',
     },
     {
       name: 'Health Connect',
       desc: 'Passive steps, sleep, resting HR ingestion boundary',
       icon: Heart,
-      status: 'Available',
+      status: 'Not implemented',
       color: 'text-[#8A8A8E]',
     },
     {
       name: 'Gemini AI',
       desc: 'Opt-in cloud intelligence for task breakdowns',
       icon: Sparkles,
-      status: 'Ready',
+      status: settings.cloudGemini ? 'Enabled; server setup required' : 'Off',
       color: 'text-[#BB86FC]',
     },
     {
       name: 'Gmail',
       desc: 'Scan recent mail for action confirmations (pull-only)',
       icon: Mail,
-      status: 'Optional',
+      status: 'Not implemented',
       color: 'text-[#8A8A8E]',
     },
     {
       name: 'Contacts',
       desc: 'Resolve-on-view for actionable call/text tasks',
       icon: Users,
-      status: 'Optional',
+      status: 'Not implemented',
       color: 'text-[#8A8A8E]',
     },
   ];
@@ -84,8 +88,12 @@ export const ConnectedServicesScreen: React.FC<ConnectedServicesScreenProps> = (
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div>
-          <h2 className="text-lg font-semibold text-[#F0F0F0]">Connected Services</h2>
-          <p className="text-xs text-[#8A8A8E]">Google spine and assistive integrations</p>
+          <h2 className="text-lg font-semibold text-[#F0F0F0]">
+            Connected Services
+          </h2>
+          <p className="text-xs text-[#8A8A8E]">
+            Google spine and assistive integrations
+          </p>
         </div>
       </div>
 
@@ -100,11 +108,13 @@ export const ConnectedServicesScreen: React.FC<ConnectedServicesScreenProps> = (
               {isConnected ? name : 'Not Connected'}
             </h3>
             <p className="text-xs text-[#8A8A8E] truncate">
-              {isConnected ? email : 'Sign in to sync Google Tasks & Calendar'}
+              {isConnected
+                ? email
+                : 'Google sign-in for NeuroFlow tasks and notes'}
             </p>
           </div>
           <button
-            onClick={() => setIsConnected(!isConnected)}
+            onClick={isConnected ? signOut : signInWithGoogle}
             className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-colors ${
               isConnected
                 ? 'bg-[#212124] text-[#8A8A8E] border-[#232326] hover:text-[#D9A441]'
@@ -116,6 +126,11 @@ export const ConnectedServicesScreen: React.FC<ConnectedServicesScreenProps> = (
         </div>
       </div>
 
+      {authError && (
+        <p role="alert" className="text-red-300 text-sm">
+          {authError}
+        </p>
+      )}
       {/* Services List */}
       <div className="space-y-3">
         <span className="text-[11px] font-semibold tracking-wider text-[#555559] uppercase block">
@@ -135,7 +150,9 @@ export const ConnectedServicesScreen: React.FC<ConnectedServicesScreenProps> = (
                     <Icon className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-medium text-[#F0F0F0]">{svc.name}</h4>
+                    <h4 className="text-xs font-medium text-[#F0F0F0]">
+                      {svc.name}
+                    </h4>
                     <p className="text-[11px] text-[#8A8A8E] truncate mt-0.5">
                       {svc.desc}
                     </p>

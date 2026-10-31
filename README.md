@@ -1,6 +1,12 @@
 # NeuroFlow
 
-Calm-functional ADHD execution app. Native Flutter. Replaces NeuroList + RoutineFlow.
+Calm-functional ADHD execution app. The current checkout is a React/Vite web
+prototype with an Express server. See [current web status and setup](docs/WEB-PROTOTYPE-STATUS.md)
+for build commands, account boundaries, cloud setup and verification limits.
+
+The original native Flutter source remains in Git history at commit `f0f33e6`.
+The documentation below describes that historical native implementation; it is
+not the current checkout's build guide.
 
 **Source of truth:** [`docs/NeuroFlow-Unified-Spec-v1.4.md`](docs/NeuroFlow-Unified-Spec-v1.4.md) — design principles, locked design tokens, Quick Wins/Focus mechanics, AI tiering.
 **Build log:** [`docs/NeuroFlow-Build-Notes-v0.3.md`](docs/NeuroFlow-Build-Notes-v0.3.md) — stack decisions, §10 resolutions, open reviewer questions.

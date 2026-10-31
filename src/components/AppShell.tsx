@@ -16,7 +16,7 @@ import {
 } from 'lucide-react';
 import { Routine, Achievement, Task } from '../types';
 import { useNeuroStorage } from '../lib/storage';
-import { useFirebaseAuth, useFirestoreSync } from '../lib/firebase';
+import { useFirebaseAuth } from '../lib/firebase';
 import { TodayScreen } from '../screens/TodayScreen';
 import { NotesScreen } from '../screens/NotesScreen';
 import { RoutinesListScreen } from '../screens/RoutinesListScreen';
@@ -32,13 +32,20 @@ import { CaptureSheet } from './CaptureSheet';
 import { AchievementToast } from './AchievementToast';
 
 export const AppShell: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'today' | 'routines' | 'lexi' | 'notes' | 'reflect'>('today');
+  const [activeTab, setActiveTab] = useState<
+    'today' | 'routines' | 'lexi' | 'notes' | 'reflect'
+  >('today');
   const [activeOverlay, setActiveOverlay] = useState<
-    'settings' | 'connected_services' | 'health_integrations' | 'live_voice' | null
+    | 'settings'
+    | 'connected_services'
+    | 'health_integrations'
+    | 'live_voice'
+    | null
   >(null);
   const [runningRoutine, setRunningRoutine] = useState<Routine | null>(null);
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
-  const [currentAchievement, setCurrentAchievement] = useState<Achievement | null>(null);
+  const [currentAchievement, setCurrentAchievement] =
+    useState<Achievement | null>(null);
 
   // Visual Clock Timer State (5m, 25m, 50m pomodoro)
   const [visualTimerState, setVisualTimerState] = useState<{
@@ -52,10 +59,8 @@ export const AppShell: React.FC = () => {
   });
 
   const storage = useNeuroStorage();
-  const { user, signInWithGoogle, signOut, syncStatus } = useFirebaseAuth();
-
-  // Activate Firestore real-time synchronization
-  useFirestoreSync(user);
+  const { user, signInWithGoogle, signOut, syncStatus, authError } =
+    useFirebaseAuth();
 
   const greetingName = user?.displayName || storage.settings.displayName;
 
@@ -89,7 +94,11 @@ export const AppShell: React.FC = () => {
               {user ? (
                 <span className="text-[10px] text-[#2FB083] font-mono flex items-center gap-1">
                   <Cloud className="w-2.5 h-2.5" />
-                  Firestore Synced
+                  {syncStatus === 'synced'
+                    ? 'Tasks & notes synced'
+                    : syncStatus === 'error'
+                      ? 'Sync error — saved on device'
+                      : 'Syncing tasks & notes…'}
                 </span>
               ) : (
                 <button
@@ -108,7 +117,11 @@ export const AppShell: React.FC = () => {
           {/* Visual Clock Timer Quick Launcher (Pomodoro) */}
           <button
             onClick={() =>
-              setVisualTimerState({ isOpen: true, task: null, initialMinutes: 25 })
+              setVisualTimerState({
+                isOpen: true,
+                task: null,
+                initialMinutes: 25,
+              })
             }
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#2FB083]/15 hover:bg-[#2FB083]/25 text-[#2FB083] text-xs font-semibold border border-[#2FB083]/30 transition-all shadow-sm"
             title="Visual Clock Timer (5m, 25m, 50m pomodoro)"
@@ -138,6 +151,11 @@ export const AppShell: React.FC = () => {
         </div>
       </header>
 
+      {authError && (
+        <p role="alert" className="p-3 text-red-300">
+          {authError}
+        </p>
+      )}
       {/* Primary Tab View */}
       <main className="flex-1 max-w-2xl mx-auto w-full">
         {activeTab === 'today' && (
@@ -227,7 +245,9 @@ export const AppShell: React.FC = () => {
             }`}
           >
             <Repeat className="w-5 h-5" />
-            <span className="text-[10px] font-medium tracking-wide">Routines</span>
+            <span className="text-[10px] font-medium tracking-wide">
+              Routines
+            </span>
           </button>
 
           {/* Lexi AI Dedicated Tab */}
@@ -241,7 +261,9 @@ export const AppShell: React.FC = () => {
           >
             <div
               className={`p-1 rounded-full ${
-                activeTab === 'lexi' ? 'bg-[#BB86FC]/20 ring-1 ring-[#BB86FC]/40' : ''
+                activeTab === 'lexi'
+                  ? 'bg-[#BB86FC]/20 ring-1 ring-[#BB86FC]/40'
+                  : ''
               }`}
             >
               <Sparkles className="w-5 h-5" />
@@ -270,7 +292,9 @@ export const AppShell: React.FC = () => {
             }`}
           >
             <Flower2 className="w-5 h-5" />
-            <span className="text-[10px] font-medium tracking-wide">Reflect</span>
+            <span className="text-[10px] font-medium tracking-wide">
+              Reflect
+            </span>
           </button>
         </div>
       </nav>
@@ -312,8 +336,12 @@ export const AppShell: React.FC = () => {
           <SettingsScreen
             settings={storage.settings}
             onBack={() => setActiveOverlay(null)}
-            onOpenConnectedServices={() => setActiveOverlay('connected_services')}
-            onOpenHealthIntegrations={() => setActiveOverlay('health_integrations')}
+            onOpenConnectedServices={() =>
+              setActiveOverlay('connected_services')
+            }
+            onOpenHealthIntegrations={() =>
+              setActiveOverlay('health_integrations')
+            }
             refresh={storage.refresh}
           />
         </div>
@@ -322,7 +350,9 @@ export const AppShell: React.FC = () => {
       {/* Connected Services Overlay */}
       {activeOverlay === 'connected_services' && (
         <div className="fixed inset-0 z-50 bg-[#0C0C0D] overflow-y-auto">
-          <ConnectedServicesScreen onBack={() => setActiveOverlay('settings')} />
+          <ConnectedServicesScreen
+            onBack={() => setActiveOverlay('settings')}
+          />
         </div>
       )}
 
