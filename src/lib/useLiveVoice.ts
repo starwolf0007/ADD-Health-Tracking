@@ -1,3 +1,4 @@
+import { cloudFetch, requireCloudConsent } from './cloudClient';
 import { useState, useRef, useEffect, useCallback } from 'react';
 
 // Converts Float32 [-1.0, 1.0] PCM from AudioContext to 16-bit little-endian Base64
@@ -45,11 +46,14 @@ export function useLiveVoice() {
   const [isConnected, setIsConnected] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [transcriptHistory, setTranscriptHistory] = useState<LiveVoiceMessage[]>([]);
+  const [transcriptHistory, setTranscriptHistory] = useState<
+    LiveVoiceMessage[]
+  >([]);
   const [currentInputText, setCurrentInputText] = useState('');
   const [currentOutputText, setCurrentOutputText] = useState('');
   const [error, setError] = useState<string | null>(null);
 
+  const generationRef = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
   const inputCtxRef = useRef<AudioContext | null>(null);
   const outputCtxRef = useRef<AudioContext | null>(null);
@@ -74,7 +78,9 @@ export function useLiveVoice() {
 
   const playAudioChunk = useCallback((base64Audio: string) => {
     if (!outputCtxRef.current) {
-      outputCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
+      outputCtxRef.current = new (
+        window.AudioContext || (window as any).webkitAudioContext
+      )({
         sampleRate: 24000,
       });
     }
@@ -101,7 +107,9 @@ export function useLiveVoice() {
     setIsSpeaking(true);
 
     source.onended = () => {
-      activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== source);
+      activeSourcesRef.current = activeSourcesRef.current.filter(
+        (s) => s !== source,
+      );
       if (activeSourcesRef.current.length === 0) {
         setIsSpeaking(false);
       }
@@ -109,16 +117,24 @@ export function useLiveVoice() {
   }, []);
 
   const startSession = async () => {
+    const generation = ++generationRef.current;
     try {
       setError(null);
+      requireCloudConsent();
+      const ticketResponse = await cloudFetch('/api/gemini/live-ticket', {
+        method: 'POST',
+        body: '{}',
+      });
+      const ticketData = await ticketResponse.json();
+      if (!ticketResponse.ok)
+        throw new Error(ticketData.error || 'Voice is unavailable');
+      if (generation !== generationRef.current) return;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/api/live-ws`;
+      const wsUrl = `${protocol}//${window.location.host}/api/live-ws?ticket=${encodeURIComponent(ticketData.ticket)}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = async () => {
-        setIsConnected(true);
-
         // Setup microphone capture at 16kHz
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
@@ -129,9 +145,16 @@ export function useLiveVoice() {
               noiseSuppression: true,
             },
           });
+          if (wsRef.current !== ws || ws.readyState !== WebSocket.OPEN) {
+            stream.getTracks().forEach((track) => track.stop());
+            return;
+          }
           mediaStreamRef.current = stream;
+          requireCloudConsent();
 
-          const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({
+          const inputCtx = new (
+            window.AudioContext || (window as any).webkitAudioContext
+          )({
             sampleRate: 16000,
           });
           inputCtxRef.current = inputCtx;
@@ -153,7 +176,10 @@ export function useLiveVoice() {
           setIsListening(true);
         } catch (micErr: any) {
           console.error('Microphone access failed:', micErr);
-          setError('Microphone access denied or unavailable: ' + micErr.message);
+          setError(
+            'Microphone access denied or unavailable: ' + micErr.message,
+          );
+          endSession();
         }
       };
 
@@ -174,13 +200,18 @@ export function useLiveVoice() {
               { id: `in-${Date.now()}`, sender: 'user', text: msg.text },
             ]);
           } else if (msg.type === 'outputTranscript') {
-            setCurrentOutputText((prev) => (prev ? `${prev} ${msg.text}` : msg.text));
+            setCurrentOutputText((prev) =>
+              prev ? `${prev} ${msg.text}` : msg.text,
+            );
             setTranscriptHistory((prev) => [
               ...prev,
               { id: `out-${Date.now()}`, sender: 'lexi', text: msg.text },
             ]);
+          } else if (msg.type === 'sessionClosed') {
+            endSession();
           } else if (msg.type === 'error') {
             setError(msg.message);
+            endSession();
           }
         } catch (e) {
           console.error('Error handling WebSocket message:', e);
@@ -188,9 +219,7 @@ export function useLiveVoice() {
       };
 
       ws.onclose = () => {
-        setIsConnected(false);
-        setIsListening(false);
-        setIsSpeaking(false);
+        endSession();
       };
 
       ws.onerror = (err) => {
@@ -204,6 +233,7 @@ export function useLiveVoice() {
   };
 
   const endSession = useCallback(() => {
+    generationRef.current++;
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
@@ -221,6 +251,10 @@ export function useLiveVoice() {
       inputCtxRef.current = null;
     }
     stopPlayback();
+    if (outputCtxRef.current) {
+      void outputCtxRef.current.close();
+      outputCtxRef.current = null;
+    }
     setIsConnected(false);
     setIsListening(false);
     setIsSpeaking(false);
