@@ -1,0 +1,8 @@
+{
+  "name": "NeuroFlow",
+  "description": "ADHD/ADD habit, routine, and executive-function companion with calm mode-swapping, timed routines, and Lexi AI.",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

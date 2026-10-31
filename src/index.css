@@ -1,0 +1,54 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-app: #0C0C0D;
+    --surface: #161618;
+    --surface-raised: #1C1C1F;
+    --surface-variant: #212124;
+    --surface-glass: rgba(28, 28, 31, 0.85);
+    --divider: #232326;
+    
+    --accent: #2FB083;
+    --accent-dim: #1E7A5A;
+    --accent-wash: rgba(47, 176, 131, 0.12);
+    
+    --text-primary: #F0F0F0;
+    --text-secondary: #8A8A8E;
+    --text-muted: #555559;
+    --text-faint: #3C3C40;
+    
+    --warning: #D9A441;
+    --calendar: #7AA7A0;
+    --gold: #FFD700;
+    --info: #2196F3;
+    --lexi: #BB86FC;
+  }
+
+  body {
+    background-color: var(--bg-app);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Subtle breathing animation for Lexi avatar */
+@keyframes lexi-breathe {
+  0%, 100% {
+    transform: scale(0.97);
+  }
+  50% {
+    transform: scale(1.03);
+  }
+}
+
+.animate-lexi-breathe {
+  animation: lexi-breathe 4s ease-in-out infinite;
+}
+
+/* Safe bottom inset */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 1rem);
+}
