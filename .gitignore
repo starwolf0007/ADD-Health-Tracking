@@ -1,4 +1,18 @@
-# Flutter/Dart
+# Node / Web
+node_modules/
+dist/
+dist-ssr/
+*.local
+.env
+.env.*
+!.env.example
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+bun.lock
+
+# Flutter / Dart legacy
 .dart_tool/
 .flutter-plugins
 .flutter-plugins-dependencies
@@ -7,44 +21,6 @@
 .pub/
 build/
 *.g.dart
-
-# Generated Drift files (run build_runner to regenerate)
-lib/data/database.g.dart
-
-# Android
-# Firebase / Google config — contains project API keys and OAuth client IDs.
-# Keep out of version control; use google-services.json.example as a template.
-**/google-services.json
-**/android/.gradle
-**/android/captures/
-**/android/local.properties
-**/android/**/GeneratedPluginRegistrant.java
-
-# Gradle wrapper (gradlew, gradlew.bat, gradle-wrapper.jar) IS committed —
-# required for CI and any clone to build/test without a pre-installed Gradle.
-
-# Test-build signing keystore — decoded from the TEST_KEYSTORE_BASE64 secret
-# at CI time (see .github/workflows/test-build.yml). Never commit the real key.
-*.jks
-*.keystore
-key.properties
-
-# iOS
-**/ios/**/*.mode1v3
-**/ios/**/*.mode2v3
-**/ios/**/*.moved-aside
-**/ios/**/*.pbxuser
-**/ios/**/*.perspectivev3
-**/ios/**/DerivedData/
-**/ios/**/.idea/
-**/ios/**/*.hmap
-**/ios/**/*.ipa
-**/ios/**/*.xcscmblueprint
-**/ios/**/Pods/
-**/ios/**/.symlinks/
-
-# macOS
-**/macos/Flutter/ephemeral
 
 # IDE
 .idea/
@@ -55,6 +31,6 @@ key.properties
 .DS_Store
 Thumbs.db
 
-# Build/session artifacts that don't belong in version control
+# Build/session artifacts
 *.bundle
 green_gate_log.txt

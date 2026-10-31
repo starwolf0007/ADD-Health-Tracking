@@ -46,6 +46,7 @@ interface TodayScreenProps {
   onOpenSettings: () => void;
   onLaunchRoutine: (routine: Routine) => void;
   onTriggerAchievement: (achievement: Achievement) => void;
+  onOpenVisualTimer?: (task?: Task | null, initialMinutes?: number) => void;
   refresh: () => void;
 }
 
@@ -58,6 +59,7 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({
   onOpenSettings,
   onLaunchRoutine,
   onTriggerAchievement,
+  onOpenVisualTimer,
   refresh,
 }) => {
   const [selectedDay, setSelectedDay] = useState<Date>(new Date());
@@ -215,6 +217,41 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({
           )}
         </div>
       </div>
+
+      {/* Visual Clock Timer Quick Bar (ADHD Time-Blindness Support) */}
+      {isToday && onOpenVisualTimer && (
+        <div className="bg-[#161618] border border-[#232326] rounded-2xl p-3.5 shadow-sm flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-[#2FB083]/15 text-[#2FB083]">
+              <Clock className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-xs font-semibold text-[#F0F0F0]">Visual Clock Timer</h4>
+              <p className="text-[11px] text-[#8A8A8E]">See time move as you work</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => onOpenVisualTimer(plan.primaryTask, 5)}
+              className="px-2.5 py-1 rounded-lg bg-[#1C1C1F] hover:bg-[#2FB083]/20 hover:text-[#2FB083] text-[11px] font-semibold text-[#8A8A8E] border border-[#232326] transition-colors"
+            >
+              5m
+            </button>
+            <button
+              onClick={() => onOpenVisualTimer(plan.primaryTask, 25)}
+              className="px-2.5 py-1 rounded-lg bg-[#2FB083]/20 text-[#2FB083] border border-[#2FB083]/40 text-[11px] font-semibold transition-colors"
+            >
+              25m
+            </button>
+            <button
+              onClick={() => onOpenVisualTimer(plan.primaryTask, 50)}
+              className="px-2.5 py-1 rounded-lg bg-[#1C1C1F] hover:bg-[#2FB083]/20 hover:text-[#2FB083] text-[11px] font-semibold text-[#8A8A8E] border border-[#232326] transition-colors"
+            >
+              50m
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Due Routines Card (if any active routines exist for today) */}
       {isToday && routines.length > 0 && (
@@ -396,6 +433,17 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({
                   >
                     <Pause className="w-3.5 h-3.5" />
                     <span>Pause & Return Later</span>
+                  </button>
+                )}
+
+                {onOpenVisualTimer && (
+                  <button
+                    onClick={() => onOpenVisualTimer(plan.primaryTask)}
+                    className="py-2 px-3 bg-[#161618] hover:bg-[#212124] text-[#2FB083] border border-[#2FB083]/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                    title="Open moving visual clock timer"
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>Clock</span>
                   </button>
                 )}
 

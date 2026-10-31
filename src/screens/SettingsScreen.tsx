@@ -4,12 +4,15 @@ import {
   ChevronRight,
   CloudSync,
   Dumbbell,
-  Bell,
-  Sparkles,
+  Radio,
   RotateCcw,
+  LogIn,
+  LogOut,
+  User as UserIcon,
+  Cloud,
 } from 'lucide-react';
-import { AppSettings, settingsStorage, taskStorage, routineStorage, habitStorage, moodStorage, noteStorage } from '../lib/storage';
-import { SEED_TASKS, SEED_ROUTINES, SEED_HABITS } from '../lib/constants';
+import { AppSettings, settingsStorage } from '../lib/storage';
+import { useFirebaseAuth } from '../lib/firebase';
 
 interface SettingsScreenProps {
   settings: AppSettings;
@@ -29,6 +32,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [name, setName] = useState(settings.displayName || '');
   const [briefing, setBriefing] = useState(settings.morningBriefing);
   const [cloudGemini, setCloudGemini] = useState(settings.cloudGemini);
+
+  const { user, signInWithGoogle, signOut, syncStatus } = useFirebaseAuth();
 
   const handleSaveName = (newName: string) => {
     setName(newName);
@@ -78,7 +83,70 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         </button>
         <div>
           <h2 className="text-lg font-semibold text-[#F0F0F0]">Settings</h2>
-          <p className="text-xs text-[#8A8A8E]">Calm preferences · Minimal by design</p>
+          <p className="text-xs text-[#8A8A8E]">Preferences & Account Security</p>
+        </div>
+      </div>
+
+      {/* Firebase Account & Auth Section */}
+      <div className="space-y-2">
+        <span className="text-[11px] font-semibold tracking-wider text-[#555559] uppercase block">
+          Firebase Auth & Sync
+        </span>
+
+        <div className="p-4 rounded-2xl bg-[#161618] border border-[#232326] space-y-3 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              {user?.photoURL ? (
+                <img
+                  src={user.photoURL}
+                  alt={user.displayName || 'User'}
+                  className="w-10 h-10 rounded-full border border-[#232326] object-cover"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-[#1C1C1F] border border-[#232326] flex items-center justify-center text-[#2FB083]">
+                  <UserIcon className="w-5 h-5" />
+                </div>
+              )}
+              <div>
+                <h4 className="text-sm font-medium text-[#F0F0F0]">
+                  {user ? user.displayName || 'Google Account' : 'Not signed in'}
+                </h4>
+                <p className="text-xs text-[#8A8A8E]">
+                  {user ? user.email : 'Sign in to sync your tasks and habits with Firestore'}
+                </p>
+              </div>
+            </div>
+
+            {user ? (
+              <button
+                onClick={signOut}
+                className="px-3 py-1.5 rounded-xl bg-[#212124] text-[#8A8A8E] hover:text-[#D9A441] border border-[#232326] text-xs font-semibold flex items-center gap-1.5 transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Sign Out</span>
+              </button>
+            ) : (
+              <button
+                onClick={signInWithGoogle}
+                className="px-3 py-1.5 rounded-xl bg-[#2FB083] text-[#0C0C0D] hover:bg-[#2FB083]/90 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span>Google Sign-In</span>
+              </button>
+            )}
+          </div>
+
+          {user && (
+            <div className="pt-2 border-t border-[#232326] flex items-center justify-between text-xs text-[#8A8A8E]">
+              <span className="flex items-center gap-1.5 text-[#2FB083]">
+                <Cloud className="w-3.5 h-3.5" />
+                Cloud Firestore connected
+              </span>
+              <span className="font-mono text-[10px] text-[#555559]">
+                UID: {user.uid.slice(0, 8)}…
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -88,7 +156,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           About you
         </span>
         <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326]">
-          <label className="text-xs text-[#8A8A8E] block mb-1">Your first name</label>
+          <label className="text-xs text-[#8A8A8E] block mb-1">Display name</label>
           <input
             type="text"
             value={name}
@@ -172,31 +240,48 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         </div>
       </div>
 
-      {/* AI (§14) */}
+      {/* AI & Gemini Capabilities */}
       <div className="space-y-2">
         <span className="text-[11px] font-semibold tracking-wider text-[#555559] uppercase block">
-          AI Tiering (§14)
+          Gemini AI Ecosystem
         </span>
 
-        <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326] flex items-center justify-between">
-          <div className="pr-4">
-            <h4 className="text-xs font-medium text-[#F0F0F0]">Cloud Gemini suggestions</h4>
-            <p className="text-[11px] text-[#8A8A8E] mt-0.5">
-              Sends task titles to Google for smarter breakdowns. Off by default. Health data is never shared.
-            </p>
-          </div>
-          <button
-            onClick={handleToggleCloudGemini}
-            className={`w-11 h-6 rounded-full transition-colors relative p-0.5 shrink-0 ${
-              cloudGemini ? 'bg-[#2FB083]' : 'bg-[#232326]'
-            }`}
-          >
-            <span
-              className={`block w-5 h-5 rounded-full bg-white transition-transform ${
-                cloudGemini ? 'translate-x-5' : 'translate-x-0'
+        <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326] space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="pr-4">
+              <h4 className="text-xs font-medium text-[#F0F0F0]">Cloud Gemini breakdown</h4>
+              <p className="text-[11px] text-[#8A8A8E] mt-0.5">
+                Multi-model ADHD planning using gemini-4-argon, gemini-3.8-flash, and gemini-3.1-flash-lite.
+              </p>
+            </div>
+            <button
+              onClick={handleToggleCloudGemini}
+              className={`w-11 h-6 rounded-full transition-colors relative p-0.5 shrink-0 ${
+                cloudGemini ? 'bg-[#2FB083]' : 'bg-[#232326]'
               }`}
-            />
-          </button>
+            >
+              <span
+                className={`block w-5 h-5 rounded-full bg-white transition-transform ${
+                  cloudGemini ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="pt-2 border-t border-[#232326] text-[11px] text-[#8A8A8E] space-y-1">
+            <div className="flex items-center justify-between">
+              <span>Real-Time Voice API:</span>
+              <span className="text-[#BB86FC] font-mono">gemini-3.8-live</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Voice Transcription:</span>
+              <span className="text-[#2FB083] font-mono">gemini-3.5-transcribe</span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span>Search & Maps Grounding:</span>
+              <span className="text-[#7AA7A0] font-mono">gemini-3.8-flash</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -207,7 +292,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           className="text-xs text-[#8A8A8E] hover:text-[#D9A441] flex items-center gap-1.5 transition-colors"
         >
           <RotateCcw className="w-3.5 h-3.5" />
-          <span>Reset demo data to defaults</span>
+          <span>Reset local data to defaults</span>
         </button>
       </div>
     </div>

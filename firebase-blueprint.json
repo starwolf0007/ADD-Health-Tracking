@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "NeuroFlow Firestore Blueprint",
+  "entities": {
+    "users": {
+      "path": "users/{userId}",
+      "description": "User profile and top-level settings",
+      "fields": {
+        "displayName": { "type": "string" },
+        "email": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "morningBriefing": { "type": "boolean" },
+        "cloudGemini": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "tasks": {
+      "path": "users/{userId}/tasks/{taskId}",
+      "description": "User tasks with ADHD energy levels and status",
+      "fields": {
+        "title": { "type": "string" },
+        "notes": { "type": "string" },
+        "energy": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "completedAt": { "type": "string" },
+        "estimatedMinutes": { "type": "number" },
+        "isQuickWin": { "type": "boolean" },
+        "reentryNote": { "type": "object" }
+      }
+    },
+    "routines": {
+      "path": "users/{userId}/routines/{routineId}",
+      "description": "User routines and step checklists",
+      "fields": {
+        "name": { "type": "string" },
+        "anchor": { "type": "string" },
+        "scheduleHour": { "type": "number" },
+        "scheduleMinute": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "steps": { "type": "array" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "habits": {
+      "path": "users/{userId}/habits/{habitId}",
+      "description": "User habits",
+      "fields": {
+        "name": { "type": "string" },
+        "frequency": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "habit_checkins": {
+      "path": "users/{userId}/habit_checkins/{checkInId}",
+      "description": "Daily habit check-in records",
+      "fields": {
+        "habitId": { "type": "string" },
+        "date": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      }
+    },
+    "mood_logs": {
+      "path": "users/{userId}/mood_logs/{logId}",
+      "description": "Mood and capacity signals driving Quick Wins",
+      "fields": {
+        "level": { "type": "string" },
+        "note": { "type": "string" },
+        "loggedAt": { "type": "string" }
+      }
+    },
+    "notes": {
+      "path": "users/{userId}/notes/{noteId}",
+      "description": "Captured notes and thought dumps",
+      "fields": {
+        "body": { "type": "string" },
+        "pinned": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    }
+  }
+}

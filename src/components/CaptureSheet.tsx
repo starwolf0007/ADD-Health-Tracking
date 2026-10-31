@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { X, Calendar, Clock, Battery, BatteryLow, BatteryMedium } from 'lucide-react';
+import { X, Calendar, Clock, Battery, BatteryLow, BatteryMedium, Mic, Square, Loader2 } from 'lucide-react';
 import { EnergyLevel, Task } from '../types';
 import { taskStorage } from '../lib/storage';
+import { useAudioTranscribe } from '../lib/useTranscribe';
 
 interface CaptureSheetProps {
   isOpen: boolean;
@@ -22,7 +23,22 @@ export const CaptureSheet: React.FC<CaptureSheetProps> = ({
   const [timeStr, setTimeStr] = useState('09:00');
   const [submitting, setSubmitting] = useState(false);
 
+  // Voice transcription hook (gemini-3.5-transcribe)
+  const { isRecording, isTranscribing, startRecording, stopAndTranscribe } =
+    useAudioTranscribe();
+
   if (!isOpen) return null;
+
+  const handleMicToggle = async () => {
+    if (!isRecording) {
+      await startRecording();
+    } else {
+      const transcript = await stopAndTranscribe();
+      if (transcript) {
+        setTitle((prev) => (prev ? `${prev} ${transcript}` : transcript));
+      }
+    }
+  };
 
   const handleSubmit = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -88,16 +104,42 @@ export const CaptureSheet: React.FC<CaptureSheetProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-          <div>
+          <div className="relative">
             <input
               type="text"
               autoFocus
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="What's on your mind?"
-              className="w-full bg-transparent text-lg text-[#F0F0F0] placeholder-[#555559] border-none outline-none focus:ring-0 p-1"
+              placeholder="What's on your mind? (or speak it)"
+              className="w-full bg-transparent text-lg text-[#F0F0F0] placeholder-[#555559] border-none outline-none focus:ring-0 p-1 pr-12"
             />
+            {/* Audio Voice Input Button */}
+            <button
+              type="button"
+              onClick={handleMicToggle}
+              className={`absolute right-1 top-1 p-2 rounded-xl border transition-colors ${
+                isRecording
+                  ? 'bg-red-600 text-white border-red-500 animate-pulse'
+                  : 'bg-[#1C1C1F] text-[#8A8A8E] hover:text-[#2FB083] border-[#232326]'
+              }`}
+              title={isRecording ? 'Stop & transcribe' : 'Dictate with Gemini audio transcription'}
+            >
+              {isRecording ? (
+                <Square className="w-4 h-4" />
+              ) : isTranscribing ? (
+                <Loader2 className="w-4 h-4 animate-spin text-[#2FB083]" />
+              ) : (
+                <Mic className="w-4 h-4" />
+              )}
+            </button>
           </div>
+
+          {(isRecording || isTranscribing) && (
+            <div className="p-2 rounded-lg bg-[#2FB083]/15 text-[11px] text-[#2FB083] flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+              {isRecording ? 'Listening… tap to finish dictation' : 'Transcribing voice input…'}
+            </div>
+          )}
 
           {/* Scheduled Day / Time Selector */}
           <div className="bg-[#1C1C1F] rounded-xl p-3 border border-[#232326] space-y-2">
@@ -141,7 +183,7 @@ export const CaptureSheet: React.FC<CaptureSheetProps> = ({
             )}
           </div>
 
-          {/* Energy Required (Monochrome shape badges per §13) */}
+          {/* Energy Required */}
           <div>
             <label className="text-[11px] font-semibold tracking-wider text-[#555559] uppercase block mb-2">
               Energy to Start
