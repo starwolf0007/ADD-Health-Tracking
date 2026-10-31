@@ -1,5 +1,9 @@
-import 'package:firebase_crashlytics/firebase_crashlytics.dart';
-import 'package:flutter/foundation.dart';
+enum StartupDiagnosticSeverity {
+  info,
+  warning,
+  error,
+  fatal,
+}
 
 /// Fail-safe startup diagnostics for Crashlytics.
 ///
@@ -10,9 +14,17 @@ class StartupDiagnostics {
   StartupDiagnostics._();
 
   static bool _enabled = false;
+  static final List<Map<String, String>> _events = <Map<String, String>>[];
+
+  static List<Map<String, String>> get events =>
+      List<Map<String, String>>.unmodifiable(_events);
 
   static void configure({required bool enabled}) {
     _enabled = enabled;
+  }
+
+  static void reset() {
+    _events.clear();
   }
 
   static Future<void> recordBuildMetadata() async {
@@ -35,11 +47,14 @@ class StartupDiagnostics {
       await FirebaseCrashlytics.instance.setCustomKey('build_date', buildDate);
       await FirebaseCrashlytics.instance.setCustomKey('is_debug', kDebugMode);
     });
+
+    _recordEvent('build_metadata', 'ready', StartupDiagnosticSeverity.info);
   }
 
   static Future<void> checkpoint(
     String phase, {
     required String status,
+    StartupDiagnosticSeverity severity = StartupDiagnosticSeverity.info,
   }) async {
     if (!_enabled) return;
 
@@ -49,12 +64,18 @@ class StartupDiagnostics {
       await FirebaseCrashlytics.instance.log('startup: $phase $status');
     });
 
+    _recordEvent(phase, status, severity);
+
     if (kDebugMode) {
       debugPrint('[StartupDiagnostics] startup: $phase $status');
     }
   }
 
-  static Future<void> markFailure(String phase, Object error) async {
+  static Future<void> markFailure(
+    String phase,
+    Object error, {
+    StartupDiagnosticSeverity severity = StartupDiagnosticSeverity.error,
+  }) async {
     if (!_enabled) return;
 
     await _safe(() async {
@@ -63,13 +84,19 @@ class StartupDiagnostics {
         phase,
       );
       await FirebaseCrashlytics.instance.setCustomKey(
+        'startup_failure_severity',
+        severity.name,
+      );
+      await FirebaseCrashlytics.instance.setCustomKey(
         'startup_phase',
         '$phase:failed',
       );
       await FirebaseCrashlytics.instance.log(
-        'startup: $phase failed (${error.runtimeType})',
+        'startup: $phase failed (${error.runtimeType}) [${severity.name}]',
       );
     });
+
+    _recordEvent(phase, 'failed', severity, details: error.toString());
   }
 
   static Future<void> markRunning() async {
@@ -81,6 +108,22 @@ class StartupDiagnostics {
         'running',
       );
       await FirebaseCrashlytics.instance.log('startup: complete');
+    });
+
+    _recordEvent('startup', 'running', StartupDiagnosticSeverity.info);
+  }
+
+  static void _recordEvent(
+    String phase,
+    String status,
+    StartupDiagnosticSeverity severity, {
+    String? details,
+  }) {
+    _events.add({
+      'phase': phase,
+      'status': status,
+      'severity': severity.name,
+      if (details != null) 'details': details,
     });
   }
 
