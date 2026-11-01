@@ -11,6 +11,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+#### 0. Google Drive Workspace Integration & Auto-Backups (`src/lib/googleDrive.ts`, `src/screens/GoogleDriveScreen.tsx`)
+- **OAuth Setup & Token Management**:
+  - Configured 13 Google Drive OAuth scopes for project `neuroflow-1e7cd`.
+  - In-memory access token caching lifecycle tied to Firebase Auth (never stored in `localStorage` or `sessionStorage`).
+  - Official styled "Sign in with Google" button for instant authorization.
+- **Drive Workspace Surface**:
+  - Live file browser supporting Docs, Sheets, text notes, and PDFs with direct `webViewLink` shortcuts.
+  - Real-time search across Google Drive files.
+- **Automated Behavioral Daily Backups (`AppShell.tsx`, `SettingsScreen.tsx`)**:
+  - Daily automatic backup snapshot export of tasks, routines, habits, moods, and notes saved to Drive upon launch.
+  - Toggle setting for automatic daily backups in Settings under Integrations.
+  - One-tap "Backup to Drive" exports timestamped JSON backups on demand.
+  - In-app Achievement Toast celebration upon backup completion.
+- **Direct Drive File Creation**:
+  - Upload notes and markdown documents directly to Google Drive.
+- **Mandatory Deletion Confirmation Modal**:
+  - Safe, non-destructive UX requiring explicit user confirmation before removing any file from Google Drive.
+- **Header & Settings Integration**:
+  - Quick-access "Drive" launcher button in the `AppShell` header and dedicated tile in Connected Services.
+
+
 #### 1. ADHD Time-Blindness Visual Clock Timer (`src/components/VisualClockTimer.tsx`)
 - **Analog Clock Face**: 60-minute circular dial with major tick marks and numbers (0, 5, 10... 55, 60).
 - **Physical Moving Disk & Sweeping Hand**:
@@ -33,8 +54,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Today screen quick-bar with `5m`, `25m`, and `50m` preset pills.
   - "Clock" button on the Active Recommended Task card.
 
-#### 2. Lexi AI Executive Function Coaching Interface (`src/components/LexiChatInterface.tsx`)
-- **First-Class AppShell Tab**: Dedicated **Lexi AI** bottom navigation tab with glowing purple sparkle badge (`#BB86FC`).
+#### 2. Lexi AI Executive Function & Proactive Body Doubling (`src/components/LexiChatInterface.tsx`, `src/screens/TodayScreen.tsx`)
+- **First-Class AppShell Tab & Today Launcher**:
+  - Dedicated **Lexi AI** bottom navigation tab with glowing purple sparkle badge (`#BB86FC`).
+  - Quick **"Double"** action button directly on the Recommended Active Task card in `TodayScreen`.
+- **Proactive Virtual Body Doubling**:
+  - Persistent companion focus bar with elapsed timer and companion presence indicator.
+  - Proactive 10-minute companion check-ins with low-cognitive-load response chips (*"Still in the flow"*, *"Got distracted"*, *"Finished it!"*).
+- **Structured 3-Step ADHD Task Initiation Breakdown**:
+  - Standardized micro-progression designed specifically for executive dysfunction:
+    - `Step 1: Initiation (~2m)`: Tiny physical inertia-breaking action.
+    - `Step 2: Setup (~5m)`: Low-friction preparation.
+    - `Step 3: Tangible Action (~10m)`: First bite-sized work phase.
+  - One-tap **"Add to Today"** button for each micro-step directly into Today's timeline.
 - **Pre-Configured Executive Function Prompt Presets**:
   - *Break down a big task* (uses `gemini-4-argon` to deconstruct overwhelming projects into ≤2 min micro-steps).
   - *Break task paralysis* (sensory-friendly immediate initiation action).
@@ -42,8 +74,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - *Quiet spaces nearby* (Google Maps Grounding).
   - *ADHD research* (Google Search Grounding).
 - **Interactive Action Steps**:
-  - One-tap **"Add this step to Today"** button inserts broken-down steps directly into Today's schedule.
   - Contextual proposals for starting or pausing active tasks with return point notes.
+
 
 #### 3. Real-Time Voice Conversations (`gemini-3.8-live`)
 - **Full-Screen Voice Mode (`src/screens/LiveVoiceScreen.tsx`)**:

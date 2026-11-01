@@ -28,8 +28,8 @@ export function useAudioTranscribe() {
       setIsRecording(true);
       return true;
     } catch (err: any) {
-      console.error('Failed to access microphone for recording:', err);
-      setError('Microphone access denied: ' + err.message);
+      console.warn('Microphone access denied or unavailable for transcription:', err?.message || err);
+      setError('Microphone access blocked. Please allow microphone in browser settings.');
       return false;
     }
   };

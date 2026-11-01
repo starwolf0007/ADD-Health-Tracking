@@ -448,6 +448,15 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({
                 )}
 
                 <button
+                  onClick={onOpenLexi}
+                  className="py-2 px-3 bg-[#BB86FC]/15 hover:bg-[#BB86FC]/25 text-[#BB86FC] border border-[#BB86FC]/30 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                  title="Body double with Lexi AI for proactive task initiation"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Double</span>
+                </button>
+
+                <button
                   onClick={() => handleToggleTask(plan.primaryTask!)}
                   className="py-2 px-3.5 bg-[#161618] hover:bg-[#212124] text-[#F0F0F0] border border-[#232326] rounded-xl text-xs font-medium flex items-center gap-1.5 transition-colors"
                 >
@@ -456,6 +465,7 @@ export const TodayScreen: React.FC<TodayScreenProps> = ({
                 </button>
               </div>
             </div>
+
           )}
 
           {/* Habits Section (Capped at 3 daily habits) */}

@@ -117,9 +117,10 @@ export interface Achievement {
   id: string;
   title: string;
   message: string;
-  type: 'reentry' | 'quickwin' | 'routine';
+  type: 'reentry' | 'quickwin' | 'routine' | 'backup';
   timestamp: number;
 }
+
 
 export interface HevySet {
   index: number;

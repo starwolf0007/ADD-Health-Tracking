@@ -10,8 +10,22 @@ import {
   LogOut,
   User as UserIcon,
   Cloud,
+  HardDrive,
+  FolderSync,
+  Download,
+  ShieldCheck,
+  RefreshCw,
+  Check,
 } from 'lucide-react';
-import { AppSettings, settingsStorage } from '../lib/storage';
+import {
+  AppSettings,
+  settingsStorage,
+  getGuestDataSummary,
+  importGuestDataToAccount,
+  exportAllData,
+  getStorageScope,
+  formatDateKey,
+} from '../lib/storage';
 import { useFirebaseAuth } from '../lib/firebase';
 
 interface SettingsScreenProps {
@@ -19,6 +33,7 @@ interface SettingsScreenProps {
   onBack: () => void;
   onOpenConnectedServices: () => void;
   onOpenHealthIntegrations: () => void;
+  onOpenGoogleDrive?: () => void;
   refresh: () => void;
 }
 
@@ -27,13 +42,25 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   onBack,
   onOpenConnectedServices,
   onOpenHealthIntegrations,
+  onOpenGoogleDrive,
   refresh,
 }) => {
   const [name, setName] = useState(settings.displayName || '');
   const [briefing, setBriefing] = useState(settings.morningBriefing);
   const [cloudGemini, setCloudGemini] = useState(settings.cloudGemini);
+  const [autoDriveBackup, setAutoDriveBackup] = useState(settings.autoDriveBackup ?? true);
 
-  const { user, signInWithGoogle, signOut, syncStatus } = useFirebaseAuth();
+  const {
+    user,
+    signInWithGoogle,
+    signOut,
+    syncStatus,
+    pendingQueueCount,
+    triggerManualSync,
+  } = useFirebaseAuth();
+  const [guestSummary, setGuestSummary] = useState(getGuestDataSummary());
+  const [isSyncingNow, setIsSyncingNow] = useState(false);
+  const [mergeNotice, setMergeNotice] = useState<string | null>(null);
 
   const handleSaveName = (newName: string) => {
     setName(newName);
@@ -45,6 +72,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     const next = !briefing;
     setBriefing(next);
     settingsStorage.save({ morningBriefing: next });
+    refresh();
+  };
+
+  const handleToggleAutoDriveBackup = () => {
+    const next = !autoDriveBackup;
+    setAutoDriveBackup(next);
+    settingsStorage.save({ autoDriveBackup: next });
     refresh();
   };
 
@@ -60,6 +94,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     settingsStorage.save({ cloudGemini: next });
     refresh();
   };
+
 
   const handleResetData = () => {
     if (
@@ -174,6 +209,50 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         </span>
 
         <div className="space-y-2">
+          {/* Google Drive Workspace */}
+          {onOpenGoogleDrive && (
+            <div
+              onClick={onOpenGoogleDrive}
+              className="p-3.5 rounded-2xl bg-[#161618] hover:bg-[#1C1C1F] border border-[#4285F4]/30 flex items-center justify-between cursor-pointer transition-colors shadow-sm"
+            >
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-[#4285F4]/15 text-[#4285F4]">
+                  <HardDrive className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-medium text-[#F0F0F0]">Google Drive</h4>
+                  <p className="text-[11px] text-[#8A8A8E]">
+                    File management & backup snapshots
+                  </p>
+                </div>
+              </div>
+              <ChevronRight className="w-4 h-4 text-[#555559]" />
+            </div>
+          )}
+
+          {/* Automatic Daily Google Drive Backup Toggle */}
+          <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326] flex items-center justify-between">
+            <div className="pr-4">
+              <h4 className="text-xs font-medium text-[#F0F0F0]">Automatic Daily Drive Backup</h4>
+              <p className="text-[11px] text-[#8A8A8E] mt-0.5">
+                Automatically archives an encrypted snapshot of tasks, habits, and notes to your Google Drive daily.
+              </p>
+            </div>
+            <button
+              onClick={handleToggleAutoDriveBackup}
+              className={`w-11 h-6 rounded-full transition-colors relative p-0.5 shrink-0 ${
+                autoDriveBackup ? 'bg-[#2FB083]' : 'bg-[#232326]'
+              }`}
+            >
+              <span
+                className={`block w-5 h-5 rounded-full bg-white transition-transform ${
+                  autoDriveBackup ? 'translate-x-5' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+
+
           <div
             onClick={onOpenConnectedServices}
             className="p-3.5 rounded-2xl bg-[#161618] hover:bg-[#1C1C1F] border border-[#232326] flex items-center justify-between cursor-pointer transition-colors"
@@ -185,7 +264,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               <div>
                 <h4 className="text-xs font-medium text-[#F0F0F0]">Connected Services</h4>
                 <p className="text-[11px] text-[#8A8A8E]">
-                  Google Tasks, Calendar, and Drive
+                  Google Tasks, Calendar, and Drive status
                 </p>
               </div>
             </div>
@@ -285,15 +364,130 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         </div>
       </div>
 
-      {/* Data Management */}
-      <div className="pt-4 border-t border-[#232326]">
-        <button
-          onClick={handleResetData}
-          className="text-xs text-[#8A8A8E] hover:text-[#D9A441] flex items-center gap-1.5 transition-colors"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>Reset local data to defaults</span>
-        </button>
+      {/* Data Management & Account Isolation */}
+      <div className="space-y-3 pt-2 border-t border-[#232326]">
+        <span className="text-[11px] font-semibold tracking-wider text-[#555559] uppercase block">
+          Data Management & Account Isolation
+        </span>
+
+        {/* Current Storage Scope Card */}
+        <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326] space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[#8A8A8E]">Active Storage Scope:</span>
+            <span className="font-mono text-[#F0F0F0]">
+              {user ? `Account (${user.email || user.uid.slice(0, 8)})` : 'Guest Mode (Device Local)'}
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between text-xs pt-1 border-t border-[#232326]/60">
+            <span className="text-[#8A8A8E] flex items-center gap-1.5">
+              <ShieldCheck className="w-3.5 h-3.5 text-[#2FB083]" />
+              Pre-Migration Backup:
+            </span>
+            <span className="text-[#2FB083] font-mono text-[11px]">Protected in storage</span>
+          </div>
+
+          {/* Pending Offline Sync Queue */}
+          {pendingQueueCount > 0 && (
+            <div className="pt-2 border-t border-[#232326]/60 flex items-center justify-between">
+              <span className="text-xs text-[#D9A441] flex items-center gap-1.5">
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncingNow ? 'animate-spin' : ''}`} />
+                {pendingQueueCount} offline items pending
+              </span>
+              <button
+                onClick={async () => {
+                  setIsSyncingNow(true);
+                  await triggerManualSync();
+                  setIsSyncingNow(false);
+                  refresh();
+                }}
+                disabled={isSyncingNow}
+                className="px-2.5 py-1 rounded-xl bg-[#D9A441]/15 text-[#D9A441] text-xs font-medium hover:bg-[#D9A441]/25 transition-colors"
+              >
+                Sync Now
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* Guest Data Import Card (Visible when signed in and guest records exist) */}
+        {user && guestSummary.hasData && (
+          <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#2FB083]/30 space-y-2 shadow-sm">
+            <div className="flex items-start gap-2.5">
+              <div className="p-2 rounded-xl bg-[#2FB083]/15 text-[#2FB083]">
+                <FolderSync className="w-4 h-4" />
+              </div>
+              <div className="flex-1">
+                <h4 className="text-xs font-semibold text-[#F0F0F0]">Unmerged Guest Work Available</h4>
+                <p className="text-[11px] text-[#8A8A8E] mt-0.5">
+                  Found {guestSummary.taskCount} tasks, {guestSummary.routineCount} routines, {guestSummary.habitCount} habits, {guestSummary.noteCount} notes created in guest mode.
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={() => {
+                const res = importGuestDataToAccount(user.uid);
+                setGuestSummary(getGuestDataSummary());
+                refresh();
+                setMergeNotice(
+                  `Successfully merged ${res.importedTasks} tasks, ${res.importedRoutines} routines, and ${res.importedNotes} notes into your account.`
+                );
+                setTimeout(() => setMergeNotice(null), 6000);
+              }}
+              className="w-full py-2 rounded-xl bg-[#2FB083] hover:bg-[#2FB083]/90 text-[#0C0C0D] font-semibold text-xs tracking-wide transition-all shadow-sm flex items-center justify-center gap-1.5"
+            >
+              <FolderSync className="w-3.5 h-3.5" />
+              <span>Import Guest Work into this Account</span>
+            </button>
+
+            {mergeNotice && (
+              <div className="p-2.5 rounded-xl bg-[#2FB083]/15 border border-[#2FB083]/30 flex items-center gap-2 text-xs text-[#2FB083]">
+                <Check className="w-4 h-4 shrink-0" />
+                <span>{mergeNotice}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Local JSON Backup Download */}
+        <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326] flex items-center justify-between">
+          <div>
+            <h4 className="text-xs font-medium text-[#F0F0F0]">Export Local Data Snapshot</h4>
+            <p className="text-[11px] text-[#8A8A8E]">
+              Download an unencrypted JSON snapshot of your current tasks, habits, and notes.
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              const data = exportAllData();
+              const blob = new Blob([JSON.stringify(data, null, 2)], {
+                type: 'application/json',
+              });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `neuroflow-backup-${getStorageScope()}-${formatDateKey(new Date())}.json`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="p-2 rounded-xl bg-[#212124] text-[#8A8A8E] hover:text-[#F0F0F0] border border-[#232326] transition-colors"
+            title="Download JSON snapshot"
+          >
+            <Download className="w-4 h-4" />
+          </button>
+        </div>
+
+        {/* Reset Local Data */}
+        <div className="pt-2">
+          <button
+            onClick={handleResetData}
+            className="text-xs text-[#8A8A8E] hover:text-[#D9A441] flex items-center gap-1.5 transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Reset current scope to defaults</span>
+          </button>
+        </div>
       </div>
     </div>
   );

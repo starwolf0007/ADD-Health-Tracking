@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sun,
   StickyNote,
@@ -12,11 +12,19 @@ import {
   Radio,
   Sparkles,
   Clock,
+  HardDrive,
   User as UserIcon,
+  CloudOff,
+  RefreshCw,
+  AlertCircle,
 } from 'lucide-react';
 import { Routine, Achievement, Task } from '../types';
-import { useNeuroStorage } from '../lib/storage';
+import {
+  useNeuroStorage,
+  exportAllData,
+} from '../lib/storage';
 import { useFirebaseAuth, useFirestoreSync } from '../lib/firebase';
+import { googleDriveService } from '../lib/googleDrive';
 import { TodayScreen } from '../screens/TodayScreen';
 import { NotesScreen } from '../screens/NotesScreen';
 import { RoutinesListScreen } from '../screens/RoutinesListScreen';
@@ -25,6 +33,7 @@ import { RoutineRunScreen } from '../screens/RoutineRunScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ConnectedServicesScreen } from '../screens/ConnectedServicesScreen';
 import { HealthIntegrationsScreen } from '../screens/HealthIntegrationsScreen';
+import { GoogleDriveScreen } from '../screens/GoogleDriveScreen';
 import { LexiChatInterface } from './LexiChatInterface';
 import { LiveVoiceScreen } from '../screens/LiveVoiceScreen';
 import { VisualClockTimer } from './VisualClockTimer';
@@ -34,7 +43,7 @@ import { AchievementToast } from './AchievementToast';
 export const AppShell: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'today' | 'routines' | 'lexi' | 'notes' | 'reflect'>('today');
   const [activeOverlay, setActiveOverlay] = useState<
-    'settings' | 'connected_services' | 'health_integrations' | 'live_voice' | null
+    'settings' | 'connected_services' | 'health_integrations' | 'live_voice' | 'google_drive' | null
   >(null);
   const [runningRoutine, setRunningRoutine] = useState<Routine | null>(null);
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
@@ -52,10 +61,38 @@ export const AppShell: React.FC = () => {
   });
 
   const storage = useNeuroStorage();
-  const { user, signInWithGoogle, signOut, syncStatus } = useFirebaseAuth();
+  const {
+    user,
+    accessToken,
+    signInWithGoogle,
+    signOut,
+    syncStatus,
+    pendingQueueCount,
+    triggerManualSync,
+  } = useFirebaseAuth();
 
   // Activate Firestore real-time synchronization
   useFirestoreSync(user);
+
+  // Automatic Google Drive Daily Backup
+  useEffect(() => {
+    if (!accessToken || !storage.settings.autoDriveBackup) return;
+
+    const payload = exportAllData();
+    googleDriveService.checkAndRunAutoBackup(accessToken, payload).then((res) => {
+      if (res.executed) {
+        setCurrentAchievement({
+          id: `backup-${Date.now()}`,
+          title: 'GOOGLE DRIVE SYNCED',
+          message: `Automatic daily snapshot created (${res.fileName})`,
+          type: 'backup',
+          timestamp: Date.now(),
+        });
+      }
+    }).catch((err) => {
+      console.warn('Auto backup check encountered error:', err);
+    });
+  }, [accessToken, storage.settings.autoDriveBackup]);
 
   const greetingName = user?.displayName || storage.settings.displayName;
 
@@ -87,18 +124,51 @@ export const AppShell: React.FC = () => {
             </h1>
             <div className="flex items-center gap-1.5 mt-1">
               {user ? (
-                <span className="text-[10px] text-[#2FB083] font-mono flex items-center gap-1">
-                  <Cloud className="w-2.5 h-2.5" />
-                  Firestore Synced
-                </span>
+                syncStatus === 'synced' ? (
+                  <span className="text-[10px] text-[#2FB083] font-mono flex items-center gap-1">
+                    <Cloud className="w-2.5 h-2.5" />
+                    Firestore Synced
+                  </span>
+                ) : syncStatus === 'syncing' ? (
+                  <span className="text-[10px] text-[#4285F4] font-mono flex items-center gap-1">
+                    <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                    Syncing ({pendingQueueCount})
+                  </span>
+                ) : syncStatus === 'offline' ? (
+                  <span className="text-[10px] text-[#8A8A8E] font-mono flex items-center gap-1">
+                    <CloudOff className="w-2.5 h-2.5" />
+                    Offline ({pendingQueueCount} queued)
+                  </span>
+                ) : syncStatus === 'queued' ? (
+                  <button
+                    onClick={triggerManualSync}
+                    className="text-[10px] text-[#D9A441] hover:underline font-mono flex items-center gap-1"
+                    title="Tap to retry offline sync"
+                  >
+                    <Clock className="w-2.5 h-2.5" />
+                    {pendingQueueCount} queued to sync
+                  </button>
+                ) : (
+                  <button
+                    onClick={triggerManualSync}
+                    className="text-[10px] text-[#EB5757] hover:underline font-mono flex items-center gap-1"
+                    title="Sync issue. Tap to retry."
+                  >
+                    <AlertCircle className="w-2.5 h-2.5" />
+                    Sync issue ({pendingQueueCount})
+                  </button>
+                )
               ) : (
-                <button
-                  onClick={signInWithGoogle}
-                  className="text-[10px] text-[#8A8A8E] hover:text-[#2FB083] flex items-center gap-1 transition-colors"
-                >
-                  <LogIn className="w-2.5 h-2.5" />
-                  Sign in with Google
-                </button>
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] text-[#8A8A8E] font-mono">Guest Mode</span>
+                  <button
+                    onClick={signInWithGoogle}
+                    className="text-[10px] text-[#2FB083] hover:underline flex items-center gap-1 transition-colors"
+                  >
+                    <LogIn className="w-2.5 h-2.5" />
+                    Sign in
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -115,6 +185,16 @@ export const AppShell: React.FC = () => {
           >
             <Clock className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Timer</span>
+          </button>
+
+          {/* Google Drive Quick Launcher */}
+          <button
+            onClick={() => setActiveOverlay('google_drive')}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#4285F4]/15 hover:bg-[#4285F4]/25 text-[#4285F4] text-xs font-semibold border border-[#4285F4]/30 transition-all shadow-sm"
+            title="Google Drive Files & Backups"
+          >
+            <HardDrive className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Drive</span>
           </button>
 
           {/* Live Voice Quick Trigger */}
@@ -289,6 +369,13 @@ export const AppShell: React.FC = () => {
         <LiveVoiceScreen onClose={() => setActiveOverlay(null)} />
       )}
 
+      {/* Google Drive Workspace Overlay */}
+      {activeOverlay === 'google_drive' && (
+        <div className="fixed inset-0 z-50 bg-[#0C0C0D] overflow-y-auto">
+          <GoogleDriveScreen onBack={() => setActiveOverlay(null)} />
+        </div>
+      )}
+
       {/* Visual Clock Timer Modal Overlay (Time-Blindness Pomodoro) */}
       {visualTimerState.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm animate-in fade-in">
@@ -314,6 +401,7 @@ export const AppShell: React.FC = () => {
             onBack={() => setActiveOverlay(null)}
             onOpenConnectedServices={() => setActiveOverlay('connected_services')}
             onOpenHealthIntegrations={() => setActiveOverlay('health_integrations')}
+            onOpenGoogleDrive={() => setActiveOverlay('google_drive')}
             refresh={storage.refresh}
           />
         </div>
@@ -322,7 +410,10 @@ export const AppShell: React.FC = () => {
       {/* Connected Services Overlay */}
       {activeOverlay === 'connected_services' && (
         <div className="fixed inset-0 z-50 bg-[#0C0C0D] overflow-y-auto">
-          <ConnectedServicesScreen onBack={() => setActiveOverlay('settings')} />
+          <ConnectedServicesScreen
+            onBack={() => setActiveOverlay('settings')}
+            onOpenGoogleDrive={() => setActiveOverlay('google_drive')}
+          />
         </div>
       )}
 
