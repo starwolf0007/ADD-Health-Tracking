@@ -78,7 +78,7 @@ export const AppShell: React.FC = () => {
   useEffect(() => {
     if (!accessToken || !storage.settings.autoDriveBackup) return;
 
-    const payload = exportAllData();
+    const payload = exportAllData({ includeSensitive: false });
     googleDriveService.checkAndRunAutoBackup(accessToken, payload).then((res) => {
       if (res.executed) {
         setCurrentAchievement({

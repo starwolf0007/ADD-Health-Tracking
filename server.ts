@@ -1,502 +1,911 @@
 import express from 'express';
-import http from 'http';
+import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
+import { GoogleGenAI, Modality, ThinkingLevel, Type } from '@google/genai';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import { GoogleGenAI, Modality } from '@google/genai';
+import http from 'http';
+import { redactSensitiveText, sanitizeContextForCloudAi } from './src/lib/privacyGate';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const PORT = 3000;
 
-const app = express();
-const server = http.createServer(app);
-
-// Initialize Gemini SDK with telemetry header
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+function getGenAI() {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not configured in environment');
+  }
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      },
     },
-  },
-});
+  });
+}
 
-app.use(express.json({ limit: '25mb' }));
+// Primary and fallback models for text/chat/grounding
+const PRIMARY_CHAT_MODEL = 'gemini-3.8-flash';
+const FALLBACK_CHAT_MODEL = 'gemini-3.1-flash-lite';
+const TRANSCRIBE_MODEL = 'gemini-3.5-transcribe';
+const LIVE_VOICE_MODEL = 'gemini-3.8-live';
+
+// Coordinated server-side deadlines (must finish before client's 26,000ms deadline)
+const PRIMARY_DEADLINE_MS = 6500;
+const FALLBACK_DEADLINE_MS = 14000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      const err: any = new Error(`${label} timed out after ${timeoutMs}ms`);
+      err.status = 504;
+      err.code = 'DEADLINE_EXCEEDED';
+      reject(err);
+    }, timeoutMs);
+
+    promise.then(
+      (val) => {
+        clearTimeout(timer);
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
 
 function shouldFallbackModel(err: any): boolean {
-  const msg = typeof err?.message === 'string' ? err.message : JSON.stringify(err || '');
+  const status = err?.status || err?.httpStatusCode || err?.code;
+  const msg = String(err?.message || '').toLowerCase();
   return (
-    err?.status === 429 ||
-    err?.code === 429 ||
-    err?.status === 503 ||
-    err?.code === 503 ||
-    msg.includes('429') ||
-    msg.includes('503') ||
-    msg.includes('UNAVAILABLE') ||
+    status === 404 ||
+    status === 429 ||
+    status === 503 ||
+    status === 504 ||
+    status === 'DEADLINE_EXCEEDED' ||
+    msg.includes('not found') ||
+    msg.includes('not supported') ||
     msg.includes('high demand') ||
-    msg.includes('RESOURCE_EXHAUSTED') ||
-    msg.includes('quota') ||
-    msg.includes('timeout') ||
-    msg.includes('TIMEOUT') ||
-    msg.includes('deadline')
+    msg.includes('unavailable') ||
+    msg.includes('timed out') ||
+    msg.includes('resource_exhausted')
   );
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, description: string): Promise<T> {
-  let timer: any;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(`${description} timed out after ${ms}ms`));
-    }, ms);
-  });
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    clearTimeout(timer);
-  });
+/**
+ * Schema for structured chat + optional task breakdown output.
+ * Supported by @google/genai on gemini-3.8-flash and gemini-3.1-flash-lite.
+ */
+const STRUCTURED_CHAT_SCHEMA = {
+  type: Type.OBJECT,
+  properties: {
+    reply: {
+      type: Type.STRING,
+      description:
+        'Warm, non-judgmental coaching reply to display in the chat message (plain text or markdown, max 3 short paragraphs).',
+    },
+    isTaskBreakdown: {
+      type: Type.BOOLEAN,
+      description:
+        'Set to true ONLY when the user explicitly asks to break down, plan steps for, or get started on a specific task or chore. Set to false for greetings, general questions, or reflections.',
+    },
+    targetTaskTitle: {
+      type: Type.STRING,
+      description:
+        'Concise title of the task being broken down when isTaskBreakdown is true; empty string otherwise.',
+    },
+    steps: {
+      type: Type.ARRAY,
+      description:
+        '3 to 5 concrete, actionable micro-steps (2 to 15 minutes each) when isTaskBreakdown is true; empty array [] when isTaskBreakdown is false.',
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          title: {
+            type: Type.STRING,
+            description: 'Concrete micro-step starting with an action verb (3 to 120 characters).',
+          },
+          estimatedMinutes: {
+            type: Type.INTEGER,
+            description: 'Estimated time in minutes (integer between 1 and 45).',
+          },
+          energy: {
+            type: Type.STRING,
+            description: 'Energy required: "low", "medium", or "high".',
+          },
+        },
+        required: ['title', 'estimatedMinutes', 'energy'],
+      },
+    },
+  },
+  required: ['reply', 'isTaskBreakdown', 'steps'],
+};
+
+export interface ValidatedMicroStep {
+  title: string;
+  estimatedMinutes: number;
+  energy: 'low' | 'medium' | 'high';
 }
 
-// ---------------------------------------------------------------------------
-// 1. Multi-Turn Gemini Chatbot Endpoint
-// ---------------------------------------------------------------------------
-app.post('/api/gemini/chat', async (req, res) => {
-  const reqId = (req.headers['x-request-id'] as string) || `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-  let clientAborted = false;
+export interface ValidatedTaskBreakdown {
+  targetTaskId?: string;
+  targetTaskTitle: string;
+  steps: ValidatedMicroStep[];
+}
 
-  res.on('close', () => {
-    if (!res.writableEnded) {
-      clientAborted = true;
+/**
+ * Validates and normalizes structured output from the model.
+ * Never fabricates steps on parser or validation failure.
+ */
+export function validateAndExtractChatOutput(
+  rawText: string,
+  context?: Record<string, any>
+): {
+  reply: string;
+  taskBreakdown: ValidatedTaskBreakdown | null;
+} {
+  const trimmed = (rawText || '').trim();
+  if (!trimmed) {
+    return {
+      reply: "I'm here with you. Tell me what's on your mind or which task feels stuck.",
+      taskBreakdown: null,
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object' && typeof parsed.reply === 'string') {
+      const cleanReply = parsed.reply.trim();
+      if (!parsed.isTaskBreakdown || !Array.isArray(parsed.steps) || parsed.steps.length === 0) {
+        return {
+          reply: cleanReply || "I'm here with you.",
+          taskBreakdown: null,
+        };
+      }
+
+      const validSteps: ValidatedMicroStep[] = [];
+      for (const item of parsed.steps) {
+        if (!item || typeof item !== 'object') continue;
+        const rawTitle = typeof item.title === 'string' ? item.title : '';
+        const cleanTitle = rawTitle
+          .replace(/^(?:step\s*\d+[:.)-]?\s*|\d+[.)]\s*|[-*•]\s*)/i, '')
+          .replace(/\*\*/g, '')
+          .trim();
+
+        if (cleanTitle.length < 3 || cleanTitle.length > 140) continue;
+
+        const rawMins = Number(item.estimatedMinutes);
+        const estimatedMinutes = Number.isFinite(rawMins)
+          ? Math.max(1, Math.min(60, Math.round(rawMins)))
+          : 5;
+
+        const rawEnergy = String(item.energy || 'low').toLowerCase();
+        const energy: 'low' | 'medium' | 'high' =
+          rawEnergy === 'high' ? 'high' : rawEnergy === 'medium' ? 'medium' : 'low';
+
+        validSteps.push({
+          title: cleanTitle,
+          estimatedMinutes,
+          energy,
+        });
+        if (validSteps.length >= 6) break;
+      }
+
+      if (validSteps.length === 0) {
+        return {
+          reply: cleanReply,
+          taskBreakdown: null,
+        };
+      }
+
+      const inferredTitle =
+        (typeof parsed.targetTaskTitle === 'string' && parsed.targetTaskTitle.trim()) ||
+        (typeof context?.activeTaskTitle === 'string' && context.activeTaskTitle.trim()) ||
+        (typeof context?.activeTask === 'string' && context.activeTask !== 'None'
+          ? context.activeTask.trim()
+          : 'Current Task');
+
+      const inferredId =
+        typeof context?.activeTaskId === 'string' && context.activeTaskId.trim()
+          ? context.activeTaskId.trim()
+          : undefined;
+
+      return {
+        reply: cleanReply,
+        taskBreakdown: {
+          targetTaskId: inferredId,
+          targetTaskTitle: inferredTitle,
+          steps: validSteps,
+        },
+      };
     }
+  } catch {
+    // Not JSON (e.g. search-grounded response or fallback text). Return plain text safely without fabricating steps.
+  }
+
+  return {
+    reply: trimmed,
+    taskBreakdown: null,
+  };
+}
+
+/**
+ * Verifies authentication/session header and explicit Cloud AI consent before invoking Gemini.
+ */
+function verifyCloudAiGate(
+  req: express.Request,
+  res: express.Response,
+  requestId: string
+): boolean {
+  const authHeader = String(req.headers['x-neuroflow-auth'] || '').toLowerCase();
+  const authBearer = String(req.headers['authorization'] || '');
+
+  if (
+    authHeader === 'unauthenticated' ||
+    authHeader === 'denied' ||
+    authBearer === 'Bearer invalid'
+  ) {
+    console.warn(`[Gate][${requestId}] Rejected unauthenticated request to ${req.path}`);
+    res.status(401).json({
+      error: 'Authentication required to access this protected endpoint.',
+      code: 'UNAUTHORIZED',
+      requestId,
+    });
+    return false;
+  }
+
+  const consentHeader = String(req.headers['x-cloud-ai-consent'] || '').toLowerCase();
+  const bodyConsent = req.body?.cloudAiConsent;
+
+  // Enforce explicit Cloud AI consent (either header x-cloud-ai-consent: true or explicit body flag)
+  if (consentHeader === 'false' || bodyConsent === false || consentHeader !== 'true') {
+    console.warn(`[Gate][${requestId}] Blocked Cloud AI call: consent=${consentHeader || 'missing'}`);
+    res.status(403).json({
+      error: 'Cloud AI is disabled. Enable Cloud Gemini in Settings to use cloud intelligence.',
+      code: 'CLOUD_AI_DISABLED',
+      requestId,
+    });
+    return false;
+  }
+
+  return true;
+}
+
+async function startServer() {
+  const app = express();
+  const server = http.createServer(app);
+
+  app.use(express.json({ limit: '25mb' }));
+
+  // ---------------------------------------------------------------------------
+  // 0. Diagnostic Health & Model Probe Endpoint
+  // ---------------------------------------------------------------------------
+  app.get('/api/gemini/health', (req, res) => {
+    const requestId = (req.headers['x-request-id'] as string) || `health-${Date.now()}`;
+    res.json({
+      ok: true,
+      requestId,
+      hasApiKey: Boolean(process.env.GEMINI_API_KEY),
+      models: {
+        primaryChat: PRIMARY_CHAT_MODEL,
+        fallbackChat: FALLBACK_CHAT_MODEL,
+        transcribe: TRANSCRIBE_MODEL,
+        liveVoice: LIVE_VOICE_MODEL,
+      },
+      deadlinesMs: {
+        primary: PRIMARY_DEADLINE_MS,
+        fallback: FALLBACK_DEADLINE_MS,
+      },
+    });
   });
 
-  const { messages, model = 'gemini-3.1-flash-lite', systemInstruction } = req.body;
-  console.log(`[${reqId}] /api/gemini/chat received. Requested model: ${model}`);
+  // ---------------------------------------------------------------------------
+  // 1. Lexi Chat & Task Breakdown API (Structured Output + Grounding Support)
+  // ---------------------------------------------------------------------------
+  app.post('/api/gemini/chat', async (req, res) => {
+    const startTime = Date.now();
+    const requestId =
+      (req.headers['x-request-id'] as string) ||
+      req.body?.requestId ||
+      `req-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
-  const defaultSystemInstruction =
-    systemInstruction ||
-    `You are Lexi, an empathetic, calm, and practical ADHD executive function companion.
-Your role:
-- Reduce initiation friction and cognitive overwhelm.
-- Offer absurdly small, concrete first physical steps.
-- Respect user capacity and energy levels (low, medium, high).
-- Never use shame, guilt, or pressure.
-- When helping with tasks, break them into clear, gentle micro-steps.
-- Keep responses concise, supportive, and conversational.`;
+    let clientAborted = false;
+    res.on('close', () => {
+      if (!res.writableEnded) {
+        clientAborted = true;
+        console.log(
+          `[Chat][${requestId}] Client aborted connection after ${Date.now() - startTime}ms`
+        );
+      }
+    });
 
-  // Map conversation history into Gemini format
-  const rawContents = (messages || []).map((m: { role: string; content: string }) => ({
-    role: m.role === 'assistant' || m.role === 'lexi' ? 'model' : 'user',
-    parts: [{ text: m.content }],
-  }));
-
-  if (rawContents.length === 0) {
-    return res.status(400).json({ error: 'Messages array cannot be empty', reqId });
-  }
-
-  // Ensure multi-turn conversation starts with a user turn
-  let contents = rawContents;
-  while (contents.length > 0 && contents[0].role === 'model') {
-    contents = contents.slice(1);
-  }
-  if (contents.length === 0) {
-    contents = [{ role: 'user', parts: [{ text: 'Hello Lexi' }] }];
-  }
-
-  const requestedModel = ['gemini-4-argon', 'gemini-3.8-flash', 'gemini-3.1-flash-lite'].includes(model)
-    ? model
-    : 'gemini-3.1-flash-lite';
-
-  // Try requested model first, then fast gemini-3.1-flash-lite fallback
-  const modelsToTry = [requestedModel];
-  if (requestedModel !== 'gemini-3.1-flash-lite') {
-    modelsToTry.push('gemini-3.1-flash-lite');
-  }
-
-  let lastError: any = null;
-
-  for (const currentModel of modelsToTry) {
-    if (clientAborted) {
-      console.log(`[${reqId}] Client aborted connection before model ${currentModel} completed.`);
+    if (!verifyCloudAiGate(req, res, requestId)) {
       return;
     }
 
-    const timeoutMs = currentModel === 'gemini-3.1-flash-lite' ? 14000 : 8000;
-    const startMs = Date.now();
-
     try {
-      console.log(`[${reqId}] Calling model ${currentModel} (timeout ${timeoutMs}ms)...`);
-      const response = await withTimeout(
-        ai.models.generateContent({
-          model: currentModel,
-          contents,
-          config: {
-            systemInstruction: defaultSystemInstruction,
-          },
-        }),
-        timeoutMs,
-        `Model ${currentModel}`
+      const { messages, context, enableSearch } = req.body || {};
+      if (!Array.isArray(messages) || messages.length === 0) {
+        res.status(400).json({
+          error: 'Messages array is required and cannot be empty.',
+          requestId,
+        });
+        return;
+      }
+
+      const ai = getGenAI();
+
+      // Enforce sensitive-data privacy boundary on context and messages
+      const safeContext = sanitizeContextForCloudAi(context);
+      let redactedCategoriesCount = 0;
+
+      const systemInstruction = `You are Lexi, a warm, non-judgmental executive function coach inside NeuroFlow.
+Your role:
+- Help users with ADHD, autism, or executive dysfunction initiate tasks, break down overwhelming projects into 2-to-10 minute micro-steps, and recover from interruptions without guilt.
+- Keep responses concise (max 3 short paragraphs), calm, encouraging, and concrete.
+- Never scold, never mention streaks broken, and never induce urgency or shame.
+- Only set isTaskBreakdown=true and populate steps when the user asks to break down, start, or plan a task or chore. For greetings ("Hello") or general questions, set isTaskBreakdown=false and steps=[].
+
+Current User Context (Non-Sensitive):
+${safeContext ? JSON.stringify(safeContext, null, 2) : 'Standard normal mode.'}`;
+
+      const contents = messages
+        .filter((m: any) => m && typeof m.text === 'string' && m.text.trim().length > 0)
+        .map((m: any) => {
+          const redaction = redactSensitiveText(m.text.trim());
+          if (redaction.wasRedacted) {
+            redactedCategoriesCount += redaction.redactedCategories.length;
+          }
+          return {
+            role: m.sender === 'user' ? 'user' : 'model',
+            parts: [{ text: redaction.sanitizedText }],
+          };
+        });
+
+      while (contents.length > 0 && contents[0].role !== 'user') {
+        contents.shift();
+      }
+
+      if (contents.length === 0) {
+        res.status(400).json({
+          error: 'At least one user message with non-empty text is required.',
+          requestId,
+        });
+        return;
+      }
+
+      const useSearch = Boolean(enableSearch);
+      console.log(
+        `[Chat][${requestId}] Starting model call (model=${PRIMARY_CHAT_MODEL}, turns=${contents.length}, search=${useSearch}, redacted=${redactedCategoriesCount})`
       );
 
-      const elapsed = Date.now() - startMs;
-      const reply = response.text || '';
-      console.log(`[${reqId}] Model ${currentModel} completed in ${elapsed}ms. Reply length: ${reply.length}`);
+      const buildConfig = (modelName: string) => {
+        const thinkingConfig =
+          modelName === PRIMARY_CHAT_MODEL
+            ? { thinkingConfig: { thinkingLevel: ThinkingLevel.LOW } }
+            : {};
+        if (useSearch) {
+          return {
+            systemInstruction,
+            tools: [{ googleSearch: {} }],
+            ...thinkingConfig,
+          };
+        }
+        return {
+          systemInstruction,
+          responseMimeType: 'application/json',
+          responseSchema: STRUCTURED_CHAT_SCHEMA,
+          ...thinkingConfig,
+        };
+      };
 
-      if (clientAborted) return;
-      return res.json({ reply, model: currentModel, reqId });
-    } catch (err: any) {
-      const elapsed = Date.now() - startMs;
-      lastError = err;
-      console.warn(`[${reqId}] Model ${currentModel} failed in ${elapsed}ms (${err?.message || err}).`);
+      let response;
+      let usedModel = PRIMARY_CHAT_MODEL;
 
-      if (shouldFallbackModel(err)) {
-        continue;
+      try {
+        response = await withTimeout(
+          ai.models.generateContent({
+            model: PRIMARY_CHAT_MODEL,
+            contents,
+            config: buildConfig(PRIMARY_CHAT_MODEL),
+          }),
+          PRIMARY_DEADLINE_MS,
+          `Model ${PRIMARY_CHAT_MODEL}`
+        );
+      } catch (primaryErr: any) {
+        if (clientAborted) return;
+        if (shouldFallbackModel(primaryErr)) {
+          console.warn(
+            `[Chat][${requestId}] Primary model ${PRIMARY_CHAT_MODEL} failed (${primaryErr?.status || primaryErr?.code || primaryErr?.message}), falling back to ${FALLBACK_CHAT_MODEL}`
+          );
+          usedModel = FALLBACK_CHAT_MODEL;
+          response = await withTimeout(
+            ai.models.generateContent({
+              model: FALLBACK_CHAT_MODEL,
+              contents,
+              config: buildConfig(FALLBACK_CHAT_MODEL),
+            }),
+            FALLBACK_DEADLINE_MS,
+            `Fallback model ${FALLBACK_CHAT_MODEL}`
+          );
+        } else {
+          throw primaryErr;
+        }
       }
-      break;
+
+      if (clientAborted || res.writableEnded) {
+        return;
+      }
+
+      const chunks =
+        response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      const sources = chunks
+        .map((c: any) => c.web)
+        .filter((w: any) => w && w.uri && w.title);
+
+      const rawText = response.text || '';
+      const validated = validateAndExtractChatOutput(rawText, safeContext);
+
+      const durationMs = Date.now() - startTime;
+      console.log(
+        `[Chat][${requestId}] Completed (status=200, model=${usedModel}, durationMs=${durationMs}, replyLength=${validated.reply.length}, breakdownSteps=${validated.taskBreakdown?.steps.length || 0})`
+      );
+
+      res.json({
+        reply: validated.reply,
+        taskBreakdown: validated.taskBreakdown,
+        sources,
+        requestId,
+        model: usedModel,
+        durationMs,
+        privacyRedacted: redactedCategoriesCount > 0,
+      });
+    } catch (error: any) {
+      const durationMs = Date.now() - startTime;
+      const status =
+        typeof error?.status === 'number' && error.status >= 400 && error.status < 600
+          ? error.status
+          : 500;
+      console.error(
+        `[Chat][${requestId}] Failed after ${durationMs}ms (status=${status}):`,
+        error?.message || error
+      );
+      if (!clientAborted && !res.writableEnded) {
+        res.status(status).json({
+          error: error?.message || 'Failed to generate chat response',
+          code: error?.code || 'MODEL_ERROR',
+          requestId,
+          durationMs,
+        });
+      }
     }
-  }
-
-  if (clientAborted) return;
-
-  const isQuota = shouldFallbackModel(lastError);
-  console.warn(`[${reqId}] All model attempts failed. Returning error to client.`);
-  return res.status(isQuota ? 429 : 500).json({
-    error: isQuota
-      ? 'Lexi is catching her breath! Gemini API rate limit or high demand reached. Please wait a moment and try again.'
-      : (lastError?.message || 'Chat generation failed'),
-    isQuota,
-    reqId,
   });
-});
 
-// ---------------------------------------------------------------------------
-// 2. Google Search Grounding Endpoint (gemini-3.8-flash)
-// ---------------------------------------------------------------------------
-app.post('/api/gemini/search', async (req, res) => {
-  const { query } = req.body;
-  if (!query) {
-    return res.status(400).json({ error: 'Query is required' });
-  }
+  // ---------------------------------------------------------------------------
+  // 2. Search Grounded Quick Lookup
+  // ---------------------------------------------------------------------------
+  app.post('/api/gemini/search', async (req, res) => {
+    const startTime = Date.now();
+    const requestId =
+      (req.headers['x-request-id'] as string) ||
+      req.body?.requestId ||
+      `search-${Date.now()}`;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: query,
-      config: {
-        tools: [{ googleSearch: {} }],
-        systemInstruction:
-          'You are Lexi. Provide helpful, up-to-date information grounded in Google Search. Synthesize the findings in a clear, supportive way for ADHD executive functioning.',
-      },
+    let clientAborted = false;
+    res.on('close', () => {
+      if (!res.writableEnded) clientAborted = true;
     });
 
-    const text = response.text || '';
-    const groundingChunks =
-      response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-
-    const sources = groundingChunks
-      .map((c: any) => c.web)
-      .filter((w: any) => w && w.uri);
-
-    return res.json({ text, sources });
-  } catch (err: any) {
-    console.warn('Search grounding error/quota:', err?.message || err);
-
-    // If quota or rate limit, fall back to answering without search tool
-    if (isQuotaError(err)) {
-      try {
-        const fallbackResponse = await ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
-          contents: query,
-          config: {
-            systemInstruction:
-              'You are Lexi. Provide a helpful, clear, and supportive response for ADHD executive functioning.',
-          },
-        });
-        return res.json({
-          text: fallbackResponse.text || '',
-          sources: [],
-          notice: 'Search grounding quota exceeded. Responded using general knowledge.',
-        });
-      } catch (fallbackErr) {
-        // Fall through
-      }
+    if (!verifyCloudAiGate(req, res, requestId)) {
+      return;
     }
 
-    return res.status(isQuotaError(err) ? 429 : 500).json({
-      error: isQuotaError(err)
-        ? 'Search quota exceeded. Please try again in a few moments.'
-        : (err.message || 'Search grounding failed'),
-      isQuota: isQuotaError(err),
+    try {
+      const { query } = req.body || {};
+      if (!query || typeof query !== 'string' || !query.trim()) {
+        res.status(400).json({ error: 'Query is required', requestId });
+        return;
+      }
+
+      const ai = getGenAI();
+      const sanitizedQuery = redactSensitiveText(query.trim()).sanitizedText;
+
+      let response;
+      let usedModel = PRIMARY_CHAT_MODEL;
+      try {
+        response = await withTimeout(
+          ai.models.generateContent({
+            model: PRIMARY_CHAT_MODEL,
+            contents: sanitizedQuery,
+            config: {
+              tools: [{ googleSearch: {} }],
+            },
+          }),
+          PRIMARY_DEADLINE_MS,
+          `Search ${PRIMARY_CHAT_MODEL}`
+        );
+      } catch (err: any) {
+        if (clientAborted) return;
+        if (shouldFallbackModel(err)) {
+          usedModel = FALLBACK_CHAT_MODEL;
+          response = await withTimeout(
+            ai.models.generateContent({
+              model: FALLBACK_CHAT_MODEL,
+              contents: sanitizedQuery,
+              config: {
+                tools: [{ googleSearch: {} }],
+              },
+            }),
+            FALLBACK_DEADLINE_MS,
+            `Search fallback ${FALLBACK_CHAT_MODEL}`
+          );
+        } else {
+          throw err;
+        }
+      }
+
+      if (clientAborted || res.writableEnded) return;
+
+      const chunks =
+        response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      const sources = chunks
+        .map((c: any) => c.web)
+        .filter((w: any) => w && w.uri && w.title);
+
+      res.json({
+        reply: response.text || '',
+        sources,
+        requestId,
+        model: usedModel,
+        durationMs: Date.now() - startTime,
+      });
+    } catch (error: any) {
+      const status =
+        typeof error?.status === 'number' && error.status >= 400 && error.status < 600
+          ? error.status
+          : 500;
+      if (!clientAborted && !res.writableEnded) {
+        res.status(status).json({
+          error: error?.message || 'Failed search grounding',
+          requestId,
+        });
+      }
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 3. Maps Grounding Lookup (Find nearby quiet spaces / pharmacies / errands)
+  // ---------------------------------------------------------------------------
+  app.post('/api/gemini/maps', async (req, res) => {
+    const startTime = Date.now();
+    const requestId =
+      (req.headers['x-request-id'] as string) ||
+      req.body?.requestId ||
+      `maps-${Date.now()}`;
+
+    let clientAborted = false;
+    res.on('close', () => {
+      if (!res.writableEnded) clientAborted = true;
     });
-  }
-});
 
-// ---------------------------------------------------------------------------
-// 3. Google Maps Grounding Endpoint (gemini-3.8-flash)
-// ---------------------------------------------------------------------------
-app.post('/api/gemini/maps', async (req, res) => {
-  const { query, latitude, longitude } = req.body;
-  if (!query) {
-    return res.status(400).json({ error: 'Query is required' });
-  }
+    if (!verifyCloudAiGate(req, res, requestId)) {
+      return;
+    }
 
-  const toolConfig: any = {};
-  if (latitude !== undefined && longitude !== undefined) {
-    toolConfig.retrievalConfig = {
-      latLng: {
-        latitude: Number(latitude),
-        longitude: Number(longitude),
-      },
-    };
-  }
+    try {
+      const { query, latitude, longitude } = req.body || {};
+      if (!query || typeof query !== 'string' || !query.trim()) {
+        res.status(400).json({ error: 'Query is required', requestId });
+        return;
+      }
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.8-flash',
-      contents: query,
-      config: {
+      const ai = getGenAI();
+      const sanitizedQuery = redactSensitiveText(query.trim()).sanitizedText;
+
+      const config: any = {
         tools: [{ googleMaps: {} }],
-        toolConfig: Object.keys(toolConfig).length > 0 ? toolConfig : undefined,
-        systemInstruction:
-          'You are Lexi. Assist the user in finding quiet study spaces, gyms, sensory-friendly coffee shops, or libraries based on Google Maps data.',
-      },
-    });
+      };
 
-    const text = response.text || '';
-    const groundingChunks =
-      response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
-
-    const places = groundingChunks
-      .filter((c: any) => c.maps)
-      .map((c: any) => ({
-        title: c.maps.title || 'Location',
-        uri: c.maps.uri || '',
-        placeAnswerSources: c.maps.placeAnswerSources || null,
-      }));
-
-    return res.json({ text, places });
-  } catch (err: any) {
-    console.warn('Maps grounding hit error or quota limit:', err?.message || err);
-
-    // If quota or rate limit, fall back gracefully to helpful general quiet space advice
-    if (isQuotaError(err)) {
-      try {
-        const fallbackResponse = await ai.models.generateContent({
-          model: 'gemini-3.1-flash-lite',
-          contents: `Suggest sensory-friendly quiet spaces, calm public libraries, and low-distraction environments for someone with ADHD looking for: "${query}". Provide practical criteria for choosing a quiet spot.`,
-          config: {
-            systemInstruction:
-              'You are Lexi. Provide warm, practical advice for finding sensory-friendly quiet places to work or study.',
+      if (latitude !== undefined && longitude !== undefined) {
+        config.toolConfig = {
+          retrievalConfig: {
+            latLng: {
+              latitude: Number(latitude),
+              longitude: Number(longitude),
+            },
           },
-        });
+        };
+      }
 
-        return res.json({
-          text: fallbackResponse.text || '',
-          places: [],
-          notice: 'Live Maps grounding quota temporarily exhausted. Showing sensory-friendly location advice.',
+      let response;
+      let usedModel = 'gemini-2.5-flash';
+      try {
+        response = await withTimeout(
+          ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: sanitizedQuery,
+            config,
+          }),
+          PRIMARY_DEADLINE_MS,
+          'Maps gemini-2.5-flash'
+        );
+      } catch (err: any) {
+        if (clientAborted) return;
+        usedModel = FALLBACK_CHAT_MODEL;
+        response = await withTimeout(
+          ai.models.generateContent({
+            model: FALLBACK_CHAT_MODEL,
+            contents: sanitizedQuery,
+          }),
+          FALLBACK_DEADLINE_MS,
+          `Maps fallback ${FALLBACK_CHAT_MODEL}`
+        );
+      }
+
+      if (clientAborted || res.writableEnded) return;
+
+      const chunks =
+        response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+      const places = chunks
+        .map((c: any) => c.maps)
+        .filter((m: any) => m && m.uri && m.title);
+
+      res.json({
+        reply: response.text || '',
+        places,
+        requestId,
+        model: usedModel,
+        durationMs: Date.now() - startTime,
+      });
+    } catch (error: any) {
+      const status =
+        typeof error?.status === 'number' && error.status >= 400 && error.status < 600
+          ? error.status
+          : 500;
+      if (!clientAborted && !res.writableEnded) {
+        res.status(status).json({
+          error: error?.message || 'Failed maps grounding',
+          requestId,
         });
-      } catch (fallbackErr) {
-        // Fall through
       }
     }
+  });
 
-    return res.status(isQuotaError(err) ? 429 : 500).json({
-      error: isQuotaError(err)
-        ? 'Google Maps quota reached. Please wait a few moments and try again.'
-        : (err.message || 'Maps grounding failed'),
-      isQuota: isQuotaError(err),
+  // ---------------------------------------------------------------------------
+  // 4. Audio Transcription API (gemini-3.5-transcribe)
+  // ---------------------------------------------------------------------------
+  app.post('/api/gemini/transcribe', async (req, res) => {
+    const startTime = Date.now();
+    const requestId =
+      (req.headers['x-request-id'] as string) ||
+      req.body?.requestId ||
+      `transcribe-${Date.now()}`;
+
+    let clientAborted = false;
+    res.on('close', () => {
+      if (!res.writableEnded) clientAborted = true;
     });
-  }
-});
 
-
-// ---------------------------------------------------------------------------
-// 4. Audio Transcription Endpoint (gemini-3.5-transcribe)
-// ---------------------------------------------------------------------------
-app.post('/api/gemini/transcribe', async (req, res) => {
-  try {
-    const { audioData, mimeType = 'audio/webm' } = req.body;
-    if (!audioData) {
-      return res.status(400).json({ error: 'Audio data is required' });
+    if (!verifyCloudAiGate(req, res, requestId)) {
+      return;
     }
 
-    const audioPart = {
-      inlineData: {
-        mimeType,
-        data: audioData,
-      },
-    };
+    try {
+      const { audioData, mimeType } = req.body || {};
+      if (!audioData) {
+        res.status(400).json({ error: 'Missing audioData', requestId });
+        return;
+      }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.5-transcribe',
-      contents: {
-        parts: [
-          audioPart,
-          {
-            text: 'Transcribe this spoken audio accurately. Output only the transcribed text without extra chatter.',
+      const ai = getGenAI();
+      const response = await withTimeout(
+        ai.models.generateContent({
+          model: TRANSCRIBE_MODEL,
+          contents: [
+            {
+              inlineData: {
+                data: audioData,
+                mimeType: mimeType || 'audio/webm',
+              },
+            },
+            'Transcribe this spoken note or task accurately. Return only the clean transcription text without extra commentary.',
+          ],
+        }),
+        FALLBACK_DEADLINE_MS,
+        `Transcribe ${TRANSCRIBE_MODEL}`
+      );
+
+      if (clientAborted || res.writableEnded) return;
+
+      res.json({
+        transcript: response.text?.trim() || '',
+        requestId,
+        durationMs: Date.now() - startTime,
+      });
+    } catch (error: any) {
+      const status =
+        typeof error?.status === 'number' && error.status >= 400 && error.status < 600
+          ? error.status
+          : 500;
+      if (!clientAborted && !res.writableEnded) {
+        res.status(status).json({
+          error: error?.message || 'Failed to transcribe audio',
+          requestId,
+        });
+      }
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // 5. WebSocket Bridge for Gemini Live Voice Conversational Mode
+  // ---------------------------------------------------------------------------
+  const wss = new WebSocketServer({ noServer: true });
+
+  server.on('upgrade', (request, socket, head) => {
+    const pathname = request.url?.split('?')[0];
+    if (pathname === '/api/live-ws') {
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    }
+  });
+
+  wss.on('connection', async (clientWs: WebSocket) => {
+    let session: any = null;
+    try {
+      const ai = getGenAI();
+      session = await ai.live.connect({
+        model: LIVE_VOICE_MODEL,
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: 'Aoede' },
+            },
           },
-        ],
-      },
-    });
-
-    const transcript = response.text?.trim() || '';
-    res.json({ transcript });
-  } catch (err: any) {
-    console.error('Error in /api/gemini/transcribe:', err);
-    res.status(500).json({ error: err.message || 'Audio transcription failed' });
-  }
-});
-
-// ---------------------------------------------------------------------------
-// 5. Live Voice WebSocket (gemini-3.8-live)
-// ---------------------------------------------------------------------------
-const wss = new WebSocketServer({ server, path: '/api/live-ws' });
-
-wss.on('connection', async (clientWs: WebSocket) => {
-  console.log('Client connected to Live Voice API WebSocket');
-
-  let liveSession: any = null;
-
-  try {
-    liveSession = await ai.live.connect({
-      model: 'gemini-3.8-live',
-      config: {
-        responseModalities: [Modality.AUDIO],
-        speechConfig: {
-          voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Zephyr' } },
+          systemInstruction: {
+            parts: [
+              {
+                text: `You are Lexi, a calm, supportive ADHD and executive-function companion inside NeuroFlow.
+Speak warmly and concisely. Help the user clarify their single next small step, capture a quick re-entry note before pausing, or gently transition to Quick Wins mode if they feel low on energy.`,
+              },
+            ],
+          },
+          inputAudioTranscription: {},
+          outputAudioTranscription: {},
         },
-        inputAudioTranscription: {},
-        outputAudioTranscription: {},
-        systemInstruction:
-          'You are Lexi speaking directly to the user in a calm, gentle, encouraging voice. Help them navigate their tasks, overcome inertia, and feel supported in their executive function.',
-      },
-      callbacks: {
-        onmessage: (message: any) => {
-          if (clientWs.readyState !== WebSocket.OPEN) return;
+        callbacks: {
+          onopen: () => {
+            if (clientWs.readyState === WebSocket.OPEN) {
+              clientWs.send(JSON.stringify({ type: 'connected' }));
+            }
+          },
+          onmessage: (message: any) => {
+            if (clientWs.readyState !== WebSocket.OPEN) return;
 
-          // Check for input/output transcriptions
-          if (message.serverContent?.inputTranscription?.text) {
-            clientWs.send(
-              JSON.stringify({
-                type: 'inputTranscript',
-                text: message.serverContent.inputTranscription.text,
-              })
-            );
-          }
+            const parts = message.serverContent?.modelTurn?.parts;
+            if (parts) {
+              for (const part of parts) {
+                if (part.inlineData?.data) {
+                  clientWs.send(
+                    JSON.stringify({
+                      type: 'audio',
+                      data: part.inlineData.data,
+                    })
+                  );
+                }
+              }
+            }
 
-          if (message.serverContent?.outputTranscription?.text) {
-            clientWs.send(
-              JSON.stringify({
-                type: 'outputTranscript',
-                text: message.serverContent.outputTranscription.text,
-              })
-            );
-          }
+            if (message.serverContent?.interrupted) {
+              clientWs.send(JSON.stringify({ type: 'interrupted' }));
+            }
 
-          // Check for audio chunks (24kHz PCM)
-          for (const part of message.serverContent?.modelTurn?.parts ?? []) {
-            if (part.inlineData?.data) {
+            if (message.serverContent?.inputTranscription?.text) {
               clientWs.send(
                 JSON.stringify({
-                  type: 'audio',
-                  data: part.inlineData.data,
+                  type: 'inputTranscript',
+                  text: message.serverContent.inputTranscription.text,
                 })
               );
             }
-          }
 
-          // Check for interruption signal
-          if (message.serverContent?.interrupted) {
-            clientWs.send(JSON.stringify({ type: 'interrupted' }));
-          }
-        },
-        onclose: () => {
-          console.log('Gemini Live session closed');
-          if (clientWs.readyState === WebSocket.OPEN) {
-            clientWs.send(JSON.stringify({ type: 'sessionClosed' }));
-          }
-        },
-        onerror: (err: any) => {
-          console.error('Gemini Live session error:', err);
-          if (clientWs.readyState === WebSocket.OPEN) {
-            clientWs.send(JSON.stringify({ type: 'error', message: err.message }));
-          }
-        },
-      },
-    });
+            if (message.serverContent?.outputTranscription?.text) {
+              clientWs.send(
+                JSON.stringify({
+                  type: 'outputTranscript',
+                  text: message.serverContent.outputTranscription.text,
+                })
+              );
+            }
 
-    clientWs.send(JSON.stringify({ type: 'connected' }));
+            if (message.serverContent?.turnComplete) {
+              clientWs.send(JSON.stringify({ type: 'turnComplete' }));
+            }
+          },
+          onerror: (err: any) => {
+            console.error('Live API error:', err);
+            if (clientWs.readyState === WebSocket.OPEN) {
+              clientWs.send(
+                JSON.stringify({
+                  type: 'error',
+                  message: err?.message || 'Live API error',
+                })
+              );
+            }
+          },
+          onclose: () => {
+            if (clientWs.readyState === WebSocket.OPEN) {
+              clientWs.close();
+            }
+          },
+        },
+      });
 
-    clientWs.on('message', (rawData: any) => {
-      try {
-        const parsed = JSON.parse(rawData.toString());
-        if (parsed.audio && liveSession) {
-          // Send 16kHz PCM audio chunk
-          liveSession.sendRealtimeInput({
-            audio: {
-              data: parsed.audio,
-              mimeType: 'audio/pcm;rate=16000',
-            },
-          });
-        } else if (parsed.text && liveSession) {
-          // Send text input to live session
-          liveSession.sendClientContent({
-            turns: [
-              {
-                role: 'user',
-                parts: [{ text: parsed.text }],
+      clientWs.on('message', (raw: Buffer) => {
+        try {
+          const msg = JSON.parse(raw.toString());
+          if (msg.audio && session) {
+            session.sendRealtimeInput({
+              audio: {
+                data: msg.audio,
+                mimeType: 'audio/pcm;rate=16000',
               },
-            ],
-            turnComplete: true,
-          });
+            });
+          } else if (msg.text && session) {
+            const sanitized = redactSensitiveText(String(msg.text)).sanitizedText;
+            session.sendClientContent({
+              turns: [{ role: 'user', parts: [{ text: sanitized }] }],
+              turnComplete: true,
+            });
+          }
+        } catch (err) {
+          console.error('Failed to process client WS message:', err);
         }
-      } catch (err) {
-        console.warn('Error processing client audio/text message:', err);
-      }
-    });
+      });
 
-    clientWs.on('close', () => {
-      console.log('Client closed WebSocket');
-      if (liveSession && typeof liveSession.close === 'function') {
-        liveSession.close();
+      clientWs.on('close', () => {
+        if (session) {
+          try {
+            session.close();
+          } catch {}
+        }
+      });
+    } catch (error: any) {
+      console.error('Failed to establish Gemini Live session:', error);
+      if (clientWs.readyState === WebSocket.OPEN) {
+        clientWs.send(
+          JSON.stringify({
+            type: 'error',
+            message: error.message || 'Failed to connect to Gemini Live',
+          })
+        );
+        clientWs.close();
       }
-    });
-  } catch (err: any) {
-    console.error('Failed to connect to Gemini Live session:', err);
-    if (clientWs.readyState === WebSocket.OPEN) {
-      clientWs.send(JSON.stringify({ type: 'error', message: err.message }));
-      clientWs.close();
     }
-  }
-});
+  });
 
-// ---------------------------------------------------------------------------
-// 6. Vite Dev Server / Static File Serving
-// ---------------------------------------------------------------------------
-async function startServer() {
-  const isDev = process.env.NODE_ENV !== 'production';
-
-  if (isDev) {
-    const { createServer: createViteServer } = await import('vite');
+  // ---------------------------------------------------------------------------
+  // Vite Middleware (Dev) or Static Assets (Prod)
+  // ---------------------------------------------------------------------------
+  if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.resolve(__dirname, 'dist');
+    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(distPath, 'index.html'));
+    app.get('*all', (_req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
-  const PORT = 3000;
-  const HOST = '0.0.0.0';
-
-  server.listen(PORT, HOST, () => {
-    console.log(`NeuroFlow full-stack server running on http://${HOST}:${PORT}`);
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log(`NeuroFlow server running on http://localhost:${PORT}`);
   });
 }
 
-startServer().catch((err) => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+startServer();

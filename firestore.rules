@@ -1,12 +1,158 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Users can only read and write their own data
+    // 1. Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 2. Reusable Security Primitives
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    // 3. Entity Validation Blueprints
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid']) &&
+        data.keys().hasOnly(['uid', 'email', 'displayName', 'photoURL', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid == userId &&
+        (!('email' in data) || data.email == null || (data.email is string && data.email.size() <= 256)) &&
+        (!('displayName' in data) || data.displayName == null || (data.displayName is string && data.displayName.size() <= 120)) &&
+        (!('photoURL' in data) || data.photoURL == null || (data.photoURL is string && data.photoURL.size() <= 1024)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 64)) &&
+        (!('updatedAt' in data) || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidTask(data, taskId) {
+      return data.keys().hasAll(['id', 'title', 'energy', 'status', 'createdAt', 'isQuickWin']) &&
+        data.keys().hasOnly([
+          'id', 'title', 'notes', 'energy', 'status', 'createdAt', 'dueDate',
+          'completedAt', 'activeStartedAt', 'estimatedMinutes', 'reentryNote',
+          'isQuickWin', 'googleTaskId', 'updatedAt'
+        ]) &&
+        data.id is string && data.id == taskId && data.id.size() <= 128 &&
+        data.title is string && data.title.size() >= 1 && data.title.size() <= 300 &&
+        data.energy in ['low', 'medium', 'high'] &&
+        data.status in ['pending', 'inProgress', 'completed', 'skipped', 'paused', 'blocked'] &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.isQuickWin is bool &&
+        (!('notes' in data) || data.notes == null || (data.notes is string && data.notes.size() <= 4000)) &&
+        (!('dueDate' in data) || data.dueDate == null || (data.dueDate is string && data.dueDate.size() <= 64)) &&
+        (!('completedAt' in data) || data.completedAt == null || (data.completedAt is string && data.completedAt.size() <= 64)) &&
+        (!('activeStartedAt' in data) || data.activeStartedAt == null || (data.activeStartedAt is string && data.activeStartedAt.size() <= 64)) &&
+        (!('estimatedMinutes' in data) || data.estimatedMinutes == null || (data.estimatedMinutes is number && data.estimatedMinutes >= 0 && data.estimatedMinutes <= 1440)) &&
+        (!('reentryNote' in data) || data.reentryNote == null || data.reentryNote is map) &&
+        (!('googleTaskId' in data) || data.googleTaskId == null || (data.googleTaskId is string && data.googleTaskId.size() <= 256)) &&
+        (!('updatedAt' in data) || data.updatedAt == null || (data.updatedAt is string && data.updatedAt.size() <= 64));
+    }
+
+    function isValidNote(data, noteId) {
+      return data.keys().hasAll(['id', 'body', 'pinned', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'body', 'pinned', 'linkedTaskId', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id == noteId && data.id.size() <= 128 &&
+        data.body is string && data.body.size() >= 1 && data.body.size() <= 10000 &&
+        data.pinned is bool &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        data.updatedAt is string && data.updatedAt.size() <= 64 &&
+        (!('linkedTaskId' in data) || data.linkedTaskId == null || (data.linkedTaskId is string && data.linkedTaskId.size() <= 128));
+    }
+
+    function isValidRoutine(data, routineId) {
+      return data.keys().hasAll(['id', 'name', 'anchor', 'isActive', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'name', 'anchor', 'scheduleHour', 'scheduleMinute', 'isActive', 'activeDays', 'steps', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id == routineId && data.id.size() <= 128 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        data.anchor in ['morning', 'midday', 'evening', 'custom'] &&
+        data.isActive is bool &&
+        data.createdAt is string && data.createdAt.size() <= 64 &&
+        (!('steps' in data) || (data.steps is list && data.steps.size() <= 50));
+    }
+
+    function isValidHabit(data, habitId) {
+      return data.keys().hasAll(['id', 'name', 'frequency', 'isActive', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'name', 'icon', 'notes', 'frequency', 'isActive', 'createdAt', 'updatedAt']) &&
+        data.id is string && data.id == habitId && data.id.size() <= 128 &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 160 &&
+        // Enforce on-device-only medication habit rule at database boundary
+        !data.name.matches('.*(?i)(medication|medicine|adderall|vyvanse|ritalin|concerta|prescription).*') &&
+        (!('icon' in data) || data.icon == null || (data.icon is string && data.icon.size() <= 32 && data.icon != '💊')) &&
+        data.frequency in ['daily', 'weekdays', 'weekends'] &&
+        data.isActive is bool &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    function isValidHabitCheckIn(data, checkInId) {
+      return data.keys().hasAll(['id', 'habitId', 'date', 'completed', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'habitId', 'date', 'completed', 'createdAt']) &&
+        data.id is string && data.id == checkInId && data.id.size() <= 128 &&
+        data.habitId is string && data.habitId.size() <= 128 &&
+        data.date is string && data.date.size() <= 16 &&
+        data.completed is bool &&
+        data.createdAt is string && data.createdAt.size() <= 64;
+    }
+
+    // 4. User-Scoped Collections (Strict Owner-Only Isolation)
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
-      
-      match /{allSubcollections=**} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow get: if isOwner(userId) && isValidId(userId);
+      allow list: if false;
+      allow create, update: if isOwner(userId) && isValidId(userId) && isValidUserProfile(incoming(), userId);
+      allow delete: if isOwner(userId) && isValidId(userId);
+
+      match /tasks/{taskId} {
+        allow get: if isOwner(userId) && isValidId(taskId);
+        allow list: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidId(taskId) && isValidTask(incoming(), taskId);
+        allow delete: if isOwner(userId) && isValidId(taskId);
+      }
+
+      match /notes/{noteId} {
+        allow get: if isOwner(userId) && isValidId(noteId);
+        allow list: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidId(noteId) && isValidNote(incoming(), noteId);
+        allow delete: if isOwner(userId) && isValidId(noteId);
+      }
+
+      match /routines/{routineId} {
+        allow get: if isOwner(userId) && isValidId(routineId);
+        allow list: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidId(routineId) && isValidRoutine(incoming(), routineId);
+        allow delete: if isOwner(userId) && isValidId(routineId);
+      }
+
+      match /habits/{habitId} {
+        allow get: if isOwner(userId) && isValidId(habitId);
+        allow list: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidId(habitId) && isValidHabit(incoming(), habitId);
+        allow delete: if isOwner(userId) && isValidId(habitId);
+      }
+
+      match /habit_checkins/{checkInId} {
+        allow get: if isOwner(userId) && isValidId(checkInId);
+        allow list: if isOwner(userId);
+        allow create, update: if isOwner(userId) && isValidId(checkInId) && isValidHabitCheckIn(incoming(), checkInId);
+        allow delete: if isOwner(userId) && isValidId(checkInId);
+      }
+
+      // 5. Explicit On-Device-Only Sensitive Class Denial (Spec §2.8 & §14)
+      match /mood_logs/{logId} {
+        allow read, write: if false;
+      }
+
+      match /hevy_workouts/{workoutId} {
+        allow read, write: if false;
       }
     }
   }

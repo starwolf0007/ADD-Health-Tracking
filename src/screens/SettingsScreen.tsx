@@ -61,6 +61,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   const [guestSummary, setGuestSummary] = useState(getGuestDataSummary());
   const [isSyncingNow, setIsSyncingNow] = useState(false);
   const [mergeNotice, setMergeNotice] = useState<string | null>(null);
+  const [showCloudConsentConfirm, setShowCloudConsentConfirm] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [includeSensitiveExport, setIncludeSensitiveExport] = useState(false);
 
   const handleSaveName = (newName: string) => {
     setName(newName);
@@ -83,28 +86,27 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
   };
 
   const handleToggleCloudGemini = () => {
-    if (!cloudGemini) {
-      const ok = window.confirm(
-        'Enable Cloud Gemini?\n\nTask titles and descriptions will be processed for smarter executive breakdown suggestions. Health data, energy logs, and private mood check-ins are NEVER shared and remain strictly on-device.\n\nYou can turn this off at any time.'
-      );
-      if (!ok) return;
+    if (!cloudGemini && !showCloudConsentConfirm) {
+      setShowCloudConsentConfirm(true);
+      return;
     }
     const next = !cloudGemini;
     setCloudGemini(next);
+    setShowCloudConsentConfirm(false);
     settingsStorage.save({ cloudGemini: next });
     refresh();
   };
 
+  const handleConfirmEnableCloudGemini = () => {
+    setCloudGemini(true);
+    setShowCloudConsentConfirm(false);
+    settingsStorage.save({ cloudGemini: true });
+    refresh();
+  };
 
   const handleResetData = () => {
-    if (
-      window.confirm(
-        'Reset NeuroFlow data to initial clean state? This reloads the starter routines, habits, and tasks.'
-      )
-    ) {
-      localStorage.clear();
-      window.location.reload();
-    }
+    localStorage.clear();
+    window.location.reload();
   };
 
   return (
@@ -330,7 +332,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             <div className="pr-4">
               <h4 className="text-xs font-medium text-[#F0F0F0]">Cloud Gemini breakdown</h4>
               <p className="text-[11px] text-[#8A8A8E] mt-0.5">
-                Multi-model ADHD planning using gemini-4-argon, gemini-3.8-flash, and gemini-3.1-flash-lite.
+                Multi-model ADHD planning using gemini-3.8-flash and gemini-3.1-flash-lite. Mood logs, medications, and health metrics are stripped by the on-device privacy gate.
               </p>
             </div>
             <button
@@ -346,6 +348,33 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
               />
             </button>
           </div>
+
+          {showCloudConsentConfirm && !cloudGemini && (
+            <div className="p-3 rounded-xl bg-[#1C1C1F] border border-[#2FB083]/40 space-y-2">
+              <p className="text-xs text-[#F0F0F0] font-medium">
+                Enable Cloud Gemini?
+              </p>
+              <p className="text-[11px] text-[#8A8A8E] leading-relaxed">
+                Task titles and descriptions will be processed for executive breakdown suggestions. Sensitive health data, medication habits, and mood check-ins are strictly on-device and never shared.
+              </p>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleConfirmEnableCloudGemini}
+                  className="px-3 py-1.5 rounded-lg bg-[#2FB083] text-[#0C0C0D] text-xs font-semibold"
+                >
+                  Confirm & Enable
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowCloudConsentConfirm(false)}
+                  className="px-3 py-1.5 rounded-lg bg-[#232326] text-[#8A8A8E] text-xs"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="pt-2 border-t border-[#232326] text-[11px] text-[#8A8A8E] space-y-1">
             <div className="flex items-center justify-between">
@@ -451,42 +480,79 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
         )}
 
         {/* Local JSON Backup Download */}
-        <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326] flex items-center justify-between">
-          <div>
-            <h4 className="text-xs font-medium text-[#F0F0F0]">Export Local Data Snapshot</h4>
-            <p className="text-[11px] text-[#8A8A8E]">
-              Download an unencrypted JSON snapshot of your current tasks, habits, and notes.
-            </p>
+        <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326] space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="pr-3">
+              <h4 className="text-xs font-medium text-[#F0F0F0]">Export Local Data Snapshot</h4>
+              <p className="text-[11px] text-[#8A8A8E]">
+                Download a JSON snapshot of your tasks, routines, non-sensitive habits, and notes. Automatic cloud backups always exclude sensitive data.
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                const data = exportAllData({ includeSensitive: includeSensitiveExport });
+                const blob = new Blob([JSON.stringify(data, null, 2)], {
+                  type: 'application/json',
+                });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `neuroflow-backup-${getStorageScope()}-${formatDateKey(new Date())}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+              className="p-2.5 rounded-xl bg-[#212124] text-[#8A8A8E] hover:text-[#F0F0F0] border border-[#232326] transition-colors shrink-0"
+              title="Download JSON snapshot"
+            >
+              <Download className="w-4 h-4" />
+            </button>
           </div>
-          <button
-            onClick={() => {
-              const data = exportAllData();
-              const blob = new Blob([JSON.stringify(data, null, 2)], {
-                type: 'application/json',
-              });
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `neuroflow-backup-${getStorageScope()}-${formatDateKey(new Date())}.json`;
-              a.click();
-              URL.revokeObjectURL(url);
-            }}
-            className="p-2 rounded-xl bg-[#212124] text-[#8A8A8E] hover:text-[#F0F0F0] border border-[#232326] transition-colors"
-            title="Download JSON snapshot"
-          >
-            <Download className="w-4 h-4" />
-          </button>
+
+          <label className="flex items-center justify-between pt-2 border-t border-[#232326]/60 cursor-pointer text-[11px] text-[#8A8A8E]">
+            <span>Include on-device sensitive data (Mood logs, Hevy workouts, medication habits)</span>
+            <input
+              type="checkbox"
+              checked={includeSensitiveExport}
+              onChange={(e) => setIncludeSensitiveExport(e.target.checked)}
+              className="rounded border-[#232326] bg-[#1C1C1F] text-[#2FB083] focus:ring-0"
+            />
+          </label>
         </div>
 
         {/* Reset Local Data */}
         <div className="pt-2">
-          <button
-            onClick={handleResetData}
-            className="text-xs text-[#8A8A8E] hover:text-[#D9A441] flex items-center gap-1.5 transition-colors"
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Reset current scope to defaults</span>
-          </button>
+          {!showResetConfirm ? (
+            <button
+              type="button"
+              onClick={() => setShowResetConfirm(true)}
+              className="text-xs text-[#8A8A8E] hover:text-[#D9A441] flex items-center gap-1.5 transition-colors"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Reset current scope to defaults</span>
+            </button>
+          ) : (
+            <div className="p-3 rounded-xl bg-[#D9A441]/10 border border-[#D9A441]/40 flex items-center justify-between gap-2">
+              <span className="text-xs text-[#F0F0F0]">
+                Reset local storage to starter defaults?
+              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleResetData}
+                  className="px-3 py-1 rounded-lg bg-[#D9A441] text-[#0C0C0D] text-xs font-semibold"
+                >
+                  Confirm Reset
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowResetConfirm(false)}
+                  className="px-2.5 py-1 rounded-lg bg-[#212124] text-[#8A8A8E] text-xs"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

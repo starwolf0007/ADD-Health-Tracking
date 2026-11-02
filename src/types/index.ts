@@ -64,6 +64,7 @@ export interface HabitCheckIn {
 export interface Habit {
   id: string;
   name: string;
+  icon?: string;
   notes?: string;
   frequency: HabitFrequency;
   isActive: boolean;

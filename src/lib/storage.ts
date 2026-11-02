@@ -11,6 +11,7 @@ import {
   RoutineStep,
 } from '../types';
 import { SEED_ROUTINES, SEED_HABITS, SEED_TASKS, SEED_WORKOUTS } from './constants';
+import { filterNonSensitiveHabits } from './privacyGate';
 
 // ---------------------------------------------------------------------------
 // Storage Scope Management
@@ -795,17 +796,26 @@ export function useNeuroStorage() {
   };
 }
 
-export function exportAllData() {
+export interface ExportOptions {
+  includeSensitive?: boolean;
+}
+
+export function exportAllData(options?: ExportOptions) {
+  const includeSensitive = options?.includeSensitive === true;
+  const allHabits = habitStorage.getAll();
+  const exportedHabits = includeSensitive ? allHabits : filterNonSensitiveHabits(allHabits);
+
   return {
     version: 2,
     scope: getStorageScope(),
+    privacyTier: includeSensitive ? 'full-including-sensitive' : 'standard-non-sensitive',
     exportedAt: new Date().toISOString(),
     tasks: taskStorage.getAll(),
     routines: routineStorage.getAll(),
-    habits: habitStorage.getAll(),
-    moods: moodStorage.getAll(),
+    habits: exportedHabits,
+    moods: includeSensitive ? moodStorage.getAll() : [],
     notes: noteStorage.getAll(),
     settings: settingsStorage.get(),
-    hevyWorkouts: hevyStorage.getWorkouts(),
+    hevyWorkouts: includeSensitive ? hevyStorage.getWorkouts() : [],
   };
 }

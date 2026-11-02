@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { settingsStorage } from './storage';
 
 export function useAudioTranscribe() {
   const [isRecording, setIsRecording] = useState(false);
@@ -10,6 +11,12 @@ export function useAudioTranscribe() {
 
   const startRecording = async (): Promise<boolean> => {
     setError(null);
+    const settings = settingsStorage.get();
+    if (!settings.cloudGemini) {
+      setError('Cloud AI is disabled. Enable Cloud Gemini in Settings to use voice transcription.');
+      return false;
+    }
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       const mediaRecorder = new MediaRecorder(stream, {
@@ -47,23 +54,26 @@ export function useAudioTranscribe() {
         setIsTranscribing(true);
 
         try {
-          // Stop media tracks
           recorder.stream.getTracks().forEach((track) => track.stop());
 
           const mimeType = recorder.mimeType || 'audio/webm';
           const blob = new Blob(chunksRef.current, { type: mimeType });
 
-          // Convert blob to base64
           const reader = new FileReader();
           reader.readAsDataURL(blob);
           reader.onloadend = async () => {
             const base64Url = reader.result as string;
             const base64Data = base64Url.split(',')[1];
+            const settings = settingsStorage.get();
 
             try {
               const res = await fetch('/api/gemini/transcribe', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: {
+                  'Content-Type': 'application/json',
+                  'x-cloud-ai-consent': String(settings.cloudGemini),
+                  'x-neuroflow-client': 'web-applet-v1',
+                },
                 body: JSON.stringify({
                   audioData: base64Data,
                   mimeType,
@@ -71,7 +81,7 @@ export function useAudioTranscribe() {
               });
 
               if (!res.ok) {
-                const errData = await res.json();
+                const errData = await res.json().catch(() => ({}));
                 throw new Error(errData.error || 'Transcription failed');
               }
 

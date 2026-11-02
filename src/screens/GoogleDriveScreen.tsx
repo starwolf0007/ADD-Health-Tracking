@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { useFirebaseAuth } from '../lib/firebase';
 import { googleDriveService, DriveFile } from '../lib/googleDrive';
-import { useNeuroStorage } from '../lib/storage';
+import { useNeuroStorage, exportAllData } from '../lib/storage';
 
 interface GoogleDriveScreenProps {
   onBack: () => void;
@@ -78,14 +78,7 @@ export const GoogleDriveScreen: React.FC<GoogleDriveScreenProps> = ({ onBack }) 
     setIsUploading(true);
     setError(null);
     try {
-      const backupPayload = {
-        exportedAt: new Date().toISOString(),
-        tasks: storage.tasks,
-        routines: storage.routines,
-        habits: storage.habits,
-        notes: storage.notes,
-        settings: storage.settings,
-      };
+      const backupPayload = exportAllData({ includeSensitive: false });
 
       const createdFile = await googleDriveService.backupNeuroFlowData(
         accessToken,

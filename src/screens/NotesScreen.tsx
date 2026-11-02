@@ -20,6 +20,8 @@ export const NotesScreen: React.FC<NotesScreenProps> = ({ notes, refresh }) => {
   const [editingNote, setEditingNote] = useState<Note | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [newBody, setNewBody] = useState('');
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [promoteNotice, setPromoteNotice] = useState<string | null>(null);
 
   const sortedNotes = [...notes].sort((a, b) => {
     if (a.pinned && !b.pinned) return -1;
@@ -68,10 +70,13 @@ export const NotesScreen: React.FC<NotesScreenProps> = ({ notes, refresh }) => {
 
   const handleDelete = (id: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (window.confirm('Delete this note? This cannot be undone.')) {
-      noteStorage.delete(id);
-      refresh();
+    if (deleteConfirmId !== id) {
+      setDeleteConfirmId(id);
+      return;
     }
+    noteStorage.delete(id);
+    setDeleteConfirmId(null);
+    refresh();
   };
 
   const handlePromoteToTask = (note: Note, e: React.MouseEvent) => {
@@ -91,7 +96,8 @@ export const NotesScreen: React.FC<NotesScreenProps> = ({ notes, refresh }) => {
     };
 
     taskStorage.save(newTask);
-    alert(`Promoted to Today: "${title}"`);
+    setPromoteNotice(`Promoted to Today: "${title}"`);
+    setTimeout(() => setPromoteNotice(null), 4000);
     refresh();
   };
 
@@ -126,6 +132,12 @@ export const NotesScreen: React.FC<NotesScreenProps> = ({ notes, refresh }) => {
           <span>New Note</span>
         </button>
       </div>
+
+      {promoteNotice && (
+        <div className="p-3 rounded-xl bg-[#2FB083]/15 border border-[#2FB083]/40 text-xs text-[#2FB083] font-medium">
+          {promoteNotice}
+        </div>
+      )}
 
       {sortedNotes.length === 0 ? (
         <div className="text-center py-16 px-4 bg-[#161618] border border-dashed border-[#232326] rounded-2xl">
@@ -172,10 +184,15 @@ export const NotesScreen: React.FC<NotesScreenProps> = ({ notes, refresh }) => {
                   </button>
                   <button
                     onClick={(e) => handleDelete(note.id, e)}
-                    className="p-1.5 rounded-lg hover:text-[#D9A441] transition-colors"
+                    className={`p-1.5 rounded-lg transition-colors flex items-center gap-1 text-xs ${
+                      deleteConfirmId === note.id
+                        ? 'bg-[#D9A441] text-[#0C0C0D] font-semibold px-2'
+                        : 'hover:text-[#D9A441]'
+                    }`}
                     title="Delete note"
                   >
                     <Trash2 className="w-4 h-4" />
+                    {deleteConfirmId === note.id && <span>Confirm</span>}
                   </button>
                 </div>
               </div>

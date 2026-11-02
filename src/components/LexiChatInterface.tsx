@@ -1,662 +1,644 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  Sparkles,
   Send,
+  Mic,
+  Square,
+  Sparkles,
+  Plus,
   Check,
   Globe,
   MapPin,
-  Mic,
-  Square,
-  Radio,
-  ExternalLink,
-  Plus,
   Loader2,
-  Brain,
-  Zap,
-  Coffee,
-  HelpCircle,
-  BatteryLow,
-  Users,
-  Smile,
+  AudioLines,
   AlertCircle,
-  Clock,
   RotateCcw,
-  X,
+  XCircle,
+  ShieldCheck,
+  Link2,
 } from 'lucide-react';
-import { Task, LexiProposal } from '../types';
-import { LexiAvatar } from './LexiAvatar';
-import { taskStorage, settingsStorage } from '../lib/storage';
+import { Task, EnergyLevel } from '../types';
 import { useAudioTranscribe } from '../lib/useTranscribe';
+import { taskStorage, settingsStorage } from '../lib/storage';
+import { redactSensitiveText, sanitizeContextForCloudAi } from '../lib/privacyGate';
 
-interface GroundingSource {
-  uri: string;
-  title: string;
-}
-
-interface GroundingPlace {
-  title: string;
-  uri: string;
-  placeAnswerSources?: any;
+interface ChatMessage {
+  id: string;
+  sender: 'user' | 'lexi';
+  text: string;
+  timestamp: string;
+  suggestedSteps?: SuggestedMicroStep[];
+  targetTaskTitle?: string;
+  sources?: { title: string; uri: string }[];
+  isError?: boolean;
+  isConsentRequired?: boolean;
+  failedPrompt?: string;
 }
 
 export interface SuggestedMicroStep {
   id: string;
   title: string;
-  energy: 'low' | 'medium' | 'high';
   estimatedMinutes: number;
-}
-
-export interface ChatMessage {
-  id: string;
-  sender: 'lexi' | 'user';
-  text: string;
-  modelUsed?: string;
-  proposal?: LexiProposal;
-  suggestedSteps?: SuggestedMicroStep[];
-  sources?: GroundingSource[];
-  places?: GroundingPlace[];
-  isBodyDoubleCheckin?: boolean;
-  isQuotaError?: boolean;
-  isConsentRequired?: boolean;
-  failedPrompt?: string;
+  energy: EnergyLevel;
+  accepted?: boolean;
+  linkedTaskId?: string;
+  linkedTaskTitle?: string;
 }
 
 interface LexiChatInterfaceProps {
-  tasks: Task[];
+  tasks?: Task[];
+  activeTask?: Task;
+  dayMode?: string;
+  onTaskCreated?: () => void;
+  refresh?: () => void;
+  onOpenVoiceMode?: () => void;
   onOpenLiveVoice?: () => void;
-  refresh: () => void;
+  onClose?: () => void;
   embedded?: boolean;
 }
 
+// Coordinated client deadline (26s > server 6.5s primary + 14s fallback)
+const CLIENT_REQUEST_DEADLINE_MS = 26000;
+
+/**
+ * Validates structured breakdown steps returned from the server schema before presenting action cards.
+ * Never fabricates steps if validation fails.
+ */
+export function validateClientBreakdownSteps(
+  taskBreakdown: any,
+  fallbackTask?: Task
+): {
+  targetTaskTitle?: string;
+  steps: SuggestedMicroStep[];
+} {
+  if (
+    !taskBreakdown ||
+    typeof taskBreakdown !== 'object' ||
+    !Array.isArray(taskBreakdown.steps) ||
+    taskBreakdown.steps.length === 0
+  ) {
+    return { steps: [] };
+  }
+
+  const linkedTaskId =
+    (typeof taskBreakdown.targetTaskId === 'string' && taskBreakdown.targetTaskId.trim()) ||
+    fallbackTask?.id;
+  const linkedTaskTitle =
+    (typeof taskBreakdown.targetTaskTitle === 'string' && taskBreakdown.targetTaskTitle.trim()) ||
+    fallbackTask?.title ||
+    'Task Breakdown';
+
+  const validated: SuggestedMicroStep[] = [];
+  const batchTs = Date.now();
+
+  for (let i = 0; i < taskBreakdown.steps.length; i++) {
+    const raw = taskBreakdown.steps[i];
+    if (!raw || typeof raw !== 'object') continue;
+    const title = typeof raw.title === 'string' ? raw.title.trim() : '';
+    if (title.length < 3 || title.length > 140) continue;
+
+    const mins = Number(raw.estimatedMinutes);
+    const estimatedMinutes = Number.isFinite(mins)
+      ? Math.max(1, Math.min(60, Math.round(mins)))
+      : 5;
+
+    const rawEnergy = String(raw.energy || 'low').toLowerCase();
+    const energy: EnergyLevel =
+      rawEnergy === 'high' ? 'high' : rawEnergy === 'medium' ? 'medium' : 'low';
+
+    validated.push({
+      id: `step-${batchTs}-${i}`,
+      title,
+      estimatedMinutes,
+      energy,
+      accepted: false,
+      linkedTaskId,
+      linkedTaskTitle,
+    });
+  }
+
+  return {
+    targetTaskTitle: validated.length > 0 ? linkedTaskTitle : undefined,
+    steps: validated,
+  };
+}
+
 export const LexiChatInterface: React.FC<LexiChatInterfaceProps> = ({
-  tasks,
-  onOpenLiveVoice,
+  tasks = [],
+  activeTask: explicitActiveTask,
+  dayMode = 'normal',
+  onTaskCreated,
   refresh,
-  embedded = false,
+  onOpenVoiceMode,
+  onOpenLiveVoice,
 }) => {
-  const pendingTasks = tasks.filter((t) => t.status !== 'completed');
-  const activeTask = tasks.find((t) => t.status === 'inProgress') || pendingTasks[0] || null;
+  const activeTask =
+    explicitActiveTask ||
+    tasks.find((t) => t.status === 'inProgress') ||
+    tasks.find((t) => t.status === 'pending');
 
-  const [input, setInput] = useState('');
-  const [selectedModel, setSelectedModel] = useState<
-    'gemini-3.8-flash' | 'gemini-4-argon' | 'gemini-3.1-flash-lite'
-  >('gemini-3.1-flash-lite');
-  const [activeTool, setActiveTool] = useState<'none' | 'search' | 'maps'>('none');
-  const [isGenerating, setIsGenerating] = useState(false);
-
-  const activeAbortControllerRef = useRef<AbortController | null>(null);
-  const activeRequestIdRef = useRef<string | null>(null);
-
-  const handleCancelRequest = () => {
-    if (activeAbortControllerRef.current) {
-      activeAbortControllerRef.current.abort();
-      activeAbortControllerRef.current = null;
-    }
-    setIsGenerating(false);
+  const notifyTasksUpdated = () => {
+    if (onTaskCreated) onTaskCreated();
+    if (refresh) refresh();
   };
 
-  // Proactive Body Doubling State
-  const [isBodyDoubling, setIsBodyDoubling] = useState(false);
-  const [bodyDoubleSeconds, setBodyDoubleSeconds] = useState(0);
-  const bodyDoubleTimerRef = useRef<number | null>(null);
-
-  const [messages, setMessages] = useState<ChatMessage[]>(() => [
+  const handleLaunchVoice = () => {
+    if (onOpenLiveVoice) onOpenLiveVoice();
+    else if (onOpenVoiceMode) onOpenVoiceMode();
+  };
+  const [messages, setMessages] = useState<ChatMessage[]>([
     {
-      id: 'lexi-welcome',
+      id: 'welcome-1',
       sender: 'lexi',
       text: activeTask
-        ? `Hey! I'm Lexi, your executive function coach and body doubler. Right now, your active focus is "${activeTask.title}".\n\nNeed advice breaking it down into 2-minute steps, overcoming inertia, or starting a silent body-doubling sprint? Choose an advice prompt below or type what's on your mind.`
-        : `Hey! I'm Lexi, your executive function coach. Your day is completely open.\n\nWhether you need help deciding where to start, finding a quiet focus spot, or beating procrastination, I'm here to offer small, friction-free steps.`,
-      proposal: activeTask
-        ? {
-            type: 'start_task',
-            payload: { taskId: activeTask.id },
-            requiresConfirmation: true,
-            confirmationPrompt: `Would you like to start "${activeTask.title}" now?`,
-          }
-        : undefined,
+        ? `Hey there! I see "${activeTask.title}" is up right now. Would you like me to break it down into tiny 3-minute steps, or help you find a low-energy starting point?`
+        : "Hi! I'm Lexi, your executive function companion. Tell me what's on your mind—or paste a messy to-do list and I'll turn it into calm, bite-sized steps.",
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
+  const [inputText, setInputText] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [enableSearch, setEnableSearch] = useState(false);
 
-  const [appliedActions, setAppliedActions] = useState<Record<string, boolean>>({});
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const activeRequestIdRef = useRef<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const acceptedStepIdsRef = useRef<Set<string>>(new Set());
 
-  // Audio transcription hook (gemini-3.5-transcribe)
   const { isRecording, isTranscribing, startRecording, stopAndTranscribe } =
     useAudioTranscribe();
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages, isGenerating]);
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, isLoading]);
 
-  // Body doubling interval ticker and proactive check-in triggers
   useEffect(() => {
-    if (isBodyDoubling) {
-      bodyDoubleTimerRef.current = window.setInterval(() => {
-        setBodyDoubleSeconds((prev) => {
-          const next = prev + 1;
-          // Trigger a gentle proactive check-in after every 10 minutes (600 seconds)
-          if (next > 0 && next % 600 === 0) {
-            triggerBodyDoubleCheckin();
-          }
-          return next;
-        });
-      }, 1000);
-    } else {
-      if (bodyDoubleTimerRef.current) clearInterval(bodyDoubleTimerRef.current);
-      setBodyDoubleSeconds(0);
-    }
-
     return () => {
-      if (bodyDoubleTimerRef.current) clearInterval(bodyDoubleTimerRef.current);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
-  }, [isBodyDoubling, activeTask]);
+  }, []);
 
-  const triggerBodyDoubleCheckin = () => {
-    const taskName = activeTask ? `"${activeTask.title}"` : 'your current focus';
+  const handleCancelRequest = () => {
+    if (!isLoading) return;
+    const cancelledId = activeRequestIdRef.current;
+    activeRequestIdRef.current = cancelledId + 1;
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsLoading(false);
     setMessages((prev) => [
       ...prev,
       {
-        id: `checkin-${Date.now()}`,
+        id: `cancelled-${Date.now()}`,
         sender: 'lexi',
-        text: `Hey! I am right here sitting with you as your body double. How are you feeling with ${taskName}? Still flowing, or did you hit friction?`,
-        isBodyDoubleCheckin: true,
+        text: 'Request cancelled. Whenever you are ready, you can retry or send a new message.',
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        isError: true,
       },
     ]);
   };
 
-  const handleMicToggle = async () => {
-    if (!isRecording) {
-      await startRecording();
-    } else {
-      const transcript = await stopAndTranscribe();
-      if (transcript) {
-        setInput((prev) => (prev ? `${prev} ${transcript}` : transcript));
+  const handleEnableCloudAiAndRetry = (promptToRetry?: string, errorMsgId?: string) => {
+    settingsStorage.save({ cloudGemini: true });
+    if (promptToRetry) {
+      handleSend(promptToRetry, { retryErrorMsgId: errorMsgId });
+    }
+  };
+
+  const handleSend = async (
+    overrideText?: string,
+    options?: { retryErrorMsgId?: string }
+  ) => {
+    const textToSend = (overrideText ?? inputText).trim();
+    if (!textToSend) return;
+
+    const isRetry = Boolean(options?.retryErrorMsgId);
+
+    // Cancel any previous in-flight request before starting a new one
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
+    if (!overrideText) {
+      setInputText('');
+    }
+
+    // Build updated conversation history without duplicating the user message on Retry
+    let updatedMessages: ChatMessage[] = [];
+    setMessages((prev) => {
+      const filtered = options?.retryErrorMsgId
+        ? prev.filter((m) => m.id !== options.retryErrorMsgId)
+        : [...prev];
+
+      if (isRetry) {
+        updatedMessages = filtered;
+        return filtered;
+      }
+
+      const userMsg: ChatMessage = {
+        id: `user-${Date.now()}`,
+        sender: 'user',
+        text: textToSend,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      updatedMessages = [...filtered, userMsg];
+      return updatedMessages;
+    });
+
+    // Check Cloud AI consent setting
+    const currentSettings = settingsStorage.get();
+    if (!currentSettings.cloudGemini) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `consent-${Date.now()}`,
+          sender: 'lexi',
+          text: 'Cloud AI is currently turned off in your Privacy Settings. Enable Cloud Gemini to chat with Lexi or generate task breakdowns.',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isError: true,
+          isConsentRequired: true,
+          failedPrompt: textToSend,
+        },
+      ]);
+      return;
+    }
+
+    const reqNumber = activeRequestIdRef.current + 1;
+    activeRequestIdRef.current = reqNumber;
+    const correlationId = `chat-${reqNumber}-${Date.now()}`;
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    setIsLoading(true);
+
+    const timeoutId = setTimeout(() => {
+      controller.abort(new Error('CLIENT_DEADLINE_EXCEEDED'));
+    }, CLIENT_REQUEST_DEADLINE_MS);
+
+    try {
+      // Construct history cleanly from current messages + current prompt if needed
+      const historySource =
+        updatedMessages.length > 0
+          ? updatedMessages
+          : [
+              ...messages.filter((m) => m.id !== options?.retryErrorMsgId),
+              ...(isRetry
+                ? []
+                : [
+                    {
+                      id: `user-${Date.now()}`,
+                      sender: 'user' as const,
+                      text: textToSend,
+                      timestamp: '',
+                    },
+                  ]),
+            ];
+
+      const cleanHistory = historySource
+        .filter((m) => !m.isError && !m.isConsentRequired && m.text.trim().length > 0)
+        .slice(-10)
+        .map((m) => ({
+          sender: m.sender,
+          text: redactSensitiveText(m.text).sanitizedText,
+        }));
+
+      const safeContext = sanitizeContextForCloudAi({
+        activeTask: activeTask ? activeTask.title : 'None',
+        activeTaskId: activeTask?.id,
+        activeTaskTitle: activeTask?.title,
+        dayMode,
+      });
+
+      const res = await fetch('/api/gemini/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-request-id': correlationId,
+          'x-cloud-ai-consent': String(currentSettings.cloudGemini),
+          'x-neuroflow-client': 'web-applet-v1',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({
+          requestId: correlationId,
+          messages: cleanHistory,
+          enableSearch,
+          context: safeContext,
+        }),
+      });
+
+      clearTimeout(timeoutId);
+
+      if (activeRequestIdRef.current !== reqNumber) {
+        return;
+      }
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (data?.code === 'CLOUD_AI_DISABLED') {
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: `consent-${Date.now()}`,
+              sender: 'lexi',
+              text: data.error || 'Cloud AI is disabled in Settings.',
+              timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              isError: true,
+              isConsentRequired: true,
+              failedPrompt: textToSend,
+            },
+          ]);
+          return;
+        }
+        throw new Error(data.error || `Request failed with status ${res.status}`);
+      }
+
+      const replyText: string =
+        typeof data.reply === 'string' && data.reply.trim()
+          ? data.reply.trim()
+          : "I'm here with you. Tell me which step feels easiest to start.";
+
+      // Validate structured task breakdown from server schema before presenting action cards
+      const validatedBreakdown = validateClientBreakdownSteps(data.taskBreakdown, activeTask);
+
+      const lexiMsg: ChatMessage = {
+        id: `lexi-${Date.now()}`,
+        sender: 'lexi',
+        text: replyText,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        suggestedSteps: validatedBreakdown.steps.length > 0 ? validatedBreakdown.steps : undefined,
+        targetTaskTitle: validatedBreakdown.targetTaskTitle,
+        sources: Array.isArray(data.sources) ? data.sources : undefined,
+      };
+
+      setMessages((prev) => [...prev, lexiMsg]);
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+
+      if (activeRequestIdRef.current !== reqNumber) {
+        return;
+      }
+
+      const isTimeout =
+        err?.name === 'AbortError' ||
+        String(err?.message || '').includes('DEADLINE_EXCEEDED') ||
+        String(err?.message || '').includes('timed out');
+
+      const friendlyError = isTimeout
+        ? 'Lexi took too long to respond (request timed out). Your message was saved—tap Retry to try again.'
+        : `Couldn't complete response (${err?.message || 'connection error'}). Tap Retry to try again.`;
+
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `err-${Date.now()}`,
+          sender: 'lexi',
+          text: friendlyError,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isError: true,
+          failedPrompt: textToSend,
+        },
+      ]);
+    } finally {
+      if (activeRequestIdRef.current === reqNumber) {
+        setIsLoading(false);
+        abortControllerRef.current = null;
       }
     }
   };
 
-  const handleSend = async (textToSend?: string, forcedModel?: string, forcedTool?: string) => {
-    const text = (textToSend || input).trim();
-    if (!text || isGenerating) return;
+  const handleFindNearbyPlaces = async () => {
+    const query =
+      inputText.trim() || 'Quiet coffee shops or libraries nearby for focused work';
+    if (!inputText.trim()) {
+      setInputText('');
+    }
 
     const userMsg: ChatMessage = {
-      id: `user-${Date.now()}`,
+      id: `user-maps-${Date.now()}`,
       sender: 'user',
-      text,
+      text: `📍 Find nearby: ${query}`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
+
+    setMessages((prev) => [...prev, userMsg]);
 
     const currentSettings = settingsStorage.get();
     if (!currentSettings.cloudGemini) {
       setMessages((prev) => [
         ...prev,
-        userMsg,
         {
-          id: `lexi-${Date.now()}`,
+          id: `consent-maps-${Date.now()}`,
           sender: 'lexi',
-          text: "Cloud AI Coaching is currently disabled in your Settings. To protect your privacy, conversation history is not transmitted to Google AI without your explicit consent.\n\nWould you like to enable Cloud AI to chat with Lexi?",
+          text: 'Cloud AI is currently turned off in your Privacy Settings. Enable Cloud Gemini to search nearby places.',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isError: true,
           isConsentRequired: true,
-          failedPrompt: text,
+          failedPrompt: query,
         },
       ]);
-      if (!textToSend) setInput('');
       return;
     }
 
-    setMessages((prev) => [...prev, userMsg]);
-    if (!textToSend) setInput('');
-    setIsGenerating(true);
-
-    const modelToUse = forcedModel || selectedModel;
-    const toolToUse = forcedTool || activeTool;
-
-    // Coordinated client-side deadline & cancellation
-    if (activeAbortControllerRef.current) {
-      activeAbortControllerRef.current.abort();
-    }
+    const reqNumber = activeRequestIdRef.current + 1;
+    activeRequestIdRef.current = reqNumber;
     const controller = new AbortController();
-    activeAbortControllerRef.current = controller;
-    const reqId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    activeRequestIdRef.current = reqId;
+    abortControllerRef.current = controller;
+    setIsLoading(true);
 
-    const clientTimeoutMs = 26000;
     const timeoutId = setTimeout(() => {
-      if (activeRequestIdRef.current === reqId) {
-        console.warn(`[${reqId}] Client deadline (${clientTimeoutMs}ms) reached. Aborting.`);
-        controller.abort();
-      }
-    }, clientTimeoutMs);
+      controller.abort(new Error('CLIENT_DEADLINE_EXCEEDED'));
+    }, CLIENT_REQUEST_DEADLINE_MS);
 
     try {
-      if (toolToUse === 'search') {
-        // Search Grounding route (gemini-3.8-flash + googleSearch)
-        const res = await fetch('/api/gemini/search', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-request-id': reqId },
-          body: JSON.stringify({ query: text }),
-          signal: controller.signal,
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
+      const res = await fetch('/api/gemini/maps', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-request-id': `maps-${reqNumber}-${Date.now()}`,
+          'x-cloud-ai-consent': String(currentSettings.cloudGemini),
+          'x-neuroflow-client': 'web-applet-v1',
+        },
+        signal: controller.signal,
+        body: JSON.stringify({ query: redactSensitiveText(query).sanitizedText }),
+      });
 
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `lexi-${Date.now()}`,
-            sender: 'lexi',
-            text: data.text || 'Here is what I found from Google Search.',
-            modelUsed: 'gemini-3.8-flash (Search Grounded)',
-            sources: data.sources || [],
-          },
-        ]);
-      } else if (toolToUse === 'maps') {
-        // Maps Grounding route (gemini-3.8-flash + googleMaps)
-        let lat: number | undefined;
-        let lng: number | undefined;
-        try {
-          if (navigator.geolocation) {
-            const pos = await new Promise<GeolocationPosition>((res, rej) =>
-              navigator.geolocation.getCurrentPosition(res, rej, { timeout: 3000 })
-            );
-            lat = pos.coords.latitude;
-            lng = pos.coords.longitude;
-          }
-        } catch {}
+      clearTimeout(timeoutId);
+      if (activeRequestIdRef.current !== reqNumber) return;
 
-        const res = await fetch('/api/gemini/maps', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-request-id': reqId },
-          body: JSON.stringify({
-            query: text,
-            latitude: lat,
-            longitude: lng,
-          }),
-          signal: controller.signal,
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `lexi-${Date.now()}`,
-            sender: 'lexi',
-            text: data.text || 'Here are sensory-friendly and quiet places near you.',
-            modelUsed: 'gemini-3.8-flash (Maps Grounded)',
-            places: data.places || [],
-          },
-        ]);
-      } else {
-        // Multi-Turn Executive Function Chat route
-        const executiveSystemPrompt = `You are Lexi, an empathetic, non-judgmental ADHD executive function coach and virtual body double.
-Your primary goals:
-1. Provide practical, highly specific executive function advice (e.g. task initiation, working memory offloading, body doubling, time blindness management, cognitive friction reduction).
-2. When a user asks to break down a project or task, output exactly 3 sequential, concrete steps. Ensure Step 1 is an absurdly small initiation action taking under 2 minutes (e.g., "Open document and title it").
-3. Validate low energy and eliminate shame.
-4. Keep responses encouraging, concise, and structured.`;
-
-        const history = [...messages, userMsg].map((m) => ({
-          role: m.sender === 'user' ? 'user' : 'assistant',
-          content: m.text,
-        }));
-
-        const res = await fetch('/api/gemini/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-request-id': reqId },
-          body: JSON.stringify({
-            messages: history,
-            model: modelToUse,
-            systemInstruction: executiveSystemPrompt,
-          }),
-          signal: controller.signal,
-        });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
-
-        // Parse real micro-steps dynamically from the LLM response if present
-        let suggestedSteps: SuggestedMicroStep[] | undefined;
-        const replyText = data.reply || '';
-        const lines = replyText.split('\n');
-        const extracted: SuggestedMicroStep[] = [];
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          // Match lines like "1. Open document", "Step 1: Open document", "- Step 1: ...", "1) ..."
-          const stepMatch = trimmed.match(/^(?:[-*]\s*)?(?:Step\s*\d+[:.]|\d+[.)])\s+(.+)$/i);
-          if (stepMatch && stepMatch[1]) {
-            const stepTitle = stepMatch[1].replace(/[*_#]/g, '').trim();
-            if (stepTitle.length >= 3 && stepTitle.length <= 140) {
-              const stepIndex = extracted.length + 1;
-              extracted.push({
-                id: `step-${stepIndex}-${Date.now()}`,
-                title: stepTitle.startsWith('Step') ? stepTitle : `Step ${stepIndex}: ${stepTitle}`,
-                energy: stepIndex === 1 ? 'low' : stepIndex === 2 ? 'low' : 'medium',
-                estimatedMinutes: stepIndex === 1 ? 2 : stepIndex === 2 ? 5 : 10,
-              });
-            }
-          }
-        }
-
-        if (extracted.length > 0) {
-          suggestedSteps = extracted.slice(0, 6);
-        }
-
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `lexi-${Date.now()}`,
-            sender: 'lexi',
-            text: data.reply || 'I am right here with you. What feels like the least resistant step?',
-            modelUsed: data.model,
-            suggestedSteps,
-          },
-        ]);
-      }
-    } catch (err: any) {
-      if (err?.name === 'AbortError') {
-        console.log(`[${reqId}] Request was aborted or cancelled.`);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `lexi-${Date.now()}`,
-            sender: 'lexi',
-            text: 'Request was cancelled. Take your time—let me know whenever you want to try again.',
-            failedPrompt: text,
-            isQuotaError: true,
-          },
-        ]);
-        return;
-      }
-
-      console.warn('Lexi chat interaction notice:', err?.message || err);
-
-      const errString = typeof err?.message === 'string' ? err.message : JSON.stringify(err);
-      const isQuota =
-        errString.includes('429') ||
-        errString.includes('503') ||
-        errString.includes('RESOURCE_EXHAUSTED') ||
-        errString.includes('quota') ||
-        errString.includes('demand') ||
-        err?.status === 429;
-
-      const userFriendlyMessage = isQuota
-        ? "I'm catching my breath for just a moment (Gemini API rate limit or high demand). Take a gentle pause with me, and tap retry below in a few seconds."
-        : `I had trouble connecting (${err.message || 'connection issue'}). Let me know if you would like to try again.`;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Maps search failed');
 
       setMessages((prev) => [
         ...prev,
         {
-          id: `lexi-${Date.now()}`,
+          id: `lexi-maps-${Date.now()}`,
           sender: 'lexi',
-          text: userFriendlyMessage,
-          isQuotaError: isQuota,
-          failedPrompt: text,
+          text: data.reply || 'Here are some nearby options:',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          sources: data.places,
+        },
+      ]);
+    } catch (err: any) {
+      clearTimeout(timeoutId);
+      if (activeRequestIdRef.current !== reqNumber) return;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `err-maps-${Date.now()}`,
+          sender: 'lexi',
+          text: `Couldn't fetch nearby places right now (${err?.message || 'error'}).`,
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isError: true,
+          failedPrompt: query,
         },
       ]);
     } finally {
-      clearTimeout(timeoutId);
-      if (activeRequestIdRef.current === reqId) {
-        setIsGenerating(false);
-        activeAbortControllerRef.current = null;
+      if (activeRequestIdRef.current === reqNumber) {
+        setIsLoading(false);
+        abortControllerRef.current = null;
       }
     }
   };
 
-  const handleAddStepToToday = (step: SuggestedMicroStep) => {
+  const handleAcceptStep = (msgId: string, step: SuggestedMicroStep) => {
+    // Idempotency guard: prevent duplicate task creation if clicked multiple times
+    if (step.accepted || acceptedStepIdsRef.current.has(step.id)) {
+      return;
+    }
+    acceptedStepIdsRef.current.add(step.id);
+
+    const parentContextNote = step.linkedTaskTitle
+      ? `Micro-step for "${step.linkedTaskTitle}" (${step.estimatedMinutes}m)`
+      : `Suggested by Lexi (${step.estimatedMinutes}m micro-step)`;
+
     const newTask: Task = {
-      id: `task-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      id: `task-lexi-${step.id}`,
       title: step.title,
+      notes: parentContextNote,
       energy: step.energy,
       status: 'pending',
       createdAt: new Date().toISOString(),
       estimatedMinutes: step.estimatedMinutes,
-      isQuickWin: step.energy === 'low',
+      isQuickWin: step.estimatedMinutes <= 10 || step.energy === 'low',
     };
 
     taskStorage.save(newTask);
-    setAppliedActions((prev) => ({ ...prev, [step.id]: true }));
-    refresh();
-  };
 
-  const handleConfirmProposal = (msgId: string, proposal: LexiProposal) => {
-    if (proposal.type === 'start_task') {
-      taskStorage.startTask(proposal.payload.taskId);
-    } else if (proposal.type === 'pause_task') {
-      taskStorage.pauseTask(proposal.payload.taskId);
-    } else if (proposal.type === 'create_reentry_note') {
-      taskStorage.pauseTask(
-        proposal.payload.taskId,
-        proposal.payload.nextAction || 'Open task to resume'
-      );
+    // If linked to an existing parent task in storage, also record the step on the parent task's notes
+    if (step.linkedTaskId) {
+      const existingTasks = taskStorage.getAll();
+      const parentTask = existingTasks.find((t) => t.id === step.linkedTaskId);
+      if (parentTask) {
+        const stepBullet = `- [ ] ${step.title} (${step.estimatedMinutes}m)`;
+        const updatedNotes = parentTask.notes
+          ? parentTask.notes.includes(step.title)
+            ? parentTask.notes
+            : `${parentTask.notes}\n${stepBullet}`
+          : `Breakdown steps:\n${stepBullet}`;
+        taskStorage.save({ ...parentTask, notes: updatedNotes });
+      }
     }
 
-    setAppliedActions((prev) => ({ ...prev, [msgId]: true }));
-    refresh();
+    notifyTasksUpdated();
+
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== msgId || !m.suggestedSteps) return m;
+        return {
+          ...m,
+          suggestedSteps: m.suggestedSteps.map((s) =>
+            s.id === step.id ? { ...s, accepted: true } : s
+          ),
+        };
+      })
+    );
   };
 
-  const formatTimer = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+  const handleMicToggle = async () => {
+    if (isRecording) {
+      const transcript = await stopAndTranscribe();
+      if (transcript) {
+        setInputText((prev) => (prev ? `${prev} ${transcript}` : transcript));
+      }
+    } else {
+      await startRecording();
+    }
   };
+
+  const quickPrompts = [
+    'Break down my current task into 3 tiny steps',
+    'I feel stuck and overwhelmed—what is 1 easy win?',
+    'Help me plan a 10-minute reset routine',
+  ];
 
   return (
-    <div
-      className={`flex flex-col bg-[#0C0C0D] text-[#F0F0F0] ${
-        embedded ? 'h-[calc(100vh-140px)]' : 'h-full'
-      }`}
-    >
-      {/* Top Header Card */}
-      <div className="p-3.5 border-b border-[#232326] bg-[#161618] flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <LexiAvatar size={42} visualState={isGenerating ? 'thinking' : 'idle'} />
+    <div className="flex flex-col h-[calc(100vh-8.5rem)] max-w-2xl mx-auto px-4 pt-3">
+      {/* Top Bar with Live Voice CTA & Grounding Toggles */}
+      <div className="flex items-center justify-between gap-2 pb-3 mb-2 border-b border-[#232326]">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-xl bg-[#2FB083]/15 border border-[#2FB083]/30 flex items-center justify-center text-[#2FB083]">
+            <Sparkles className="w-4 h-4" />
+          </div>
           <div>
-            <div className="flex items-center gap-1.5">
-              <h2 className="text-sm sm:text-base font-semibold text-[#F0F0F0]">Lexi AI</h2>
-              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#BB86FC]/15 text-[#BB86FC] border border-[#BB86FC]/30">
-                Executive Coach
+            <h2 className="text-sm font-semibold text-[#F0F0F0] flex items-center gap-1.5">
+              <span>Lexi Companion</span>
+              <span className="inline-flex items-center gap-1 text-[10px] font-normal text-[#8A8A8E] bg-[#1C1C1F] px-2 py-0.5 rounded-md border border-[#232326]">
+                <ShieldCheck className="w-3 h-3 text-[#2FB083]" />
+                Privacy Gate Active
               </span>
-            </div>
-            <p className="text-xs text-[#8A8A8E]">ADHD Initiation & Proactive Body Doubler</p>
+            </h2>
+            <p className="text-[11px] text-[#8A8A8E]">
+              Task breakdown, gentle pacing & zero-guilt recovery
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Body Doubler Toggle */}
-          <button
-            onClick={() => setIsBodyDoubling(!isBodyDoubling)}
-            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold border transition-all ${
-              isBodyDoubling
-                ? 'bg-[#2FB083]/20 text-[#2FB083] border-[#2FB083] shadow-md shadow-[#2FB083]/20'
-                : 'bg-[#1C1C1F] text-[#8A8A8E] hover:text-[#F0F0F0] border-[#232326]'
-            }`}
-            title="Start virtual body-doubling session with Lexi"
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">
-              {isBodyDoubling ? 'Body Doubling Active' : 'Body Double'}
-            </span>
-          </button>
-
-          {onOpenLiveVoice && (
-            <button
-              onClick={onOpenLiveVoice}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#BB86FC]/15 hover:bg-[#BB86FC]/25 text-[#BB86FC] text-xs font-semibold border border-[#BB86FC]/30 shadow-sm transition-all"
-              title="Start real-time voice conversation"
-            >
-              <Radio className="w-3.5 h-3.5 animate-pulse" />
-              <span>Voice</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Body Doubling Banner (if active) */}
-      {isBodyDoubling && (
-        <div className="px-4 py-2 bg-[#2FB083]/15 border-b border-[#2FB083]/30 flex items-center justify-between text-xs text-[#2FB083] animate-in fade-in">
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#2FB083] animate-pulse" />
-            <span className="font-medium">
-              Body Doubling with Lexi on {activeTask ? `"${activeTask.title}"` : 'your focus'}
-            </span>
-          </div>
-          <div className="flex items-center gap-3 font-mono">
-            <span>{formatTimer(bodyDoubleSeconds)}</span>
-            <button
-              onClick={() => setIsBodyDoubling(false)}
-              className="text-[11px] underline opacity-80 hover:opacity-100"
-            >
-              Stop
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Advice Presets Carousel */}
-      <div className="px-4 py-2 bg-[#121214] border-b border-[#232326] overflow-x-auto no-scrollbar flex items-center gap-2">
-        <button
-          onClick={() => {
-            setSelectedModel('gemini-4-argon');
-            setActiveTool('none');
-            handleSend(
-              'I have a task that feels way too big and overwhelming. Can you help me break it down into 3 tiny physical steps that take under 2 minutes each?',
-              'gemini-4-argon',
-              'none'
-            );
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1C1C1F] hover:bg-[#232326] text-xs text-[#F0F0F0] border border-[#232326] whitespace-nowrap transition-colors"
-        >
-          <Brain className="w-3.5 h-3.5 text-[#BB86FC]" />
-          <span>Break down a big task</span>
-        </button>
-
-        <button
-          onClick={() => {
-            setSelectedModel('gemini-3.8-flash');
-            setActiveTool('none');
-            handleSend(
-              'I am experiencing task paralysis and cannot get started. What is one absurdly small initiation action I can do right this second?',
-              'gemini-3.8-flash',
-              'none'
-            );
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1C1C1F] hover:bg-[#232326] text-xs text-[#F0F0F0] border border-[#232326] whitespace-nowrap transition-colors"
-        >
-          <Zap className="w-3.5 h-3.5 text-[#2FB083]" />
-          <span>Break task paralysis</span>
-        </button>
-
-        <button
-          onClick={() => {
-            setIsBodyDoubling(true);
-            handleSend("Let's do a quiet body-doubling focus block together. Keep me company while I start.");
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1C1C1F] hover:bg-[#232326] text-xs text-[#F0F0F0] border border-[#232326] whitespace-nowrap transition-colors"
-        >
-          <Users className="w-3.5 h-3.5 text-[#4285F4]" />
-          <span>Start body doubling</span>
-        </button>
-
-        <button
-          onClick={() => {
-            setSelectedModel('gemini-3.1-flash-lite');
-            setActiveTool('none');
-            handleSend(
-              'My energy is completely depleted today. How do I pivot my schedule so I do not feel guilty?',
-              'gemini-3.1-flash-lite',
-              'none'
-            );
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1C1C1F] hover:bg-[#232326] text-xs text-[#F0F0F0] border border-[#232326] whitespace-nowrap transition-colors"
-        >
-          <BatteryLow className="w-3.5 h-3.5 text-[#D9A441]" />
-          <span>Low energy pivot</span>
-        </button>
-
-        <button
-          onClick={() => {
-            setActiveTool('maps');
-            handleSend(
-              'Find quiet, low-sensory study spaces, libraries, or coffee shops near me.',
-              'gemini-3.8-flash',
-              'maps'
-            );
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1C1C1F] hover:bg-[#232326] text-xs text-[#F0F0F0] border border-[#232326] whitespace-nowrap transition-colors"
-        >
-          <MapPin className="w-3.5 h-3.5 text-[#7AA7A0]" />
-          <span>Quiet spaces nearby</span>
-        </button>
-
-        <button
-          onClick={() => {
-            setActiveTool('search');
-            handleSend(
-              'What does recent neuroscience say about ADHD time blindness and how to manage it?',
-              'gemini-3.8-flash',
-              'search'
-            );
-          }}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#1C1C1F] hover:bg-[#232326] text-xs text-[#F0F0F0] border border-[#232326] whitespace-nowrap transition-colors"
-        >
-          <Globe className="w-3.5 h-3.5 text-[#2FB083]" />
-          <span>ADHD research</span>
-        </button>
-      </div>
-
-      {/* Model & Tool Configuration Selector */}
-      <div className="px-4 py-2 bg-[#161618] border-b border-[#232326] flex items-center justify-between text-xs gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold text-[#8A8A8E] uppercase tracking-wider">
-            Model:
-          </span>
-          <select
-            value={selectedModel}
-            onChange={(e) => setSelectedModel(e.target.value as any)}
-            className="bg-[#212124] text-[#F0F0F0] text-xs px-2.5 py-1 rounded-lg border border-[#232326] outline-none"
-          >
-            <option value="gemini-3.1-flash-lite">gemini-3.1-flash-lite (Fast & Reliable · Default)</option>
-            <option value="gemini-3.8-flash">gemini-3.8-flash (Balanced)</option>
-            <option value="gemini-4-argon">gemini-4-argon (Deep Planning)</option>
-          </select>
-        </div>
-
-        {/* Tool Grounding Toggles */}
         <div className="flex items-center gap-1.5">
           <button
-            onClick={() => setActiveTool(activeTool === 'search' ? 'none' : 'search')}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs transition-colors ${
-              activeTool === 'search'
-                ? 'bg-[#2FB083]/20 text-[#2FB083] border-[#2FB083]/40'
-                : 'bg-[#212124] text-[#8A8A8E] border-[#232326]'
+            type="button"
+            onClick={() => setEnableSearch(!enableSearch)}
+            title="Toggle Google Search Grounding for current facts"
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-all ${
+              enableSearch
+                ? 'bg-[#5B8DEF]/15 text-[#5B8DEF] border-[#5B8DEF]/40'
+                : 'bg-[#161618] text-[#8A8A8E] border-[#232326] hover:text-[#F0F0F0]'
             }`}
-            title="Google Search Grounding"
           >
-            <Globe className="w-3 h-3" />
-            <span>Search</span>
+            <Globe className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Web Search</span>
           </button>
 
           <button
-            onClick={() => setActiveTool(activeTool === 'maps' ? 'none' : 'maps')}
-            className={`flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs transition-colors ${
-              activeTool === 'maps'
-                ? 'bg-[#7AA7A0]/20 text-[#7AA7A0] border-[#7AA7A0]/40'
-                : 'bg-[#212124] text-[#8A8A8E] border-[#232326]'
-            }`}
-            title="Google Maps Grounding"
+            type="button"
+            onClick={handleLaunchVoice}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#2FB083] text-[#0C0C0D] hover:bg-[#2FB083]/90 transition-all shadow-sm"
           >
-            <MapPin className="w-3 h-3" />
-            <span>Maps</span>
+            <AudioLines className="w-3.5 h-3.5" />
+            <span>Live Voice</span>
           </button>
         </div>
       </div>
 
-      {/* Messages Thread */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      {/* Quick Prompts Row */}
+      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-2 mb-1">
+        {quickPrompts.map((prompt, idx) => (
+          <button
+            key={idx}
+            type="button"
+            disabled={isLoading}
+            onClick={() => handleSend(prompt)}
+            className="shrink-0 text-xs bg-[#161618] hover:bg-[#1C1C1F] disabled:opacity-50 text-[#8A8A8E] hover:text-[#F0F0F0] border border-[#232326] px-3 py-1.5 rounded-xl transition-colors"
+          >
+            {prompt}
+          </button>
+        ))}
+      </div>
+
+      {/* Chat Messages Scroll Area */}
+      <div className="flex-1 overflow-y-auto space-y-4 pr-1 py-2">
         {messages.map((msg) => (
           <div
             key={msg.id}
@@ -665,295 +647,203 @@ Your primary goals:
             }`}
           >
             <div
-              className={`max-w-[88%] rounded-2xl p-4 text-xs sm:text-sm leading-relaxed ${
+              className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                 msg.sender === 'user'
-                  ? 'bg-[#2FB083] text-[#0C0C0D] font-medium rounded-tr-sm'
-                  : 'bg-[#161618] text-[#F0F0F0] border border-[#232326] rounded-tl-sm shadow-md'
+                  ? 'bg-[#2FB083] text-[#0C0C0D] font-medium rounded-br-xs'
+                  : msg.isError
+                  ? 'bg-[#D9A441]/10 text-[#F0F0F0] border border-[#D9A441]/40 rounded-bl-xs'
+                  : 'bg-[#161618] text-[#F0F0F0] border border-[#232326] rounded-bl-xs'
               }`}
             >
-              <p className="whitespace-pre-wrap">{msg.text}</p>
+              <div className="whitespace-pre-wrap">{msg.text}</div>
 
-              {/* Grounded Search Sources */}
+              {/* Error / Consent Action Bar */}
+              {msg.isError && (
+                <div className="mt-3 pt-2.5 border-t border-[#232326] flex flex-wrap items-center gap-2">
+                  {msg.isConsentRequired ? (
+                    <button
+                      type="button"
+                      onClick={() => handleEnableCloudAiAndRetry(msg.failedPrompt, msg.id)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#2FB083] text-[#0C0C0D] hover:bg-[#2FB083]/90 transition-colors"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Enable Cloud AI & Retry</span>
+                    </button>
+                  ) : (
+                    msg.failedPrompt && (
+                      <button
+                        type="button"
+                        disabled={isLoading}
+                        onClick={() => handleSend(msg.failedPrompt, { retryErrorMsgId: msg.id })}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-[#212124] text-[#F0F0F0] hover:bg-[#2C2C30] border border-[#232326] transition-colors disabled:opacity-50"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 text-[#2FB083]" />
+                        <span>Retry</span>
+                      </button>
+                    )
+                  )}
+                </div>
+              )}
+
+              {/* Grounding Sources / Places */}
               {msg.sources && msg.sources.length > 0 && (
-                <div className="mt-3 pt-2.5 border-t border-[#232326] space-y-1.5">
-                  <span className="text-[10px] font-semibold text-[#2FB083] uppercase flex items-center gap-1">
-                    <Globe className="w-3 h-3" />
-                    Verified Sources:
-                  </span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {msg.sources.map((src, idx) => (
-                      <a
-                        key={idx}
-                        href={src.uri}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-1 px-2 py-1 rounded-md bg-[#212124] hover:bg-[#28282C] text-[11px] text-[#2FB083] border border-[#232326] transition-colors"
-                      >
-                        <span className="truncate max-w-[150px]">{src.title || src.uri}</span>
-                        <ExternalLink className="w-2.5 h-2.5 shrink-0" />
-                      </a>
-                    ))}
-                  </div>
+                <div className="mt-3 pt-2.5 border-t border-[#232326] flex flex-wrap gap-1.5">
+                  {msg.sources.map((src, i) => (
+                    <a
+                      key={i}
+                      href={src.uri}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[11px] bg-[#212124] hover:bg-[#28282C] text-[#5B8DEF] px-2.5 py-1 rounded-lg border border-[#232326] transition-colors"
+                    >
+                      <Globe className="w-3 h-3" />
+                      <span className="truncate max-w-[180px]">{src.title}</span>
+                    </a>
+                  ))}
                 </div>
-              )}
-
-              {/* Grounded Maps Places */}
-              {msg.places && msg.places.length > 0 && (
-                <div className="mt-3 pt-2.5 border-t border-[#232326] space-y-1.5">
-                  <span className="text-[10px] font-semibold text-[#7AA7A0] uppercase flex items-center gap-1">
-                    <MapPin className="w-3 h-3" />
-                    Recommended Quiet Spaces:
-                  </span>
-                  <div className="space-y-1.5">
-                    {msg.places.map((place, idx) => (
-                      <a
-                        key={idx}
-                        href={place.uri}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center justify-between p-2 rounded-lg bg-[#212124] hover:bg-[#28282C] text-xs text-[#F0F0F0] border border-[#232326] transition-colors"
-                      >
-                        <span className="font-medium truncate">{place.title}</span>
-                        <div className="flex items-center gap-1 text-[11px] text-[#7AA7A0] shrink-0 ml-2">
-                          <span>Open Maps</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </div>
-                      </a>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Body Double Checkin Action Responses */}
-              {msg.isBodyDoubleCheckin && (
-                <div className="mt-3 pt-2.5 border-t border-[#232326] flex flex-wrap gap-2">
-                  <button
-                    onClick={() =>
-                      handleSend('Still flowing smoothly! Let us keep the session going.')
-                    }
-                    className="px-3 py-1.5 rounded-lg bg-[#2FB083]/20 hover:bg-[#2FB083]/30 text-[#2FB083] text-xs font-medium border border-[#2FB083]/40 transition-colors"
-                  >
-                    Still in the flow
-                  </button>
-                  <button
-                    onClick={() =>
-                      handleSend('I got distracted and lost my place. Help me take a tiny step to get back.')
-                    }
-                    className="px-3 py-1.5 rounded-lg bg-[#D9A441]/20 hover:bg-[#D9A441]/30 text-[#D9A441] text-xs font-medium border border-[#D9A441]/40 transition-colors"
-                  >
-                    Got distracted
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (activeTask) taskStorage.complete(activeTask.id);
-                      refresh();
-                      handleSend('I completed this task! What a win.');
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-[#BB86FC]/20 hover:bg-[#BB86FC]/30 text-[#BB86FC] text-xs font-medium border border-[#BB86FC]/40 transition-colors"
-                  >
-                    Finished it!
-                  </button>
-                </div>
-              )}
-
-              {/* Quota limit recovery buttons */}
-              {msg.isQuotaError && msg.failedPrompt && (
-                <div className="mt-3 pt-2.5 border-t border-[#232326] flex flex-wrap gap-2">
-                  <button
-                    onClick={() => handleSend(msg.failedPrompt, 'gemini-3.1-flash-lite')}
-                    className="px-3 py-1.5 rounded-lg bg-[#2FB083]/20 hover:bg-[#2FB083]/30 text-[#2FB083] text-xs font-semibold border border-[#2FB083]/40 flex items-center gap-1.5 transition-colors"
-                  >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>Retry with Flash Lite</span>
-                  </button>
-                  <button
-                    onClick={() => handleSend(msg.failedPrompt)}
-                    className="px-3 py-1.5 rounded-lg bg-[#1C1C1F] hover:bg-[#232326] text-[#8A8A8E] text-xs font-medium border border-[#232326] transition-colors"
-                  >
-                    Retry Standard
-                  </button>
-                </div>
-              )}
-
-              {/* Cloud AI Consent Action Card */}
-              {msg.isConsentRequired && msg.failedPrompt && (
-                <div className="mt-3 pt-2.5 border-t border-[#232326] flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      settingsStorage.save({ cloudGemini: true });
-                      handleSend(msg.failedPrompt);
-                    }}
-                    className="px-3 py-1.5 rounded-lg bg-[#2FB083] text-[#0C0C0D] text-xs font-semibold hover:bg-[#2FB083]/90 transition-colors flex items-center gap-1.5"
-                  >
-                    <Check className="w-3.5 h-3.5" />
-                    <span>Enable Cloud AI & Proceed</span>
-                  </button>
-                </div>
-              )}
-
-              {msg.modelUsed && (
-                <span className="block text-[10px] text-[#555559] mt-2 font-mono">
-                  {msg.modelUsed}
-                </span>
               )}
             </div>
 
-            {/* Structured Micro-Steps (Multi-step Task Breakdown) */}
+            {/* Validated Actionable Micro-Step Cards */}
             {msg.suggestedSteps && msg.suggestedSteps.length > 0 && (
-              <div className="mt-2.5 max-w-[88%] bg-[#1A1A1D] border border-[#2FB083]/40 rounded-xl p-3.5 shadow-md space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[#2FB083] uppercase">
-                    <Sparkles className="w-3.5 h-3.5" />
-                    <span>Micro-Steps for Today</span>
+              <div className="mt-2.5 w-full max-w-[85%] bg-[#161618] border border-[#232326] rounded-2xl p-3 space-y-2 shadow-lg">
+                <div className="flex items-center justify-between px-1 gap-2">
+                  <span className="text-[11px] font-semibold uppercase tracking-wider text-[#2FB083]">
+                    Suggested Micro-Steps (Tap to Add)
+                  </span>
+                  {msg.targetTaskTitle && (
+                    <span className="inline-flex items-center gap-1 text-[11px] text-[#8A8A8E] bg-[#1C1C1F] px-2 py-0.5 rounded-lg border border-[#232326] truncate max-w-[180px]">
+                      <Link2 className="w-3 h-3 text-[#2FB083] shrink-0" />
+                      <span className="truncate">{msg.targetTaskTitle}</span>
+                    </span>
+                  )}
+                </div>
+
+                {msg.suggestedSteps.map((step) => (
+                  <div
+                    key={step.id}
+                    className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-[#1C1C1F] border border-[#232326]"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium text-[#F0F0F0] leading-snug">
+                        {step.title}
+                      </p>
+                      <span className="text-[10px] text-[#8A8A8E]">
+                        ~{step.estimatedMinutes} min · {step.energy} energy
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={step.accepted}
+                      onClick={() => handleAcceptStep(msg.id, step)}
+                      className={`shrink-0 flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                        step.accepted
+                          ? 'bg-[#2FB083]/20 text-[#2FB083] cursor-default'
+                          : 'bg-[#2FB083] text-[#0C0C0D] hover:bg-[#2FB083]/90'
+                      }`}
+                    >
+                      {step.accepted ? (
+                        <>
+                          <Check className="w-3.5 h-3.5" />
+                          <span>Added</span>
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Add</span>
+                        </>
+                      )}
+                    </button>
                   </div>
-                  <span className="text-[10px] text-[#8A8A8E]">Add any step to schedule</span>
-                </div>
-
-                <div className="space-y-2">
-                  {msg.suggestedSteps.map((step) => {
-                    const isAdded = appliedActions[step.id];
-                    return (
-                      <div
-                        key={step.id}
-                        className="p-2.5 rounded-lg bg-[#161618] border border-[#232326] flex items-center justify-between gap-2"
-                      >
-                        <div className="min-w-0">
-                          <p className="text-xs text-[#F0F0F0] font-medium truncate">
-                            {step.title}
-                          </p>
-                          <span className="text-[10px] font-mono text-[#8A8A8E]">
-                            ~{step.estimatedMinutes} min · {step.energy} energy
-                          </span>
-                        </div>
-
-                        {isAdded ? (
-                          <div className="flex items-center gap-1 text-[11px] text-[#2FB083] font-medium shrink-0">
-                            <Check className="w-3.5 h-3.5" />
-                            <span>Added</span>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => handleAddStepToToday(step)}
-                            className="flex items-center gap-1 px-2.5 py-1 bg-[#2FB083]/15 hover:bg-[#2FB083]/25 text-[#2FB083] border border-[#2FB083]/30 rounded-lg text-xs font-semibold shrink-0 transition-colors"
-                          >
-                            <Plus className="w-3 h-3" />
-                            <span>Add</span>
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                ))}
               </div>
             )}
 
-            {/* Context Proposal Card */}
-            {msg.proposal && (
-              <div className="mt-2 max-w-[88%] bg-[#1A1A1D] border border-[#2FB083]/30 rounded-xl p-3 shadow-md">
-                <p className="text-xs text-[#F0F0F0] mb-2 font-medium">
-                  {msg.proposal.confirmationPrompt}
-                </p>
-
-                {appliedActions[msg.id] ? (
-                  <div className="flex items-center gap-1.5 text-xs text-[#2FB083] font-medium">
-                    <Check className="w-4 h-4" />
-                    <span>Confirmed</span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => handleConfirmProposal(msg.id, msg.proposal!)}
-                      className="px-3 py-1.5 bg-[#2FB083] text-[#0C0C0D] rounded-lg text-xs font-semibold hover:bg-[#2FB083]/90 transition-colors"
-                    >
-                      Start Now
-                    </button>
-                    <button
-                      onClick={() =>
-                        setAppliedActions((prev) => ({ ...prev, [msg.id]: true }))
-                      }
-                      className="px-2.5 py-1.5 text-xs text-[#8A8A8E] hover:text-[#F0F0F0]"
-                    >
-                      Dismiss
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
+            <span className="text-[10px] text-[#555559] mt-1 px-1">{msg.timestamp}</span>
           </div>
         ))}
 
-        {isGenerating && (
-          <div className="flex items-center justify-between p-3 rounded-2xl bg-[#161618] border border-[#232326] text-xs text-[#8A8A8E] animate-pulse">
+        {isLoading && (
+          <div className="flex items-center justify-between gap-3 text-xs text-[#8A8A8E] bg-[#161618] border border-[#232326] w-fit rounded-2xl px-4 py-3">
             <div className="flex items-center gap-2">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-[#2FB083]" />
-              <span>Lexi is formulating executive advice…</span>
+              <Loader2 className="w-4 h-4 text-[#2FB083] animate-spin" />
+              <span>Lexi is thinking...</span>
             </div>
             <button
+              type="button"
               onClick={handleCancelRequest}
-              className="px-2.5 py-1 rounded-lg bg-[#212124] hover:bg-[#28282C] text-[#F0F0F0] text-xs font-medium border border-[#232326] flex items-center gap-1 transition-colors"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium bg-[#212124] hover:bg-[#2C2C30] text-[#F0F0F0] border border-[#232326] transition-colors"
             >
-              <X className="w-3 h-3 text-[#8A8A8E]" />
+              <XCircle className="w-3.5 h-3.5 text-[#D9A441]" />
               <span>Cancel</span>
             </button>
           </div>
         )}
 
-        <div ref={messagesEndRef} />
+        <div ref={bottomRef} />
       </div>
 
-      {/* Dictation Banner */}
-      {(isRecording || isTranscribing) && (
-        <div className="px-4 py-2 bg-[#2FB083]/15 text-xs text-[#2FB083] flex items-center justify-between border-t border-[#2FB083]/20">
-          <span className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-            {isRecording
-              ? 'Listening to your voice… tap mic to finish dictating with gemini-3.5-transcribe'
-              : 'Transcribing speech with Gemini…'}
-          </span>
+      {/* Bottom Input Composer */}
+      <div className="pt-2 pb-4">
+        <div className="flex items-center gap-2 bg-[#161618] border border-[#232326] focus-within:border-[#2FB083]/60 rounded-2xl p-2 shadow-lg">
+          <button
+            type="button"
+            onClick={handleMicToggle}
+            disabled={isTranscribing}
+            title={isRecording ? 'Stop & Transcribe' : 'Dictate with Gemini Audio'}
+            className={`p-2.5 rounded-xl transition-all shrink-0 ${
+              isRecording
+                ? 'bg-[#D9A441] text-[#0C0C0D] animate-pulse'
+                : 'bg-[#212124] text-[#8A8A8E] hover:text-[#F0F0F0]'
+            }`}
+          >
+            {isTranscribing ? (
+              <Loader2 className="w-4 h-4 animate-spin text-[#2FB083]" />
+            ) : isRecording ? (
+              <Square className="w-4 h-4 fill-current" />
+            ) : (
+              <Mic className="w-4 h-4" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleFindNearbyPlaces}
+            disabled={isLoading}
+            title="Find quiet study spots or errands nearby with Google Maps Grounding"
+            className="p-2.5 rounded-xl bg-[#212124] text-[#8A8A8E] hover:text-[#2FB083] transition-colors shrink-0 disabled:opacity-40"
+          >
+            <MapPin className="w-4 h-4" />
+          </button>
+
+          <input
+            type="text"
+            value={inputText}
+            onChange={(e) => setInputText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder={
+              isRecording
+                ? 'Listening... tap square when done'
+                : 'Ask Lexi to break down a task or chat...'
+            }
+            className="flex-1 bg-transparent text-sm text-[#F0F0F0] placeholder-[#555559] focus:outline-none px-1"
+          />
+
+          <button
+            type="button"
+            onClick={() => handleSend()}
+            disabled={!inputText.trim() || isLoading}
+            className="p-2.5 rounded-xl bg-[#2FB083] text-[#0C0C0D] disabled:opacity-30 hover:bg-[#2FB083]/90 transition-all shrink-0"
+          >
+            <Send className="w-4 h-4" />
+          </button>
         </div>
-      )}
-
-      {/* Input Composer */}
-      <div className="p-3 bg-[#161618] border-t border-[#232326] flex items-center gap-2">
-        <button
-          onClick={handleMicToggle}
-          className={`p-2.5 rounded-xl border transition-colors ${
-            isRecording
-              ? 'bg-red-600 text-white border-red-500 animate-pulse'
-              : 'bg-[#1C1C1F] text-[#8A8A8E] hover:text-[#2FB083] border-[#232326]'
-          }`}
-          title={isRecording ? 'Stop & transcribe' : 'Dictate with Gemini audio transcription'}
-        >
-          {isRecording ? <Square className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-        </button>
-
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') handleSend();
-          }}
-          placeholder={
-            isBodyDoubling
-              ? 'Tell Lexi what step you are working on right now…'
-              : activeTool === 'search'
-              ? 'Ask for research or grounding…'
-              : activeTool === 'maps'
-              ? 'Search for quiet spaces or coffee shops nearby…'
-              : 'Ask Lexi for executive function advice…'
-          }
-          className="flex-1 bg-[#1C1C1F] text-[#F0F0F0] text-sm px-4 py-2.5 rounded-xl border border-[#232326] focus:border-[#2FB083] outline-none"
-        />
-
-        <button
-          onClick={() => handleSend()}
-          disabled={!input.trim() || isGenerating}
-          className="p-2.5 bg-[#2FB083] text-[#0C0C0D] rounded-xl disabled:opacity-30 hover:bg-[#2FB083]/90 transition-colors"
-          title="Send"
-        >
-          <Send className="w-4 h-4" />
-        </button>
       </div>
     </div>
   );
