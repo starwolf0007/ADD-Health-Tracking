@@ -17,9 +17,16 @@ import {
   CloudUpload,
   Plus,
   Loader2,
+  ShieldCheck,
+  Clock,
 } from 'lucide-react';
-import { useFirebaseAuth } from '../lib/firebase';
-import { googleDriveService, DriveFile } from '../lib/googleDrive';
+import { useFirebaseAuth, useDriveBackupHealth } from '../lib/firebase';
+import {
+  googleDriveService,
+  DriveFile,
+  isAppManagedDriveFile,
+  GOOGLE_DRIVE_FILE_SCOPE,
+} from '../lib/googleDrive';
 import { useNeuroStorage, exportAllData } from '../lib/storage';
 
 interface GoogleDriveScreenProps {
@@ -29,6 +36,7 @@ interface GoogleDriveScreenProps {
 export const GoogleDriveScreen: React.FC<GoogleDriveScreenProps> = ({ onBack }) => {
   const { user, accessToken, signInWithGoogle, loading: authLoading } = useFirebaseAuth();
   const storage = useNeuroStorage();
+  const backupHealth = useDriveBackupHealth();
 
   const [files, setFiles] = useState<DriveFile[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
@@ -50,10 +58,12 @@ export const GoogleDriveScreen: React.FC<GoogleDriveScreenProps> = ({ onBack }) 
     setLoading(true);
     setError(null);
     try {
-      const result = await googleDriveService.listFiles(token, search);
+      const result = await googleDriveService.listFiles(token, search, {
+        refreshToken: signInWithGoogle,
+      });
       setFiles(result);
     } catch (err: any) {
-      console.error('Failed to list files:', err);
+      console.error('[DriveSync] Failed to list files:', err);
       setError(err.message || 'Could not load Google Drive files');
     } finally {
       setLoading(false);
@@ -82,7 +92,10 @@ export const GoogleDriveScreen: React.FC<GoogleDriveScreenProps> = ({ onBack }) 
 
       const createdFile = await googleDriveService.backupNeuroFlowData(
         accessToken,
-        backupPayload
+        backupPayload,
+        {
+          refreshToken: signInWithGoogle,
+        }
       );
       setSuccessMessage(`Successfully backed up to Google Drive as "${createdFile.name}"`);
       await fetchFiles(accessToken, searchQuery);
@@ -108,7 +121,10 @@ export const GoogleDriveScreen: React.FC<GoogleDriveScreenProps> = ({ onBack }) 
           ? 'application/json'
           : newFileName.endsWith('.md')
           ? 'text/markdown'
-          : 'text/plain'
+          : 'text/plain',
+        {
+          refreshToken: signInWithGoogle,
+        }
       );
       setIsCreatingFile(false);
       setNewFileName('neuroflow-notes.md');
@@ -128,7 +144,9 @@ export const GoogleDriveScreen: React.FC<GoogleDriveScreenProps> = ({ onBack }) 
     setIsDeleting(true);
     setError(null);
     try {
-      await googleDriveService.deleteFile(accessToken, fileToDelete.id);
+      await googleDriveService.deleteFile(accessToken, fileToDelete.id, {
+        refreshToken: signInWithGoogle,
+      });
       setSuccessMessage(`Deleted "${fileToDelete.name}" from Google Drive.`);
       setFileToDelete(null);
       await fetchFiles(accessToken, searchQuery);
@@ -159,6 +177,22 @@ export const GoogleDriveScreen: React.FC<GoogleDriveScreenProps> = ({ onBack }) 
     if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / 1048576).toFixed(1)} MB`;
   };
+
+  const formatLastSynced = (iso: string | null) => {
+    if (!iso) return 'Never synced';
+    try {
+      const date = new Date(iso);
+      if (isNaN(date.getTime())) return 'Never synced';
+      return `${date.toLocaleDateString()} at ${date.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      })}`;
+    } catch {
+      return 'Never synced';
+    }
+  };
+
+  const displayError = error || backupHealth.syncError;
 
   return (
     <div className="pb-28 max-w-2xl mx-auto px-4 pt-3 space-y-5 animate-in fade-in">
@@ -209,6 +243,73 @@ export const GoogleDriveScreen: React.FC<GoogleDriveScreenProps> = ({ onBack }) 
         )}
       </div>
 
+      {/* Backup Health & Scope Telemetry Card */}
+      <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326] space-y-2.5 shadow-sm">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-[#2FB083] shrink-0" />
+            <span className="text-xs font-semibold text-[#F0F0F0]">
+              Backup Health & Scope Status
+            </span>
+          </div>
+          <span
+            className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+              backupHealth.status === 'synced'
+                ? 'bg-[#2FB083]/15 text-[#2FB083] border-[#2FB083]/30'
+                : backupHealth.status === 'syncing'
+                ? 'bg-[#4285F4]/15 text-[#4285F4] border-[#4285F4]/30'
+                : backupHealth.status === 'error' || backupHealth.status === 'token_expired'
+                ? 'bg-red-950/60 text-red-300 border-red-800/50'
+                : backupHealth.status === 'offline'
+                ? 'bg-[#D9A441]/15 text-[#D9A441] border-[#D9A441]/30'
+                : 'bg-[#212124] text-[#8A8A8E] border-[#232326]'
+            }`}
+          >
+            {backupHealth.status === 'synced'
+              ? 'Healthy · Synced'
+              : backupHealth.status === 'syncing'
+              ? backupHealth.retryAttempt > 0
+                ? `Retrying (${backupHealth.retryAttempt}/${backupHealth.maxRetries})…`
+                : 'Syncing…'
+              : backupHealth.status === 'token_expired'
+              ? 'Token Expired'
+              : backupHealth.status === 'error'
+              ? 'Sync Error'
+              : backupHealth.status === 'offline'
+              ? 'Offline'
+              : 'Ready'}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 text-xs border-t border-[#232326]/60">
+          <div className="flex items-center gap-1.5 text-[#8A8A8E]">
+            <Clock className="w-3.5 h-3.5 text-[#4285F4] shrink-0" />
+            <span>Last Synced:</span>
+            <span className="text-[#F0F0F0] font-medium truncate">
+              {formatLastSynced(backupHealth.lastSyncedAt)}
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[#8A8A8E]">
+            <span className="shrink-0">OAuth Scope:</span>
+            <code
+              className="text-[10px] font-mono text-[#2FB083] bg-[#2FB083]/10 px-1.5 py-0.5 rounded truncate"
+              title={GOOGLE_DRIVE_FILE_SCOPE}
+            >
+              drive.file (Least-Privilege)
+            </code>
+          </div>
+        </div>
+
+        {backupHealth.lastBackupFileName && (
+          <div className="text-[11px] text-[#8A8A8E] flex items-center justify-between pt-1 border-t border-[#232326]/40">
+            <span>Latest Snapshot:</span>
+            <span className="font-mono text-[#F0F0F0] truncate max-w-[240px]">
+              {backupHealth.lastBackupFileName}
+            </span>
+          </div>
+        )}
+      </div>
+
       {/* Messages / Alerts */}
       {successMessage && (
         <div className="p-3 bg-[#2FB083]/15 border border-[#2FB083]/30 rounded-xl text-xs text-[#2FB083] flex items-center gap-2">
@@ -217,10 +318,32 @@ export const GoogleDriveScreen: React.FC<GoogleDriveScreenProps> = ({ onBack }) 
         </div>
       )}
 
-      {error && (
-        <div className="p-3 bg-red-950/40 border border-red-800/40 rounded-xl text-xs text-red-300 flex items-center gap-2">
-          <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
-          <span>{error}</span>
+      {displayError && (
+        <div className="p-3 bg-red-950/40 border border-red-800/40 rounded-xl text-xs text-red-300 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
+            <span className="leading-relaxed">{displayError}</span>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {backupHealth.status === 'token_expired' || !accessToken ? (
+              <button
+                type="button"
+                onClick={signInWithGoogle}
+                className="px-2.5 py-1 rounded-lg bg-red-800/60 hover:bg-red-700/60 text-white font-semibold text-[11px] transition-colors"
+              >
+                Reconnect
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleBackupToDrive}
+                disabled={isUploading}
+                className="px-2.5 py-1 rounded-lg bg-red-800/60 hover:bg-red-700/60 text-white font-semibold text-[11px] transition-colors"
+              >
+                Retry Sync
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -277,7 +400,7 @@ export const GoogleDriveScreen: React.FC<GoogleDriveScreenProps> = ({ onBack }) 
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search files in Google Drive…"
+                placeholder="Search app-created files in Google Drive…"
                 className="w-full bg-[#161618] text-[#F0F0F0] text-xs pl-9 pr-3 py-2.5 rounded-xl border border-[#232326] focus:border-[#4285F4] outline-none"
               />
             </div>
@@ -300,7 +423,7 @@ export const GoogleDriveScreen: React.FC<GoogleDriveScreenProps> = ({ onBack }) 
           {/* Files List */}
           <div className="bg-[#161618] border border-[#232326] rounded-2xl overflow-hidden shadow-sm">
             <div className="px-4 py-2.5 border-b border-[#232326] flex items-center justify-between text-xs text-[#8A8A8E]">
-              <span>Files on Google Drive</span>
+              <span>App-Created Files on Google Drive (drive.file)</span>
               <span>{files.length} items</span>
             </div>
 
@@ -327,9 +450,15 @@ export const GoogleDriveScreen: React.FC<GoogleDriveScreenProps> = ({ onBack }) 
                           <h4 className="text-xs font-medium text-[#F0F0F0] truncate max-w-[220px] sm:max-w-xs">
                             {file.name}
                           </h4>
-                          {file.name.startsWith('NeuroFlow-Backup') && (
+                          {(file.name.startsWith('NeuroFlow-Backup') ||
+                            file.name.startsWith('NeuroFlow-AutoBackup')) && (
                             <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#2FB083]/20 text-[#2FB083] font-mono shrink-0">
                               Backup
+                            </span>
+                          )}
+                          {isAppManagedDriveFile(file) && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#4285F4]/15 text-[#4285F4] font-mono shrink-0">
+                              drive.file
                             </span>
                           )}
                         </div>

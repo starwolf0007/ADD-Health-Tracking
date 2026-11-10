@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   RefreshCw,
   Check,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   AppSettings,
@@ -26,7 +27,7 @@ import {
   getStorageScope,
   formatDateKey,
 } from '../lib/storage';
-import { useFirebaseAuth } from '../lib/firebase';
+import { useFirebaseAuth, useDriveBackupHealth } from '../lib/firebase';
 
 interface SettingsScreenProps {
   settings: AppSettings;
@@ -58,6 +59,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
     pendingQueueCount,
     triggerManualSync,
   } = useFirebaseAuth();
+  const backupHealth = useDriveBackupHealth();
   const [guestSummary, setGuestSummary] = useState(getGuestDataSummary());
   const [isSyncingNow, setIsSyncingNow] = useState(false);
   const [mergeNotice, setMergeNotice] = useState<string | null>(null);
@@ -224,7 +226,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
                 <div>
                   <h4 className="text-xs font-medium text-[#F0F0F0]">Google Drive</h4>
                   <p className="text-[11px] text-[#8A8A8E]">
-                    File management & backup snapshots
+                    File management & backup snapshots ·{' '}
+                    {backupHealth.lastSyncedAt
+                      ? `Last synced ${new Date(backupHealth.lastSyncedAt).toLocaleDateString()}`
+                      : 'Not yet synced'}
                   </p>
                 </div>
               </div>
@@ -233,25 +238,34 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
           )}
 
           {/* Automatic Daily Google Drive Backup Toggle */}
-          <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326] flex items-center justify-between">
-            <div className="pr-4">
-              <h4 className="text-xs font-medium text-[#F0F0F0]">Automatic Daily Drive Backup</h4>
-              <p className="text-[11px] text-[#8A8A8E] mt-0.5">
-                Automatically archives an encrypted snapshot of tasks, habits, and notes to your Google Drive daily.
-              </p>
-            </div>
-            <button
-              onClick={handleToggleAutoDriveBackup}
-              className={`w-11 h-6 rounded-full transition-colors relative p-0.5 shrink-0 ${
-                autoDriveBackup ? 'bg-[#2FB083]' : 'bg-[#232326]'
-              }`}
-            >
-              <span
-                className={`block w-5 h-5 rounded-full bg-white transition-transform ${
-                  autoDriveBackup ? 'translate-x-5' : 'translate-x-0'
+          <div className="p-3.5 rounded-2xl bg-[#161618] border border-[#232326] space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="pr-4">
+                <h4 className="text-xs font-medium text-[#F0F0F0]">Automatic Daily Drive Backup</h4>
+                <p className="text-[11px] text-[#8A8A8E] mt-0.5">
+                  Automatically archives a least-privilege (<code className="text-[#4285F4] font-mono">drive.file</code>) snapshot of tasks, habits, and notes to your Google Drive daily.
+                </p>
+              </div>
+              <button
+                onClick={handleToggleAutoDriveBackup}
+                className={`w-11 h-6 rounded-full transition-colors relative p-0.5 shrink-0 ${
+                  autoDriveBackup ? 'bg-[#2FB083]' : 'bg-[#232326]'
                 }`}
-              />
-            </button>
+              >
+                <span
+                  className={`block w-5 h-5 rounded-full bg-white transition-transform ${
+                    autoDriveBackup ? 'translate-x-5' : 'translate-x-0'
+                  }`}
+                />
+              </button>
+            </div>
+
+            {backupHealth.syncError && (
+              <div className="p-2 rounded-xl bg-red-950/40 border border-red-800/40 text-[11px] text-red-300 flex items-center gap-1.5">
+                <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+                <span className="truncate">Sync Error: {backupHealth.syncError}</span>
+              </div>
+            )}
           </div>
 
 

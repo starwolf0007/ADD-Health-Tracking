@@ -11,8 +11,9 @@ import {
   Users,
   HardDrive,
   ChevronRight,
+  AlertTriangle,
 } from 'lucide-react';
-import { useFirebaseAuth } from '../lib/firebase';
+import { useFirebaseAuth, useDriveBackupHealth } from '../lib/firebase';
 
 interface ConnectedServicesScreenProps {
   onBack: () => void;
@@ -24,6 +25,7 @@ export const ConnectedServicesScreen: React.FC<ConnectedServicesScreenProps> = (
   onOpenGoogleDrive,
 }) => {
   const { user, accessToken, signInWithGoogle, signOut } = useFirebaseAuth();
+  const backupHealth = useDriveBackupHealth();
 
   return (
     <div className="pb-28 max-w-2xl mx-auto px-4 pt-3 space-y-5">
@@ -90,24 +92,51 @@ export const ConnectedServicesScreen: React.FC<ConnectedServicesScreenProps> = (
             <div>
               <h4 className="text-sm font-semibold text-[#F0F0F0]">Google Drive</h4>
               <p className="text-xs text-[#8A8A8E]">
-                {accessToken ? 'Connected & Authorized' : 'OAuth Scopes configured'}
+                {accessToken ? 'Connected & Authorized (drive.file)' : 'OAuth Scopes configured'}
               </p>
             </div>
           </div>
           <span
             className={`text-xs font-mono px-2 py-0.5 rounded-full ${
-              accessToken
+              backupHealth.status === 'error' || backupHealth.status === 'token_expired'
+                ? 'bg-red-950/60 text-red-300 border border-red-800/50'
+                : accessToken
                 ? 'bg-[#2FB083]/15 text-[#2FB083] border border-[#2FB083]/30'
                 : 'bg-[#D9A441]/15 text-[#D9A441] border border-[#D9A441]/30'
             }`}
           >
-            {accessToken ? 'Active' : 'Setup Ready'}
+            {backupHealth.status === 'error'
+              ? 'Sync Error'
+              : backupHealth.status === 'token_expired'
+              ? 'Token Expired'
+              : accessToken
+              ? 'Active'
+              : 'Setup Ready'}
           </span>
         </div>
 
         <p className="text-xs text-[#8A8A8E] leading-relaxed pt-1">
           Store lasting-value attachments, export automated backups of your routines and tasks, and manage files on Google Drive.
         </p>
+
+        <div className="pt-1 border-t border-[#232326] flex items-center justify-between text-[11px] text-[#8A8A8E]">
+          <span>Last Synced:</span>
+          <span className="font-mono text-[#F0F0F0]">
+            {backupHealth.lastSyncedAt
+              ? new Date(backupHealth.lastSyncedAt).toLocaleString([], {
+                  dateStyle: 'short',
+                  timeStyle: 'short',
+                })
+              : 'Never synced'}
+          </span>
+        </div>
+
+        {backupHealth.syncError && (
+          <div className="p-2 rounded-xl bg-red-950/40 border border-red-800/40 text-[11px] text-red-300 flex items-center gap-1.5">
+            <AlertTriangle className="w-3.5 h-3.5 text-red-400 shrink-0" />
+            <span className="truncate">{backupHealth.syncError}</span>
+          </div>
+        )}
 
         {onOpenGoogleDrive && (
           <div className="pt-2">

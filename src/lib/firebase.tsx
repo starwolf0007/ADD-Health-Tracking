@@ -27,12 +27,27 @@ import {
   registerMutationListener,
   StorageMutation,
 } from './storage';
+import {
+  GOOGLE_DRIVE_FILE_SCOPE,
+  verifyDriveFileScope,
+  registerDriveTokenHandlers,
+  calculateBackoffDelay,
+  googleDriveService,
+  setDriveBackupScope,
+  DriveBackupHealthState,
+} from './googleDrive';
 import { Task, Note } from '../types';
 
 // Least-privilege Google Drive scope for visible user backup files
-export const GOOGLE_DRIVE_SCOPES = [
-  'https://www.googleapis.com/auth/drive.file',
+export const GOOGLE_DRIVE_SCOPES: readonly string[] = [
+  GOOGLE_DRIVE_FILE_SCOPE,
 ];
+
+if (!verifyDriveFileScope(GOOGLE_DRIVE_SCOPES)) {
+  throw new Error(
+    `Invalid GOOGLE_DRIVE_SCOPES configuration: must strictly use "${GOOGLE_DRIVE_FILE_SCOPE}".`
+  );
+}
 
 // Initialize Firebase App singleton
 const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
@@ -58,6 +73,8 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   syncStatus: SyncStatus;
   pendingQueueCount: number;
+  lastSyncedAt: string | null;
+  syncError: string | null;
   triggerManualSync: () => Promise<void>;
 }
 
@@ -70,44 +87,77 @@ const AuthContext = createContext<AuthContextType>({
   signOut: async () => {},
   syncStatus: 'synced',
   pendingQueueCount: 0,
+  lastSyncedAt: null,
+  syncError: null,
   triggerManualSync: async () => {},
 });
 
-// Helper to flush queued operations
-export async function flushOfflineQueueForUser(currentUser: User): Promise<number> {
+// Helper to flush queued operations with exponential backoff retry for transient drops
+export async function flushOfflineQueueForUser(
+  currentUser: User,
+  maxRetriesPerItem = 3
+): Promise<number> {
   const queue = offlineQueueStorage.getQueue(currentUser.uid);
   if (queue.length === 0) return 0;
 
+  console.info(
+    `[FirestoreSync] Flushing ${queue.length} queued offline operation(s) for uid=${currentUser.uid.slice(0, 8)}...`
+  );
+
   let processed = 0;
   for (const op of queue) {
-    try {
-      if (op.type === 'task' && op.data) {
-        const taskDoc = doc(db, 'users', currentUser.uid, 'tasks', op.entityId);
-        await setDoc(taskDoc, op.data, { merge: true });
-        offlineQueueStorage.dequeue(op.id, currentUser.uid);
-        processed++;
-      } else if (op.type === 'delete_task') {
-        const taskDoc = doc(db, 'users', currentUser.uid, 'tasks', op.entityId);
-        await deleteDoc(taskDoc);
-        offlineQueueStorage.dequeue(op.id, currentUser.uid);
-        processed++;
-      } else if (op.type === 'note' && op.data) {
-        const noteDoc = doc(db, 'users', currentUser.uid, 'notes', op.entityId);
-        await setDoc(noteDoc, op.data, { merge: true });
-        offlineQueueStorage.dequeue(op.id, currentUser.uid);
-        processed++;
-      } else if (op.type === 'delete_note') {
-        const noteDoc = doc(db, 'users', currentUser.uid, 'notes', op.entityId);
-        await deleteDoc(noteDoc);
-        offlineQueueStorage.dequeue(op.id, currentUser.uid);
-        processed++;
+    let opSucceeded = false;
+    for (let attempt = 1; attempt <= maxRetriesPerItem; attempt++) {
+      try {
+        if (op.type === 'task' && op.data) {
+          const taskDoc = doc(db, 'users', currentUser.uid, 'tasks', op.entityId);
+          await setDoc(taskDoc, op.data, { merge: true });
+          offlineQueueStorage.dequeue(op.id, currentUser.uid);
+          processed++;
+        } else if (op.type === 'delete_task') {
+          const taskDoc = doc(db, 'users', currentUser.uid, 'tasks', op.entityId);
+          await deleteDoc(taskDoc);
+          offlineQueueStorage.dequeue(op.id, currentUser.uid);
+          processed++;
+        } else if (op.type === 'note' && op.data) {
+          const noteDoc = doc(db, 'users', currentUser.uid, 'notes', op.entityId);
+          await setDoc(noteDoc, op.data, { merge: true });
+          offlineQueueStorage.dequeue(op.id, currentUser.uid);
+          processed++;
+        } else if (op.type === 'delete_note') {
+          const noteDoc = doc(db, 'users', currentUser.uid, 'notes', op.entityId);
+          await deleteDoc(noteDoc);
+          offlineQueueStorage.dequeue(op.id, currentUser.uid);
+          processed++;
+        }
+        opSucceeded = true;
+        break;
+      } catch (err) {
+        if (attempt < maxRetriesPerItem && (typeof navigator === 'undefined' || navigator.onLine)) {
+          const delayMs = calculateBackoffDelay(attempt, 500, 4000);
+          console.warn(
+            `[FirestoreSync] Transient failure flushing queued item ${op.id} (attempt ${attempt}/${maxRetriesPerItem}). Retrying in ${delayMs}ms...`,
+            err
+          );
+          await new Promise((resolve) => setTimeout(resolve, delayMs));
+        } else {
+          console.warn(
+            `[FirestoreSync] Failed to process queued offline item ${op.id} after ${attempt} attempt(s):`,
+            err
+          );
+        }
       }
-    } catch (err) {
-      console.warn(`Failed to process queued offline item ${op.id}:`, err);
-      // Stop flushing if network failure occurs
+    }
+
+    if (!opSucceeded) {
+      // Stop flushing remaining items until next online/manual retry
       break;
     }
   }
+
+  console.info(
+    `[FirestoreSync] Flushed ${processed}/${queue.length} queued operation(s).`
+  );
   return processed;
 }
 
@@ -120,16 +170,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('synced');
   const [pendingQueueCount, setPendingQueueCount] = useState<number>(0);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  // Register OAuth token expiration callback so Drive 401 errors clear stale in-memory tokens
+  useEffect(() => {
+    registerDriveTokenHandlers({
+      onTokenExpired: (reason: string) => {
+        console.warn(`[DriveSync] Clearing expired in-memory OAuth token: ${reason}`);
+        inMemoryAccessToken = null;
+        setAccessToken(null);
+        setSyncError(reason);
+      },
+    });
+    return () => {
+      registerDriveTokenHandlers({});
+    };
+  }, []);
 
   // Monitor online / offline network events
   useEffect(() => {
     const handleOnline = () => {
+      console.info('[Sync] Network connection restored. Triggering sync check...');
       setIsOnline(true);
       if (user) {
         triggerManualSync();
       }
     };
     const handleOffline = () => {
+      console.warn('[Sync] Network connection lost. Switching to offline queue mode.');
       setIsOnline(false);
       setSyncStatus('offline');
     };
@@ -169,12 +238,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     setSyncStatus('syncing');
+    setSyncError(null);
     try {
       await flushOfflineQueueForUser(user);
       const remaining = offlineQueueStorage.getQueue(user.uid).length;
       setPendingQueueCount(remaining);
-      setSyncStatus(remaining > 0 ? 'queued' : 'synced');
-    } catch {
+      if (remaining === 0) {
+        const nowIso = new Date().toISOString();
+        setLastSyncedAt(nowIso);
+        setSyncStatus('synced');
+      } else {
+        setSyncStatus('queued');
+      }
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to synchronize offline queue';
+      console.error('[FirestoreSync] Manual sync error:', msg);
+      setSyncError(msg);
       setSyncStatus('error');
     }
   }, [user]);
@@ -189,13 +268,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         inMemoryAccessToken = null;
         setAccessToken(null);
         setStorageScope('guest');
+        setDriveBackupScope('guest');
         setSyncStatus('synced');
         setPendingQueueCount(0);
+        setSyncError(null);
         return;
       }
 
       // Switch active storage scope to signed-in user UID
       setStorageScope(currentUser.uid);
+      setDriveBackupScope(currentUser.uid);
       updateQueueCount(currentUser.uid);
 
       // Save/update user profile document in Firestore
@@ -216,9 +298,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (navigator.onLine) {
           await flushOfflineQueueForUser(currentUser);
           updateQueueCount(currentUser.uid);
+          setLastSyncedAt(new Date().toISOString());
+          setSyncError(null);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('Failed to sync user document to Firestore:', err);
+        setSyncError(err?.message || 'Failed to sync user profile');
         setSyncStatus('error');
       }
     });
@@ -228,10 +313,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signInWithGoogle = async (): Promise<string | null> => {
     try {
+      if (!verifyDriveFileScope(GOOGLE_DRIVE_SCOPES)) {
+        throw new Error('Drive scope verification failed: only drive.file is permitted.');
+      }
+
       const provider = new GoogleAuthProvider();
       // Add least-privilege Drive scopes to provider
       GOOGLE_DRIVE_SCOPES.forEach((scope) => provider.addScope(scope));
       provider.setCustomParameters({ prompt: 'select_account' });
+
+      console.info(
+        `[DriveSync] Requesting Google OAuth sign-in with least-privilege scope: ${GOOGLE_DRIVE_SCOPES.join(', ')}`
+      );
 
       const result = await signInWithPopup(auth, provider);
       const credential = GoogleAuthProvider.credentialFromResult(result);
@@ -239,6 +332,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (credential?.accessToken) {
         inMemoryAccessToken = credential.accessToken;
         setAccessToken(credential.accessToken);
+        setSyncError(null);
+        googleDriveService.clearSyncError();
+        console.info('[DriveSync] Google OAuth token acquired in memory (drive.file authorized).');
         return credential.accessToken;
       }
       return null;
@@ -264,7 +360,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await fbSignOut(auth);
       inMemoryAccessToken = null;
       setAccessToken(null);
+      setSyncError(null);
       setStorageScope('guest');
+      setDriveBackupScope('guest');
+      console.info('[DriveSync] Signed out and cleared in-memory OAuth credentials.');
     } catch (err) {
       console.error('Sign out error:', err);
     }
@@ -281,6 +380,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signOut,
         syncStatus: !isOnline ? 'offline' : syncStatus,
         pendingQueueCount,
+        lastSyncedAt,
+        syncError,
         triggerManualSync,
       }}
     >
@@ -290,6 +391,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 };
 
 export const useFirebaseAuth = () => useContext(AuthContext);
+
+export function useDriveBackupHealth(): DriveBackupHealthState {
+  const [health, setHealth] = useState<DriveBackupHealthState>(() =>
+    googleDriveService.getBackupHealth()
+  );
+
+  useEffect(() => {
+    setHealth(googleDriveService.getBackupHealth());
+    return googleDriveService.subscribeBackupHealth((nextState) => {
+      setHealth(nextState);
+    });
+  }, []);
+
+  return health;
+}
 
 // ---------------------------------------------------------------------------
 // Firestore Real-time Persistence & Offline-Resilient Synchronization

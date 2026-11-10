@@ -79,19 +79,24 @@ export const AppShell: React.FC = () => {
     if (!accessToken || !storage.settings.autoDriveBackup) return;
 
     const payload = exportAllData({ includeSensitive: false });
-    googleDriveService.checkAndRunAutoBackup(accessToken, payload).then((res) => {
-      if (res.executed) {
-        setCurrentAchievement({
-          id: `backup-${Date.now()}`,
-          title: 'GOOGLE DRIVE SYNCED',
-          message: `Automatic daily snapshot created (${res.fileName})`,
-          type: 'backup',
-          timestamp: Date.now(),
-        });
-      }
-    }).catch((err) => {
-      console.warn('Auto backup check encountered error:', err);
-    });
+    googleDriveService
+      .checkAndRunAutoBackup(accessToken, payload, {
+        refreshToken: signInWithGoogle,
+      })
+      .then((res) => {
+        if (res.executed) {
+          setCurrentAchievement({
+            id: `backup-${Date.now()}`,
+            title: 'GOOGLE DRIVE SYNCED',
+            message: `Automatic daily snapshot created (${res.fileName})`,
+            type: 'backup',
+            timestamp: Date.now(),
+          });
+        }
+      })
+      .catch((err) => {
+        console.warn('[DriveSync] Auto backup check encountered error:', err);
+      });
   }, [accessToken, storage.settings.autoDriveBackup]);
 
   const greetingName = user?.displayName || storage.settings.displayName;
