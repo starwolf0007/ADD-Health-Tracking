@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" fill="none">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#1C1C1F" />
+      <stop offset="100%" stop-color="#0C0C0D" />
+    </radialGradient>
+    <linearGradient id="emeraldWave" x1="80" y1="256" x2="432" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#2FB083" stop-opacity="0.7" />
+      <stop offset="50%" stop-color="#2FB083" />
+      <stop offset="100%" stop-color="#BB86FC" />
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle Canvas -->
+  <rect x="16" y="16" width="480" height="480" rx="116" fill="url(#bgGlow)" stroke="#232326" stroke-width="8" />
+
+  <!-- Subtle Inner Orbit Ring -->
+  <circle cx="256" cy="256" r="168" stroke="#232326" stroke-width="3" stroke-dasharray="10 10" />
+
+  <!-- NeuroFlow Heartbeat / Focus Pulse -->
+  <path
+    d="M96 276 H164 L198 208 L244 332 L292 164 L334 276 H416"
+    stroke="url(#emeraldWave)"
+    stroke-width="26"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+
+  <!-- Lexi Companion Spark -->
+  <circle cx="384" cy="148" r="22" fill="#BB86FC" />
+  <circle cx="384" cy="148" r="36" fill="#BB86FC" fill-opacity="0.22" />
+</svg>

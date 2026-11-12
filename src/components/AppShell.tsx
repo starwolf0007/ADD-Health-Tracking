@@ -17,6 +17,7 @@ import {
   CloudOff,
   RefreshCw,
   AlertCircle,
+  Download,
 } from 'lucide-react';
 import { Routine, Achievement, Task } from '../types';
 import {
@@ -41,13 +42,66 @@ import { CaptureSheet } from './CaptureSheet';
 import { AchievementToast } from './AchievementToast';
 
 export const AppShell: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'today' | 'routines' | 'lexi' | 'notes' | 'reflect'>('today');
+  const [activeTab, setActiveTab] = useState<'today' | 'routines' | 'lexi' | 'notes' | 'reflect'>(() => {
+    if (typeof window !== 'undefined') {
+      const tabParam = new URLSearchParams(window.location.search).get('tab');
+      if (
+        tabParam === 'today' ||
+        tabParam === 'routines' ||
+        tabParam === 'lexi' ||
+        tabParam === 'notes' ||
+        tabParam === 'reflect'
+      ) {
+        return tabParam;
+      }
+    }
+    return 'today';
+  });
   const [activeOverlay, setActiveOverlay] = useState<
     'settings' | 'connected_services' | 'health_integrations' | 'live_voice' | 'google_drive' | null
   >(null);
   const [runningRoutine, setRunningRoutine] = useState<Routine | null>(null);
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
   const [currentAchievement, setCurrentAchievement] = useState<Achievement | null>(null);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+  const [isStandalone, setIsStandalone] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      (window.navigator as any)?.standalone === true
+    );
+  });
+
+  // Listen for browser PWA install prompt (Android Chrome / Desktop Chrome / Edge)
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+    };
+    const handleAppInstalled = () => {
+      setDeferredInstallPrompt(null);
+      setIsStandalone(true);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (!deferredInstallPrompt) return;
+    try {
+      await deferredInstallPrompt.prompt();
+      const choiceResult = await deferredInstallPrompt.userChoice;
+      if (choiceResult?.outcome === 'accepted') {
+        setDeferredInstallPrompt(null);
+      }
+    } catch (err) {
+      console.warn('[PWA] Install prompt error:', err);
+    }
+  };
 
   // Visual Clock Timer State (5m, 25m, 50m pomodoro)
   const [visualTimerState, setVisualTimerState] = useState<{
@@ -195,6 +249,18 @@ export const AppShell: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* 1-Tap Install App Button (shown when browser offers PWA installation) */}
+          {!isStandalone && deferredInstallPrompt && (
+            <button
+              onClick={handleInstallPwa}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#2FB083] text-[#0C0C0D] text-xs font-semibold hover:bg-[#2FB083]/90 transition-all shadow-sm"
+              title="Install NeuroFlow as a full-screen app on your device"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Install</span>
+            </button>
+          )}
+
           {/* Visual Clock Timer Quick Launcher (Pomodoro) */}
           <button
             onClick={() =>
@@ -221,7 +287,7 @@ export const AppShell: React.FC = () => {
           <button
             onClick={() => setActiveOverlay('live_voice')}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#BB86FC]/15 hover:bg-[#BB86FC]/25 text-[#BB86FC] text-xs font-semibold border border-[#BB86FC]/30 transition-all shadow-sm"
-            title="Start real-time voice conversation with gemini-3.8-live"
+            title="Start real-time voice conversation with Lexi"
           >
             <Radio className="w-3.5 h-3.5 animate-pulse" />
             <span className="hidden sm:inline">Voice</span>

@@ -3,10 +3,11 @@ import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
 import { GoogleGenAI, Modality, ThinkingLevel, Type } from '@google/genai';
 import path from 'path';
+import fs from 'fs';
 import http from 'http';
 import { redactSensitiveText, sanitizeContextForCloudAi } from './src/lib/privacyGate';
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 function getGenAI() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -890,17 +891,43 @@ Speak naturally in the first person with warmth, dry wit, and quiet confidence â
   });
 
   // ---------------------------------------------------------------------------
+  // Health Check & PWA Asset Headers
+  // ---------------------------------------------------------------------------
+  app.get('/api/health', (_req, res) => {
+    res.json({
+      status: 'ok',
+      version: '0.2.0-v2',
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // Vite Middleware (Dev) or Static Assets (Prod)
   // ---------------------------------------------------------------------------
-  if (process.env.NODE_ENV !== 'production') {
+  const distPath = path.join(process.cwd(), 'dist');
+  const publicPath = path.join(process.cwd(), 'public');
+  const hasBuiltDist = fs.existsSync(path.join(distPath, 'index.html'));
+
+  if (process.env.NODE_ENV !== 'production' || !hasBuiltDist) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(
+      express.static(distPath, {
+        setHeaders: (res, filePath) => {
+          if (filePath.endsWith('manifest.webmanifest')) {
+            res.setHeader('Content-Type', 'application/manifest+json; charset=utf-8');
+          } else if (filePath.endsWith('sw.js')) {
+            res.setHeader('Service-Worker-Allowed', '/');
+            res.setHeader('Cache-Control', 'no-cache');
+          }
+        },
+      })
+    );
+    app.use(express.static(publicPath));
     app.get('*all', (_req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
