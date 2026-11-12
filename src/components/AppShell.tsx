@@ -99,7 +99,16 @@ export const AppShell: React.FC = () => {
       });
   }, [accessToken, storage.settings.autoDriveBackup]);
 
-  const greetingName = user?.displayName || storage.settings.displayName;
+  const greetingName = user?.displayName?.split(' ')[0] || storage.settings.displayName || 'Bryan';
+  const currentHour = new Date().getHours();
+  const timeOfDayGreeting =
+    currentHour < 5
+      ? `Late night, ${greetingName}`
+      : currentHour < 12
+      ? `Good morning, ${greetingName}`
+      : currentHour < 17
+      ? `Afternoon, ${greetingName}`
+      : `Evening, ${greetingName}`;
 
   return (
     <div className="min-h-screen bg-[#0C0C0D] text-[#F0F0F0] flex flex-col selection:bg-[#2FB083]/30">
@@ -124,54 +133,60 @@ export const AppShell: React.FC = () => {
             </div>
           )}
           <div>
-            <h1 className="text-sm sm:text-base font-medium text-[#F0F0F0] leading-none">
-              {greetingName ? `Hey, ${greetingName}` : 'NeuroFlow'}
+            <h1 className="text-sm sm:text-base font-semibold text-[#F0F0F0] leading-none tracking-tight">
+              {timeOfDayGreeting}
             </h1>
             <div className="flex items-center gap-1.5 mt-1">
               {user ? (
                 syncStatus === 'synced' ? (
-                  <span className="text-[10px] text-[#2FB083] font-mono flex items-center gap-1">
-                    <Cloud className="w-2.5 h-2.5" />
-                    Firestore Synced
+                  <span
+                    className="text-[11px] text-[#8A8A8E] flex items-center gap-1.5"
+                    title="Cloud backup in sync"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#2FB083]" />
+                    <span>All changes saved</span>
                   </span>
                 ) : syncStatus === 'syncing' ? (
-                  <span className="text-[10px] text-[#4285F4] font-mono flex items-center gap-1">
-                    <RefreshCw className="w-2.5 h-2.5 animate-spin" />
-                    Syncing ({pendingQueueCount})
+                  <span className="text-[11px] text-[#8A8A8E] flex items-center gap-1">
+                    <RefreshCw className="w-2.5 h-2.5 animate-spin text-[#2FB083]" />
+                    <span>Saving ({pendingQueueCount})</span>
                   </span>
                 ) : syncStatus === 'offline' ? (
-                  <span className="text-[10px] text-[#8A8A8E] font-mono flex items-center gap-1">
+                  <span className="text-[11px] text-[#8A8A8E] flex items-center gap-1">
                     <CloudOff className="w-2.5 h-2.5" />
-                    Offline ({pendingQueueCount} queued)
+                    <span>Local-first · {pendingQueueCount} queued</span>
                   </span>
                 ) : syncStatus === 'queued' ? (
                   <button
                     onClick={triggerManualSync}
-                    className="text-[10px] text-[#D9A441] hover:underline font-mono flex items-center gap-1"
+                    className="text-[11px] text-[#D9A441] hover:underline flex items-center gap-1"
                     title="Tap to retry offline sync"
                   >
                     <Clock className="w-2.5 h-2.5" />
-                    {pendingQueueCount} queued to sync
+                    <span>{pendingQueueCount} queued to sync</span>
                   </button>
                 ) : (
                   <button
                     onClick={triggerManualSync}
-                    className="text-[10px] text-[#EB5757] hover:underline font-mono flex items-center gap-1"
+                    className="text-[11px] text-[#D9A441] hover:underline flex items-center gap-1"
                     title="Sync issue. Tap to retry."
                   >
                     <AlertCircle className="w-2.5 h-2.5" />
-                    Sync issue ({pendingQueueCount})
+                    <span>Tap to retry sync ({pendingQueueCount})</span>
                   </button>
                 )
               ) : (
                 <div className="flex items-center gap-2">
-                  <span className="text-[10px] text-[#8A8A8E] font-mono">Guest Mode</span>
+                  <span className="text-[11px] text-[#8A8A8E] flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#2FB083]/80" />
+                    <span>Saved on device</span>
+                  </span>
                   <button
                     onClick={signInWithGoogle}
-                    className="text-[10px] text-[#2FB083] hover:underline flex items-center gap-1 transition-colors"
+                    className="text-[11px] text-[#2FB083] hover:underline flex items-center gap-1 transition-colors"
                   >
                     <LogIn className="w-2.5 h-2.5" />
-                    Sign in
+                    <span>Cloud sync</span>
                   </button>
                 </div>
               )}

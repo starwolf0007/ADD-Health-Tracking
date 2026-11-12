@@ -45,8 +45,14 @@ export class Executive {
       };
     }
 
-    // Normal mode: Surface lowest energy / highest priority pending task first
+    // Normal mode: Prioritize inProgress or paused tasks first (optimize for the moment of return),
+    // then surface lowest energy pending task
     const sorted = [...allPending].sort((a, b) => {
+      const statusWeight = (s: Task['status']) =>
+        s === 'inProgress' ? 0 : s === 'paused' ? 1 : 2;
+      const swDiff = statusWeight(a.status) - statusWeight(b.status);
+      if (swDiff !== 0) return swDiff;
+
       const energyOrder: Record<string, number> = { low: 0, medium: 1, high: 2 };
       return energyOrder[a.energy] - energyOrder[b.energy];
     });
@@ -55,7 +61,10 @@ export class Executive {
       mode: 'normal',
       primaryTask: sorted[0],
       quickWins: [],
-      reason: '',
+      reason:
+        sorted[0]?.status === 'paused'
+          ? 'Saved checkpoint ready — pick right back up where you stopped.'
+          : 'Lowest lift first — momentum beats order.',
     };
   }
 
@@ -84,27 +93,185 @@ export class Executive {
   }
 }
 
+export interface InlineMicroStep {
+  id: string;
+  title: string;
+  minutes: number;
+  done: boolean;
+}
+
+/**
+ * Deterministically extracts or generates 3 concrete, physical micro-steps (2–5m each)
+ * for inline "Make it smaller" task slicing on TodayScreen without requiring a tab hop or AI call.
+ */
+export function sliceTaskIntoMicroSteps(task: Task): InlineMicroStep[] {
+  // 1. Check if task.notes already has markdown checklist lines (- [ ] or - [x])
+  if (task.notes) {
+    const lines = task.notes.split('\n');
+    const parsed: InlineMicroStep[] = [];
+    lines.forEach((line, idx) => {
+      const match = line.match(/^\s*-\s*\[([ xX])\]\s*(.+)$/);
+      if (match) {
+        const done = match[1].toLowerCase() === 'x';
+        const rawTitle = match[2].replace(/\(\d+m\)\s*$/, '').trim();
+        const minMatch = match[2].match(/\((\d+)m\)/);
+        parsed.push({
+          id: `${task.id}-step-${idx}`,
+          title: rawTitle,
+          minutes: minMatch ? Number(minMatch[1]) : 3,
+          done,
+        });
+      }
+    });
+    if (parsed.length > 0) {
+      return parsed;
+    }
+  }
+
+  const lower = task.title.toLowerCase();
+  if (lower.includes('laundry') || lower.includes('shirt') || lower.includes('clothes')) {
+    return [
+      { id: `${task.id}-s1`, title: 'Bring the basket beside the dresser', minutes: 2, done: false },
+      { id: `${task.id}-s2`, title: 'Put 5 shirts away (hangers or drawer)', minutes: 3, done: false },
+      { id: `${task.id}-s3`, title: 'Toss socks & small items into top drawer', minutes: 3, done: false },
+    ];
+  }
+  if (lower.includes('reply') || lower.includes('email') || lower.includes('text') || lower.includes('call') || lower.includes('landlord')) {
+    return [
+      { id: `${task.id}-s1`, title: 'Open the thread and read the last message', minutes: 1, done: false },
+      { id: `${task.id}-s2`, title: 'Draft a 1-sentence reply (no overthinking)', minutes: 2, done: false },
+      { id: `${task.id}-s3`, title: 'Hit send and close the window', minutes: 1, done: false },
+    ];
+  }
+  if (lower.includes('petg') || lower.includes('print') || lower.includes('filament') || lower.includes('order')) {
+    return [
+      { id: `${task.id}-s1`, title: 'Check current spool color & 1.75mm spec', minutes: 2, done: false },
+      { id: `${task.id}-s2`, title: 'Add 1 spool to cart & confirm delivery day', minutes: 2, done: false },
+      { id: `${task.id}-s3`, title: 'Place order and archive receipt', minutes: 1, done: false },
+    ];
+  }
+  if (lower.includes('review') || lower.includes('focus') || lower.includes('align') || lower.includes('plan')) {
+    return [
+      { id: `${task.id}-s1`, title: 'Pick the single most important outcome for today', minutes: 3, done: false },
+      { id: `${task.id}-s2`, title: 'Park everything else in flexible tasks', minutes: 3, done: false },
+      { id: `${task.id}-s3`, title: 'Start a 5-minute timer on step one', minutes: 5, done: false },
+    ];
+  }
+
+  const totalEst = task.estimatedMinutes ?? 15;
+  const stepMin = Math.max(2, Math.min(5, Math.round(totalEst / 3)));
+  return [
+    {
+      id: `${task.id}-s1`,
+      title: `Set up workspace & open what you need for "${task.title}"`,
+      minutes: 2,
+      done: false,
+    },
+    {
+      id: `${task.id}-s2`,
+      title: task.notes ? `First pass: ${task.notes}` : `Complete the first 5-minute physical chunk`,
+      minutes: stepMin,
+      done: false,
+    },
+    {
+      id: `${task.id}-s3`,
+      title: 'Wrap up or save a quick return point',
+      minutes: 2,
+      done: false,
+    },
+  ];
+}
+
 export class DaySummary {
   static build(items: TimelineItem[]): string {
-    const remaining = items.filter((item) => !item.isCompleted);
+    const remaining = items.filter((item) => !item.isCompleted && item.type !== 'openSpace');
+    const completed = items.filter((item) => item.isCompleted && item.type !== 'openSpace').length;
     const anchors = remaining.filter((item) => item.type === 'fixedAnchor').length;
-    const flexible = remaining.filter((item) => item.type === 'flexibleBlock').length;
+    const flexible = remaining.filter(
+      (item) => item.type === 'flexibleBlock' || item.type === 'task'
+    ).length;
 
     if (anchors === 0 && flexible === 0) {
-      return items.length === 0
-        ? 'Your day is open. Add one gentle next step when you are ready.'
-        : 'Your planned anchors and flexible blocks are clear.';
+      return completed > 0
+        ? `All clear — ${completed} ${completed === 1 ? 'item' : 'items'} wrapped up today.`
+        : 'Wide-open runway today. Pick one small win whenever you want to start.';
     }
-    if (anchors === 0) {
-      return `You have ${flexible === 1 ? 'one flexible block' : `${flexible} flexible blocks`} left.`;
+
+    const parts: string[] = [];
+    if (anchors > 0) {
+      parts.push(`${anchors} fixed ${anchors === 1 ? 'anchor' : 'anchors'}`);
     }
-    if (flexible === 0) {
-      return `You have ${anchors === 1 ? 'one anchor' : `${anchors} anchors`} left.`;
+    if (flexible > 0) {
+      parts.push(`${flexible} flexible ${flexible === 1 ? 'step' : 'steps'}`);
     }
-    return `You have ${anchors === 1 ? 'one anchor' : `${anchors} anchors`} and ${
-      flexible === 1 ? 'one flexible block' : `${flexible} flexible blocks`
-    } left.`;
+    const suffix = completed > 0 ? ` · ${completed} already done` : '';
+    return `${parts.join(' and ')} ahead${suffix}.`;
   }
+
+  /**
+   * Builds a warm, first-person contextual Lexi cue aligned with LEXI_MASTER_CANON.md
+   * (peer-level, concise, schedule-aware, zero coaching clichés, works 100% offline).
+   */
+  static buildLexiCue(
+    items: TimelineItem[],
+    primaryTask: Task | undefined,
+    isQuickWins: boolean,
+    now: Date = new Date()
+  ): string {
+    const hour = now.getHours();
+    const isWeekday = now.getDay() >= 1 && now.getDay() <= 5;
+
+    if (isQuickWins) {
+      return "We're running light today. Pick one 5-minute win below and ignore the rest—no scorekeeping.";
+    }
+
+    // Bedtime protocol awareness (after 21:30 / 22:00 per Canon)
+    if (hour >= 22) {
+      return "It's past 10:00 PM—your 5:00 AM wake target is coming up. Park whatever's left with a checkpoint and call it a night.";
+    }
+    if (hour >= 21 && hour < 22) {
+      return "Evening wind-down window. Let's wrap the current thread cleanly or save a return point for tomorrow.";
+    }
+
+    if (primaryTask?.status === 'paused' && primaryTask.reentryNote) {
+      return `I kept your spot on "${primaryTask.title}". Next physical move: ${
+        primaryTask.reentryNote.nextAction || 'take the first 2-minute step'
+      }.`;
+    }
+
+    if (primaryTask?.status === 'inProgress') {
+      return `You're mid-flight on "${primaryTask.title}". Stay with this single step—or tap Pause & Park if life interrupted.`;
+    }
+
+    if (isWeekday && hour >= 6 && hour < 14) {
+      return primaryTask
+        ? `Shift hours. Keep it simple—"${primaryTask.title}" is queued up next whenever you have a clean window.`
+        : 'Shift window is rolling. Catch quick thoughts into Notes and keep your runway clear.';
+    }
+
+    if (primaryTask) {
+      const mins = primaryTask.estimatedMinutes ?? 10;
+      return `Don't overthink the whole list. Start with "${primaryTask.title}" (~${mins}m)—or tap "Make it smaller" and I'll slice it into 3 tiny moves.`;
+    }
+
+    return DaySummary.build(items);
+  }
+}
+
+export function formatBreathingRoomDuration(gapMins: number, nextTitle?: string): string {
+  const hours = Math.floor(gapMins / 60);
+  const mins = gapMins % 60;
+  let durationLabel = '';
+  if (hours >= 4) {
+    durationLabel = 'Open afternoon margin';
+  } else if (hours > 0 && mins > 0) {
+    durationLabel = `${hours}h ${mins}m open buffer`;
+  } else if (hours > 0) {
+    durationLabel = `${hours}h open buffer`;
+  } else {
+    durationLabel = `${mins}m transition buffer`;
+  }
+  return nextTitle ? `${durationLabel} before ${nextTitle}` : `${durationLabel} — unscheduled margin`;
 }
 
 export function getTimelineItemPhase(item: TimelineItem, now: Date): TimelinePhase {
@@ -165,8 +332,8 @@ export function buildTimeline(
       type: 'fixedAnchor',
       title: routine.name,
       subtitle: isComplete
-        ? 'Complete'
-        : `${completedCount}/${routine.steps.length} steps`,
+        ? `Completed all ${routine.steps.length} steps ✓`
+        : `${completedCount} of ${routine.steps.length} steps done`,
       start: start.toISOString(),
       end: end.toISOString(),
       isCompleted: isComplete,
@@ -203,7 +370,7 @@ export function buildTimeline(
         id: `task-${task.id}`,
         type: 'flexibleBlock',
         title: task.title,
-        subtitle: task.notes || (task.energy ? `${task.energy.toUpperCase()} energy` : undefined),
+        subtitle: task.notes || (task.energy ? `${task.energy} energy` : undefined),
         task,
         isCompleted: task.status === 'completed',
         isPaused: task.status === 'paused',
@@ -219,8 +386,7 @@ export function buildTimeline(
     return new Date(a.start).getTime() - new Date(b.start).getTime();
   });
 
-  // 4. Insert open spaces for gaps >= 45 minutes
-  const timedItems = items.filter((i) => i.start && i.end);
+  // 4. Insert calm breathing room for gaps >= 45 minutes
   const result: TimelineItem[] = [];
 
   for (let i = 0; i < items.length; i++) {
@@ -235,8 +401,8 @@ export function buildTimeline(
           result.push({
             id: `space-${prevEndMs}`,
             type: 'openSpace',
-            title: 'Open space',
-            subtitle: `${gapMins} minutes with no plan`,
+            title: 'Breathing room',
+            subtitle: formatBreathingRoomDuration(gapMins, item.title),
             start: prev.end,
             end: item.start,
           });
@@ -248,3 +414,4 @@ export function buildTimeline(
 
   return result;
 }
+

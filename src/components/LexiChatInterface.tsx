@@ -20,6 +20,7 @@ import { Task, EnergyLevel } from '../types';
 import { useAudioTranscribe } from '../lib/useTranscribe';
 import { taskStorage, settingsStorage } from '../lib/storage';
 import { redactSensitiveText, sanitizeContextForCloudAi } from '../lib/privacyGate';
+import { LexiAvatar } from './LexiAvatar';
 
 interface ChatMessage {
   id: string;
@@ -134,6 +135,7 @@ export const LexiChatInterface: React.FC<LexiChatInterfaceProps> = ({
   const activeTask =
     explicitActiveTask ||
     tasks.find((t) => t.status === 'inProgress') ||
+    tasks.find((t) => t.status === 'paused') ||
     tasks.find((t) => t.status === 'pending');
 
   const notifyTasksUpdated = () => {
@@ -145,13 +147,26 @@ export const LexiChatInterface: React.FC<LexiChatInterfaceProps> = ({
     if (onOpenLiveVoice) onOpenLiveVoice();
     else if (onOpenVoiceMode) onOpenVoiceMode();
   };
+
+  const buildInitialLexiGreeting = (): string => {
+    if (activeTask?.status === 'paused' && activeTask.reentryNote) {
+      const checkpoint =
+        activeTask.reentryNote.nextAction ||
+        activeTask.reentryNote.leftOffAt ||
+        'your saved checkpoint';
+      return `We paused "${activeTask.title}" — next move is "${checkpoint}". Want to pick right back up there, or slice it into three 2-minute moves first?`;
+    }
+    if (activeTask) {
+      return `"${activeTask.title}" is on deck. Want me to slice it into three 2-minute starting moves, or trade it for a lighter win first?`;
+    }
+    return `Quiet slate right now. Drop whatever is rattling around in your head—or paste a messy list—and we'll pick one easy starting move.`;
+  };
+
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome-1',
       sender: 'lexi',
-      text: activeTask
-        ? `Hey there! I see "${activeTask.title}" is up right now. Would you like me to break it down into tiny 3-minute steps, or help you find a low-energy starting point?`
-        : "Hi! I'm Lexi, your executive function companion. Tell me what's on your mind—or paste a messy to-do list and I'll turn it into calm, bite-sized steps.",
+      text: buildInitialLexiGreeting(),
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     },
   ]);
@@ -569,29 +584,30 @@ export const LexiChatInterface: React.FC<LexiChatInterfaceProps> = ({
   };
 
   const quickPrompts = [
-    'Break down my current task into 3 tiny steps',
-    'I feel stuck and overwhelmed—what is 1 easy win?',
-    'Help me plan a 10-minute reset routine',
+    'Slice my current task into 3 tiny steps',
+    "I'm stuck—pick one 2-minute starting move for me",
+    'Help me set up a quick 10-minute reset',
   ];
 
   return (
     <div className="flex flex-col h-[calc(100vh-8.5rem)] max-w-2xl mx-auto px-4 pt-3">
-      {/* Top Bar with Live Voice CTA & Grounding Toggles */}
+      {/* Top Bar with Lexi Avatar, Live Voice CTA & Grounding Toggles */}
       <div className="flex items-center justify-between gap-2 pb-3 mb-2 border-b border-[#232326]">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-xl bg-[#2FB083]/15 border border-[#2FB083]/30 flex items-center justify-center text-[#2FB083]">
-            <Sparkles className="w-4 h-4" />
-          </div>
+        <div className="flex items-center gap-2.5">
+          <LexiAvatar size={36} visualState={isLoading ? 'thinking' : 'idle'} />
           <div>
             <h2 className="text-sm font-semibold text-[#F0F0F0] flex items-center gap-1.5">
-              <span>Lexi Companion</span>
-              <span className="inline-flex items-center gap-1 text-[10px] font-normal text-[#8A8A8E] bg-[#1C1C1F] px-2 py-0.5 rounded-md border border-[#232326]">
+              <span>Lexi</span>
+              <span
+                className="inline-flex items-center gap-1 text-[10px] font-normal text-[#8A8A8E] bg-[#1C1C1F] px-2 py-0.5 rounded-full border border-[#232326]"
+                title="On-device privacy filter redacts sensitive info before any Cloud AI request"
+              >
                 <ShieldCheck className="w-3 h-3 text-[#2FB083]" />
-                Privacy Gate Active
+                Local redaction
               </span>
             </h2>
             <p className="text-[11px] text-[#8A8A8E]">
-              Task breakdown, gentle pacing & zero-guilt recovery
+              {activeTask ? `Focused on "${activeTask.title}"` : 'Ready when you are'}
             </p>
           </div>
         </div>
@@ -646,6 +662,12 @@ export const LexiChatInterface: React.FC<LexiChatInterfaceProps> = ({
               msg.sender === 'user' ? 'items-end' : 'items-start'
             }`}
           >
+            {msg.sender === 'lexi' && (
+              <div className="flex items-center gap-1.5 mb-1 pl-0.5">
+                <LexiAvatar size={20} visualState="idle" />
+                <span className="text-[11px] font-medium text-[#BB86FC]">Lexi</span>
+              </div>
+            )}
             <div
               className={`max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                 msg.sender === 'user'

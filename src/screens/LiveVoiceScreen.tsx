@@ -72,9 +72,9 @@ export const LiveVoiceScreen: React.FC<LiveVoiceScreenProps> = ({ onClose }) => 
         </div>
 
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-[#BB86FC]/15 text-[#BB86FC] border border-[#BB86FC]/30 flex items-center gap-1">
+          <span className="text-[10px] font-medium px-2.5 py-0.5 rounded-full bg-[#BB86FC]/15 text-[#BB86FC] border border-[#BB86FC]/30 flex items-center gap-1">
             <Radio className="w-3 h-3" />
-            gemini-3.8-live
+            {isConnected ? 'Live Audio · Ready' : 'Connecting…'}
           </span>
         </div>
       </div>
