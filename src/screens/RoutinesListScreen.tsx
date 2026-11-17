@@ -30,6 +30,7 @@ export const RoutinesListScreen: React.FC<RoutinesListScreenProps> = ({
   const [stepInput, setStepInput] = useState('');
   const [steps, setSteps] = useState<string[]>([]);
   const [anchor, setAnchor] = useState<RoutineAnchor>('morning');
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleAddStep = () => {
     const trimmed = stepInput.trim();
@@ -72,9 +73,10 @@ export const RoutinesListScreen: React.FC<RoutinesListScreenProps> = ({
     e.preventDefault();
     const cleanName = name.trim();
     if (!cleanName || steps.length === 0) {
-      alert('Please provide a routine name and at least one step.');
+      setFormError('Please provide a routine name and at least one step.');
       return;
     }
+    setFormError(null);
 
     const [h, m] = timeStr.split(':').map(Number);
     const routineId = `routine-${Date.now()}`;
@@ -340,6 +342,12 @@ export const RoutinesListScreen: React.FC<RoutinesListScreenProps> = ({
                   </div>
                 )}
               </div>
+
+              {formError && (
+                <p className="text-xs text-[#D9A441] bg-[#D9A441]/10 border border-[#D9A441]/30 rounded-xl px-3 py-2">
+                  {formError}
+                </p>
+              )}
 
               <div className="pt-2 flex items-center justify-end gap-2 border-t border-[#232326]">
                 <button

@@ -36,6 +36,22 @@ export const LexiAvatar: React.FC<LexiAvatarProps> = ({
     }
   };
 
+  const getImageSrc = () => {
+    switch (visualState) {
+      case 'focus':
+        return '/assets/lexi/public/lexi-focus.jpg';
+      case 'thinking':
+        return '/assets/lexi/public/lexi-thinking.jpg';
+      case 'evening':
+        return '/assets/lexi/public/lexi-evening.jpg';
+      case 'idle':
+      case 'transition':
+      case 'success':
+      default:
+        return '/assets/lexi/public/lexi-canonical-face.jpg';
+    }
+  };
+
   return (
     <div
       className={`relative inline-flex items-center justify-center shrink-0 ${
@@ -45,14 +61,14 @@ export const LexiAvatar: React.FC<LexiAvatarProps> = ({
       title={`Lexi (${visualState})`}
     >
       <div
-        className="w-full h-full rounded-full overflow-hidden border border-[#232326] bg-[#1C1C1F] flex items-center justify-center shadow-md"
+        className="w-full h-full rounded-full overflow-hidden border border-[#232326] bg-[#1C1C1F] flex items-center justify-center shadow-md transition-all duration-300"
         style={{ width: size, height: size }}
       >
         {!imageError ? (
           <img
-            src="/assets/lexi/public/lexi-canonical-face.jpg"
+            src={getImageSrc()}
             alt="Lexi companion"
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover transition-opacity duration-300"
             onError={() => setImageError(true)}
           />
         ) : (

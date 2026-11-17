@@ -1,0 +1,47 @@
+{
+  "id": "/",
+  "name": "NeuroFlow — Executive Companion",
+  "short_name": "NeuroFlow",
+  "description": "Local-first ADHD executive companion with one-tap Focus Pod, inline micro-step slicing, visual timeline river, and Lexi AI.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0C0C0D",
+  "theme_color": "#0C0C0D",
+  "categories": ["productivity", "health", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/assets/lexi/public/lexi-widget-reference.jpg",
+      "sizes": "512x512",
+      "type": "image/jpeg",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Today Focus Pod",
+      "short_name": "Focus",
+      "description": "Jump straight to your active task or checkpoint",
+      "url": "/?tab=today"
+    },
+    {
+      "name": "Talk with Lexi",
+      "short_name": "Lexi",
+      "description": "Slice a task or start Live Voice with Lexi",
+      "url": "/?tab=lexi"
+    },
+    {
+      "name": "Run a Routine",
+      "short_name": "Routines",
+      "description": "Launch a guided timed routine",
+      "url": "/?tab=routines"
+    }
+  ]
+}

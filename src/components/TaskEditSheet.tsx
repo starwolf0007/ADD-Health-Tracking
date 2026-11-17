@@ -48,6 +48,7 @@ const TaskEditForm: React.FC<FormProps> = ({ task, onClose, onUpdated }) => {
     }
     return '09:00';
   });
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,11 +80,13 @@ const TaskEditForm: React.FC<FormProps> = ({ task, onClose, onUpdated }) => {
   };
 
   const handleDelete = () => {
-    if (window.confirm('Delete this task?')) {
-      taskStorage.delete(task.id);
-      if (onUpdated) onUpdated();
-      onClose();
+    if (!confirmDelete) {
+      setConfirmDelete(true);
+      return;
     }
+    taskStorage.delete(task.id);
+    if (onUpdated) onUpdated();
+    onClose();
   };
 
   return (
@@ -209,10 +212,14 @@ const TaskEditForm: React.FC<FormProps> = ({ task, onClose, onUpdated }) => {
             <button
               type="button"
               onClick={handleDelete}
-              className="text-[#D9A441] hover:text-[#D9A441]/80 text-xs flex items-center gap-1.5 p-2 rounded-lg"
+              className={`text-xs flex items-center gap-1.5 p-2 rounded-lg transition-colors ${
+                confirmDelete
+                  ? 'bg-[#D9A441] text-[#0C0C0D] font-semibold px-3'
+                  : 'text-[#D9A441] hover:text-[#D9A441]/80'
+              }`}
             >
               <Trash2 className="w-4 h-4" />
-              <span>Delete</span>
+              <span>{confirmDelete ? 'Confirm Delete' : 'Delete'}</span>
             </button>
 
             <div className="flex items-center gap-2">

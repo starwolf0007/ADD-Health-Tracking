@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.github
+.claude
+.aistudio
+scripts/__pycache__
+scripts/tests/__pycache__
+*.log
+.env
+.env.*

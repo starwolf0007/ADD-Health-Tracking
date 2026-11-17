@@ -1,87 +1,126 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "title": "NeuroFlow Firestore Blueprint",
   "entities": {
-    "users": {
-      "path": "users/{userId}",
-      "description": "User profile and top-level settings",
-      "fields": {
-        "displayName": { "type": "string" },
-        "email": { "type": "string" },
-        "photoURL": { "type": "string" },
-        "morningBriefing": { "type": "boolean" },
-        "cloudGemini": { "type": "boolean" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
-      }
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile and non-sensitive application preferences",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 },
+        "displayName": { "type": "string", "maxLength": 120 },
+        "photoURL": { "type": "string", "maxLength": 1024 },
+        "createdAt": { "type": "string", "format": "date-time", "maxLength": 64 },
+        "updatedAt": { "type": "string", "format": "date-time", "maxLength": 64 }
+      },
+      "required": ["uid"]
     },
-    "tasks": {
-      "path": "users/{userId}/tasks/{taskId}",
-      "description": "User tasks with ADHD energy levels and status",
-      "fields": {
-        "title": { "type": "string" },
-        "notes": { "type": "string" },
-        "energy": { "type": "string" },
-        "status": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "dueDate": { "type": "string" },
-        "completedAt": { "type": "string" },
+    "Task": {
+      "title": "Task",
+      "description": "Executive task item with optional re-entry note",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 300 },
+        "notes": { "type": "string", "maxLength": 4000 },
+        "energy": { "type": "string", "enum": ["low", "medium", "high"] },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "inProgress", "completed", "skipped", "paused", "blocked"]
+        },
+        "createdAt": { "type": "string", "format": "date-time", "maxLength": 64 },
+        "dueDate": { "type": "string", "format": "date-time", "maxLength": 64 },
+        "completedAt": { "type": "string", "format": "date-time", "maxLength": 64 },
+        "activeStartedAt": { "type": "string", "format": "date-time", "maxLength": 64 },
         "estimatedMinutes": { "type": "number" },
         "isQuickWin": { "type": "boolean" },
-        "reentryNote": { "type": "object" }
-      }
+        "googleTaskId": { "type": "string", "maxLength": 256 },
+        "updatedAt": { "type": "string", "format": "date-time", "maxLength": 64 }
+      },
+      "required": ["id", "title", "energy", "status", "createdAt", "isQuickWin"]
     },
-    "routines": {
-      "path": "users/{userId}/routines/{routineId}",
-      "description": "User routines and step checklists",
-      "fields": {
-        "name": { "type": "string" },
-        "anchor": { "type": "string" },
+    "Routine": {
+      "title": "Routine",
+      "description": "Ordered step-by-step routine",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 160 },
+        "anchor": { "type": "string", "enum": ["morning", "midday", "evening", "custom"] },
         "scheduleHour": { "type": "number" },
         "scheduleMinute": { "type": "number" },
         "isActive": { "type": "boolean" },
-        "steps": { "type": "array" },
-        "createdAt": { "type": "string" }
-      }
+        "activeDays": { "type": "string", "maxLength": 16 },
+        "createdAt": { "type": "string", "format": "date-time", "maxLength": 64 }
+      },
+      "required": ["id", "name", "anchor", "isActive", "createdAt"]
     },
-    "habits": {
-      "path": "users/{userId}/habits/{habitId}",
-      "description": "User habits",
-      "fields": {
-        "name": { "type": "string" },
-        "frequency": { "type": "string" },
+    "Habit": {
+      "title": "Habit",
+      "description": "Non-sensitive daily or weekly habit item (medication habits are strictly on-device-only)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 160 },
+        "icon": { "type": "string", "maxLength": 32 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "frequency": { "type": "string", "enum": ["daily", "weekdays", "weekends"] },
         "isActive": { "type": "boolean" },
-        "createdAt": { "type": "string" }
-      }
+        "createdAt": { "type": "string", "format": "date-time", "maxLength": 64 }
+      },
+      "required": ["id", "name", "frequency", "isActive", "createdAt"]
     },
-    "habit_checkins": {
-      "path": "users/{userId}/habit_checkins/{checkInId}",
-      "description": "Daily habit check-in records",
-      "fields": {
-        "habitId": { "type": "string" },
-        "date": { "type": "string" },
+    "HabitCheckIn": {
+      "title": "HabitCheckIn",
+      "description": "Daily habit completion record for non-sensitive habits",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "habitId": { "type": "string", "maxLength": 128 },
+        "date": { "type": "string", "maxLength": 16 },
         "completed": { "type": "boolean" },
-        "createdAt": { "type": "string" }
-      }
+        "createdAt": { "type": "string", "format": "date-time", "maxLength": 64 }
+      },
+      "required": ["id", "habitId", "date", "completed", "createdAt"]
     },
-    "mood_logs": {
-      "path": "users/{userId}/mood_logs/{logId}",
-      "description": "Mood and capacity signals driving Quick Wins",
-      "fields": {
-        "level": { "type": "string" },
-        "note": { "type": "string" },
-        "loggedAt": { "type": "string" }
-      }
-    },
-    "notes": {
-      "path": "users/{userId}/notes/{noteId}",
-      "description": "Captured notes and thought dumps",
-      "fields": {
-        "body": { "type": "string" },
+    "Note": {
+      "title": "Note",
+      "description": "Scratchpad note optionally linked to a task",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "body": { "type": "string", "maxLength": 10000 },
         "pinned": { "type": "boolean" },
-        "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" }
-      }
+        "linkedTaskId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string", "format": "date-time", "maxLength": 64 },
+        "updatedAt": { "type": "string", "format": "date-time", "maxLength": 64 }
+      },
+      "required": ["id", "body", "pinned", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile document"
+    },
+    "/users/{userId}/tasks/{taskId}": {
+      "schema": { "$ref": "#/entities/Task" },
+      "description": "User tasks subcollection"
+    },
+    "/users/{userId}/routines/{routineId}": {
+      "schema": { "$ref": "#/entities/Routine" },
+      "description": "User routines subcollection"
+    },
+    "/users/{userId}/habits/{habitId}": {
+      "schema": { "$ref": "#/entities/Habit" },
+      "description": "User non-sensitive habits subcollection"
+    },
+    "/users/{userId}/habit_checkins/{checkInId}": {
+      "schema": { "$ref": "#/entities/HabitCheckIn" },
+      "description": "User habit check-ins subcollection"
+    },
+    "/users/{userId}/notes/{noteId}": {
+      "schema": { "$ref": "#/entities/Note" },
+      "description": "User notes subcollection"
     }
   }
 }

@@ -42,16 +42,18 @@ export interface LiveVoiceMessage {
   text: string;
 }
 
+export type MicStatus = 'idle' | 'requesting' | 'granted' | 'denied' | 'unsupported';
+
 export function useLiveVoice() {
   const [isConnected, setIsConnected] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isListening, setIsListening] = useState(false);
-  const [transcriptHistory, setTranscriptHistory] = useState<
-    LiveVoiceMessage[]
-  >([]);
+  const [micStatus, setMicStatus] = useState<MicStatus>('idle');
+  const [micError, setMicError] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [transcriptHistory, setTranscriptHistory] = useState<LiveVoiceMessage[]>([]);
   const [currentInputText, setCurrentInputText] = useState('');
   const [currentOutputText, setCurrentOutputText] = useState('');
-  const [error, setError] = useState<string | null>(null);
 
   const generationRef = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
@@ -77,110 +79,182 @@ export function useLiveVoice() {
   }, []);
 
   const playAudioChunk = useCallback((base64Audio: string) => {
-    if (!outputCtxRef.current) {
-      outputCtxRef.current = new (
-        window.AudioContext || (window as any).webkitAudioContext
-      )({
-        sampleRate: 24000,
-      });
-    }
-    const ctx = outputCtxRef.current;
-    if (ctx.state === 'suspended') {
-      ctx.resume();
-    }
-
-    const floatData = base64ToFloat32Array(base64Audio);
-    const audioBuffer = ctx.createBuffer(1, floatData.length, 24000);
-    audioBuffer.getChannelData(0).set(floatData);
-
-    const source = ctx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(ctx.destination);
-
-    // Schedule gapless playback
-    const now = ctx.currentTime;
-    const startTime = Math.max(now, nextStartTimeRef.current);
-    source.start(startTime);
-    nextStartTimeRef.current = startTime + audioBuffer.duration;
-
-    activeSourcesRef.current.push(source);
-    setIsSpeaking(true);
-
-    source.onended = () => {
-      activeSourcesRef.current = activeSourcesRef.current.filter(
-        (s) => s !== source,
-      );
-      if (activeSourcesRef.current.length === 0) {
-        setIsSpeaking(false);
+    try {
+      if (!outputCtxRef.current) {
+        outputCtxRef.current = new (
+          window.AudioContext || (window as any).webkitAudioContext
+        )({
+          sampleRate: 24000,
+        });
       }
-    };
+      const ctx = outputCtxRef.current;
+      if (ctx.state === 'suspended') {
+        ctx.resume();
+      }
+
+      const floatData = base64ToFloat32Array(base64Audio);
+      const audioBuffer = ctx.createBuffer(1, floatData.length, 24000);
+      audioBuffer.getChannelData(0).set(floatData);
+
+      const source = ctx.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(ctx.destination);
+
+      // Schedule gapless playback
+      const now = ctx.currentTime;
+      const startTime = Math.max(now, nextStartTimeRef.current);
+      source.start(startTime);
+      nextStartTimeRef.current = startTime + audioBuffer.duration;
+
+      activeSourcesRef.current.push(source);
+      setIsSpeaking(true);
+
+      source.onended = () => {
+        activeSourcesRef.current = activeSourcesRef.current.filter((s) => s !== source);
+        if (activeSourcesRef.current.length === 0) {
+          setIsSpeaking(false);
+        }
+      };
+    } catch (e) {
+      console.warn('Error playing audio chunk:', e);
+    }
   }, []);
 
-  const startSession = async () => {
+  // Request & configure microphone stream
+  const enableMicrophone = useCallback(async (): Promise<boolean> => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setMicStatus('unsupported');
+      setMicError('Microphone is not supported in this browser environment.');
+      return false;
+    }
+
+    setMicStatus('requesting');
+    setMicError(null);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: 16000,
+          echoCancellation: true,
+          noiseSuppression: true,
+        },
+      });
+
+      mediaStreamRef.current = stream;
+      setMicStatus('granted');
+
+      const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({
+        sampleRate: 16000,
+      });
+      inputCtxRef.current = inputCtx;
+
+      const source = inputCtx.createMediaStreamSource(stream);
+      const processor = inputCtx.createScriptProcessor(4096, 1, 1);
+      scriptProcessorRef.current = processor;
+
+      processor.onaudioprocess = (e) => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+          const inputData = e.inputBuffer.getChannelData(0);
+          const base64PCM = floatTo16BitPCMBase64(inputData);
+          wsRef.current.send(JSON.stringify({ audio: base64PCM }));
+        }
+      };
+
+      source.connect(processor);
+      processor.connect(inputCtx.destination);
+      setIsListening(true);
+      return true;
+    } catch (err: any) {
+      console.warn('Microphone permission or access issue:', err?.name || err?.message);
+      if (err.name === 'NotAllowedError' || err.message?.includes('Permission denied')) {
+        setMicStatus('denied');
+        setMicError('Microphone permission is blocked. Tap "Allow Mic" or unblock in your browser address bar settings. You can also type below!');
+      } else {
+        setMicStatus('unsupported');
+        setMicError('Microphone unavailable: ' + (err.message || 'Device error'));
+      }
+      setIsListening(false);
+      return false;
+    }
+  }, []);
+
+  const sendTextMessage = useCallback((text: string) => {
+    if (!text.trim()) return;
+    const cleanText = text.trim();
+
+    setCurrentInputText(cleanText);
+    setTranscriptHistory((prev) => [
+      ...prev,
+      { id: `in-${Date.now()}`, sender: 'user', text: cleanText },
+    ]);
+
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ text: cleanText }));
+    } else {
+      setConnectionError('Voice connection is not ready. Reconnecting...');
+    }
+  }, []);
+
+  const endSession = useCallback(() => {
+    generationRef.current++;
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
+    if (scriptProcessorRef.current) {
+      scriptProcessorRef.current.disconnect();
+      scriptProcessorRef.current = null;
+    }
+    if (inputCtxRef.current) {
+      inputCtxRef.current.close().catch(() => {});
+      inputCtxRef.current = null;
+    }
+    stopPlayback();
+    if (outputCtxRef.current) {
+      void outputCtxRef.current.close();
+      outputCtxRef.current = null;
+    }
+    setIsConnected(false);
+    setIsListening(false);
+    setIsSpeaking(false);
+    setMicStatus('idle');
+  }, [stopPlayback]);
+
+  const startSession = useCallback(async () => {
     const generation = ++generationRef.current;
     try {
-      setError(null);
+      setConnectionError(null);
       requireCloudConsent();
+
       const ticketResponse = await cloudFetch('/api/gemini/live-ticket', {
         method: 'POST',
         body: '{}',
       });
       const ticketData = await ticketResponse.json();
-      if (!ticketResponse.ok)
+      if (!ticketResponse.ok) {
         throw new Error(ticketData.error || 'Voice is unavailable');
+      }
       if (generation !== generationRef.current) return;
+
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const wsUrl = `${protocol}//${window.location.host}/api/live-ws?ticket=${encodeURIComponent(ticketData.ticket)}`;
+
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = async () => {
-        // Setup microphone capture at 16kHz
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              channelCount: 1,
-              sampleRate: 16000,
-              echoCancellation: true,
-              noiseSuppression: true,
-            },
-          });
-          if (wsRef.current !== ws || ws.readyState !== WebSocket.OPEN) {
-            stream.getTracks().forEach((track) => track.stop());
-            return;
-          }
-          mediaStreamRef.current = stream;
-          requireCloudConsent();
-
-          const inputCtx = new (
-            window.AudioContext || (window as any).webkitAudioContext
-          )({
-            sampleRate: 16000,
-          });
-          inputCtxRef.current = inputCtx;
-
-          const source = inputCtx.createMediaStreamSource(stream);
-          const processor = inputCtx.createScriptProcessor(4096, 1, 1);
-          scriptProcessorRef.current = processor;
-
-          processor.onaudioprocess = (e) => {
-            if (ws.readyState === WebSocket.OPEN) {
-              const inputData = e.inputBuffer.getChannelData(0);
-              const base64PCM = floatTo16BitPCMBase64(inputData);
-              ws.send(JSON.stringify({ audio: base64PCM }));
-            }
-          };
-
-          source.connect(processor);
-          processor.connect(inputCtx.destination);
-          setIsListening(true);
-        } catch (micErr: any) {
-          console.error('Microphone access failed:', micErr);
-          setError(
-            'Microphone access denied or unavailable: ' + micErr.message,
-          );
-          endSession();
-        }
+        setIsConnected(true);
+        setConnectionError(null);
+        enableMicrophone();
       };
 
       ws.onmessage = (event) => {
@@ -210,11 +284,11 @@ export function useLiveVoice() {
           } else if (msg.type === 'sessionClosed') {
             endSession();
           } else if (msg.type === 'error') {
-            setError(msg.message);
+            setConnectionError(msg.message);
             endSession();
           }
         } catch (e) {
-          console.error('Error handling WebSocket message:', e);
+          console.warn('Error handling WebSocket message:', e);
         }
       };
 
@@ -222,43 +296,15 @@ export function useLiveVoice() {
         endSession();
       };
 
-      ws.onerror = (err) => {
-        console.error('Live voice WebSocket error:', err);
-        setError('Voice connection lost or unavailable.');
+      ws.onerror = (event: any) => {
+        console.warn('Live voice WebSocket status update:', event?.type || 'error');
+        setConnectionError('Voice connection interrupted. Tap to reconnect.');
         setIsConnected(false);
       };
     } catch (err: any) {
-      setError(err.message || 'Failed to start Live Voice session');
+      setConnectionError(err.message || 'Failed to start Live Voice session');
     }
-  };
-
-  const endSession = useCallback(() => {
-    generationRef.current++;
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
-      mediaStreamRef.current = null;
-    }
-    if (scriptProcessorRef.current) {
-      scriptProcessorRef.current.disconnect();
-      scriptProcessorRef.current = null;
-    }
-    if (inputCtxRef.current) {
-      inputCtxRef.current.close();
-      inputCtxRef.current = null;
-    }
-    stopPlayback();
-    if (outputCtxRef.current) {
-      void outputCtxRef.current.close();
-      outputCtxRef.current = null;
-    }
-    setIsConnected(false);
-    setIsListening(false);
-    setIsSpeaking(false);
-  }, [stopPlayback]);
+  }, [enableMicrophone, endSession, playAudioChunk, stopPlayback]);
 
   useEffect(() => {
     return () => {
@@ -270,11 +316,16 @@ export function useLiveVoice() {
     isConnected,
     isSpeaking,
     isListening,
+    micStatus,
+    micError,
+    connectionError,
     startSession,
     endSession,
+    enableMicrophone,
+    sendTextMessage,
     transcriptHistory,
     currentInputText,
     currentOutputText,
-    error,
+    error: micError || connectionError,
   };
 }

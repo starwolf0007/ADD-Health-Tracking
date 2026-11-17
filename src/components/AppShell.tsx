@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Sun,
   StickyNote,
@@ -12,11 +12,20 @@ import {
   Radio,
   Sparkles,
   Clock,
+  HardDrive,
   User as UserIcon,
+  CloudOff,
+  RefreshCw,
+  AlertCircle,
+  Download,
 } from 'lucide-react';
 import { Routine, Achievement, Task } from '../types';
-import { useNeuroStorage } from '../lib/storage';
-import { useFirebaseAuth } from '../lib/firebase';
+import {
+  useNeuroStorage,
+  exportAllData,
+} from '../lib/storage';
+import { useFirebaseAuth, useFirestoreSync } from '../lib/firebase';
+import { googleDriveService } from '../lib/googleDrive';
 import { TodayScreen } from '../screens/TodayScreen';
 import { NotesScreen } from '../screens/NotesScreen';
 import { RoutinesListScreen } from '../screens/RoutinesListScreen';
@@ -25,6 +34,7 @@ import { RoutineRunScreen } from '../screens/RoutineRunScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
 import { ConnectedServicesScreen } from '../screens/ConnectedServicesScreen';
 import { HealthIntegrationsScreen } from '../screens/HealthIntegrationsScreen';
+import { GoogleDriveScreen } from '../screens/GoogleDriveScreen';
 import { LexiChatInterface } from './LexiChatInterface';
 import { LiveVoiceScreen } from '../screens/LiveVoiceScreen';
 import { VisualClockTimer } from './VisualClockTimer';
@@ -32,20 +42,66 @@ import { CaptureSheet } from './CaptureSheet';
 import { AchievementToast } from './AchievementToast';
 
 export const AppShell: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<
-    'today' | 'routines' | 'lexi' | 'notes' | 'reflect'
-  >('today');
+  const [activeTab, setActiveTab] = useState<'today' | 'routines' | 'lexi' | 'notes' | 'reflect'>(() => {
+    if (typeof window !== 'undefined') {
+      const tabParam = new URLSearchParams(window.location.search).get('tab');
+      if (
+        tabParam === 'today' ||
+        tabParam === 'routines' ||
+        tabParam === 'lexi' ||
+        tabParam === 'notes' ||
+        tabParam === 'reflect'
+      ) {
+        return tabParam;
+      }
+    }
+    return 'today';
+  });
   const [activeOverlay, setActiveOverlay] = useState<
-    | 'settings'
-    | 'connected_services'
-    | 'health_integrations'
-    | 'live_voice'
-    | null
+    'settings' | 'connected_services' | 'health_integrations' | 'live_voice' | 'google_drive' | null
   >(null);
   const [runningRoutine, setRunningRoutine] = useState<Routine | null>(null);
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
-  const [currentAchievement, setCurrentAchievement] =
-    useState<Achievement | null>(null);
+  const [currentAchievement, setCurrentAchievement] = useState<Achievement | null>(null);
+  const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
+  const [isStandalone, setIsStandalone] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return (
+      window.matchMedia?.('(display-mode: standalone)').matches ||
+      (window.navigator as any)?.standalone === true
+    );
+  });
+
+  // Listen for browser PWA install prompt (Android Chrome / Desktop Chrome / Edge)
+  useEffect(() => {
+    const handleBeforeInstallPrompt = (e: Event) => {
+      e.preventDefault();
+      setDeferredInstallPrompt(e);
+    };
+    const handleAppInstalled = () => {
+      setDeferredInstallPrompt(null);
+      setIsStandalone(true);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    window.addEventListener('appinstalled', handleAppInstalled);
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      window.removeEventListener('appinstalled', handleAppInstalled);
+    };
+  }, []);
+
+  const handleInstallPwa = async () => {
+    if (!deferredInstallPrompt) return;
+    try {
+      await deferredInstallPrompt.prompt();
+      const choiceResult = await deferredInstallPrompt.userChoice;
+      if (choiceResult?.outcome === 'accepted') {
+        setDeferredInstallPrompt(null);
+      }
+    } catch (err) {
+      console.warn('[PWA] Install prompt error:', err);
+    }
+  };
 
   // Visual Clock Timer State (5m, 25m, 50m pomodoro)
   const [visualTimerState, setVisualTimerState] = useState<{
@@ -59,10 +115,54 @@ export const AppShell: React.FC = () => {
   });
 
   const storage = useNeuroStorage();
-  const { user, signInWithGoogle, signOut, syncStatus, authError } =
-    useFirebaseAuth();
+  const {
+    user,
+    accessToken,
+    signInWithGoogle,
+    signOut,
+    syncStatus,
+    pendingQueueCount,
+    triggerManualSync,
+  } = useFirebaseAuth();
 
-  const greetingName = user?.displayName || storage.settings.displayName;
+  // Activate Firestore real-time synchronization
+  useFirestoreSync(user);
+
+  // Automatic Google Drive Daily Backup
+  useEffect(() => {
+    if (!accessToken || !storage.settings.autoDriveBackup) return;
+
+    const payload = exportAllData({ includeSensitive: false });
+    googleDriveService
+      .checkAndRunAutoBackup(accessToken, payload, {
+        refreshToken: signInWithGoogle,
+      })
+      .then((res) => {
+        if (res.executed) {
+          setCurrentAchievement({
+            id: `backup-${Date.now()}`,
+            title: 'GOOGLE DRIVE SYNCED',
+            message: `Automatic daily snapshot created (${res.fileName})`,
+            type: 'backup',
+            timestamp: Date.now(),
+          });
+        }
+      })
+      .catch((err) => {
+        console.warn('[DriveSync] Auto backup check encountered error:', err);
+      });
+  }, [accessToken, storage.settings.autoDriveBackup]);
+
+  const greetingName = user?.displayName?.split(' ')[0] || storage.settings.displayName || 'Bryan';
+  const currentHour = new Date().getHours();
+  const timeOfDayGreeting =
+    currentHour < 5
+      ? `Late night, ${greetingName}`
+      : currentHour < 12
+      ? `Good morning, ${greetingName}`
+      : currentHour < 17
+      ? `Afternoon, ${greetingName}`
+      : `Evening, ${greetingName}`;
 
   return (
     <div className="min-h-screen bg-[#0C0C0D] text-[#F0F0F0] flex flex-col selection:bg-[#2FB083]/30">
@@ -87,41 +187,84 @@ export const AppShell: React.FC = () => {
             </div>
           )}
           <div>
-            <h1 className="text-sm sm:text-base font-medium text-[#F0F0F0] leading-none">
-              {greetingName ? `Hey, ${greetingName}` : 'NeuroFlow'}
+            <h1 className="text-sm sm:text-base font-semibold text-[#F0F0F0] leading-none tracking-tight">
+              {timeOfDayGreeting}
             </h1>
             <div className="flex items-center gap-1.5 mt-1">
               {user ? (
-                <span className="text-[10px] text-[#2FB083] font-mono flex items-center gap-1">
-                  <Cloud className="w-2.5 h-2.5" />
-                  {syncStatus === 'synced'
-                    ? 'Tasks & notes synced'
-                    : syncStatus === 'error'
-                      ? 'Sync error — saved on device'
-                      : 'Syncing tasks & notes…'}
-                </span>
+                syncStatus === 'synced' ? (
+                  <span
+                    className="text-[11px] text-[#8A8A8E] flex items-center gap-1.5"
+                    title="Cloud backup in sync"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#2FB083]" />
+                    <span>All changes saved</span>
+                  </span>
+                ) : syncStatus === 'syncing' ? (
+                  <span className="text-[11px] text-[#8A8A8E] flex items-center gap-1">
+                    <RefreshCw className="w-2.5 h-2.5 animate-spin text-[#2FB083]" />
+                    <span>Saving ({pendingQueueCount})</span>
+                  </span>
+                ) : syncStatus === 'offline' ? (
+                  <span className="text-[11px] text-[#8A8A8E] flex items-center gap-1">
+                    <CloudOff className="w-2.5 h-2.5" />
+                    <span>Local-first · {pendingQueueCount} queued</span>
+                  </span>
+                ) : syncStatus === 'queued' ? (
+                  <button
+                    onClick={triggerManualSync}
+                    className="text-[11px] text-[#D9A441] hover:underline flex items-center gap-1"
+                    title="Tap to retry offline sync"
+                  >
+                    <Clock className="w-2.5 h-2.5" />
+                    <span>{pendingQueueCount} queued to sync</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={triggerManualSync}
+                    className="text-[11px] text-[#D9A441] hover:underline flex items-center gap-1"
+                    title="Sync issue. Tap to retry."
+                  >
+                    <AlertCircle className="w-2.5 h-2.5" />
+                    <span>Tap to retry sync ({pendingQueueCount})</span>
+                  </button>
+                )
               ) : (
-                <button
-                  onClick={signInWithGoogle}
-                  className="text-[10px] text-[#8A8A8E] hover:text-[#2FB083] flex items-center gap-1 transition-colors"
-                >
-                  <LogIn className="w-2.5 h-2.5" />
-                  Sign in with Google
-                </button>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-[#8A8A8E] flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#2FB083]/80" />
+                    <span>Saved on device</span>
+                  </span>
+                  <button
+                    onClick={signInWithGoogle}
+                    className="text-[11px] text-[#2FB083] hover:underline flex items-center gap-1 transition-colors"
+                  >
+                    <LogIn className="w-2.5 h-2.5" />
+                    <span>Cloud sync</span>
+                  </button>
+                </div>
               )}
             </div>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          {/* 1-Tap Install App Button (shown when browser offers PWA installation) */}
+          {!isStandalone && deferredInstallPrompt && (
+            <button
+              onClick={handleInstallPwa}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#2FB083] text-[#0C0C0D] text-xs font-semibold hover:bg-[#2FB083]/90 transition-all shadow-sm"
+              title="Install NeuroFlow as a full-screen app on your device"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Install</span>
+            </button>
+          )}
+
           {/* Visual Clock Timer Quick Launcher (Pomodoro) */}
           <button
             onClick={() =>
-              setVisualTimerState({
-                isOpen: true,
-                task: null,
-                initialMinutes: 25,
-              })
+              setVisualTimerState({ isOpen: true, task: null, initialMinutes: 25 })
             }
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#2FB083]/15 hover:bg-[#2FB083]/25 text-[#2FB083] text-xs font-semibold border border-[#2FB083]/30 transition-all shadow-sm"
             title="Visual Clock Timer (5m, 25m, 50m pomodoro)"
@@ -130,11 +273,21 @@ export const AppShell: React.FC = () => {
             <span className="hidden sm:inline">Timer</span>
           </button>
 
+          {/* Google Drive Quick Launcher */}
+          <button
+            onClick={() => setActiveOverlay('google_drive')}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#4285F4]/15 hover:bg-[#4285F4]/25 text-[#4285F4] text-xs font-semibold border border-[#4285F4]/30 transition-all shadow-sm"
+            title="Google Drive Files & Backups"
+          >
+            <HardDrive className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">Drive</span>
+          </button>
+
           {/* Live Voice Quick Trigger */}
           <button
             onClick={() => setActiveOverlay('live_voice')}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-[#BB86FC]/15 hover:bg-[#BB86FC]/25 text-[#BB86FC] text-xs font-semibold border border-[#BB86FC]/30 transition-all shadow-sm"
-            title="Start real-time voice conversation with gemini-3.8-live"
+            title="Start real-time voice conversation with Lexi"
           >
             <Radio className="w-3.5 h-3.5 animate-pulse" />
             <span className="hidden sm:inline">Voice</span>
@@ -151,11 +304,6 @@ export const AppShell: React.FC = () => {
         </div>
       </header>
 
-      {authError && (
-        <p role="alert" className="p-3 text-red-300">
-          {authError}
-        </p>
-      )}
       {/* Primary Tab View */}
       <main className="flex-1 max-w-2xl mx-auto w-full">
         {activeTab === 'today' && (
@@ -245,9 +393,7 @@ export const AppShell: React.FC = () => {
             }`}
           >
             <Repeat className="w-5 h-5" />
-            <span className="text-[10px] font-medium tracking-wide">
-              Routines
-            </span>
+            <span className="text-[10px] font-medium tracking-wide">Routines</span>
           </button>
 
           {/* Lexi AI Dedicated Tab */}
@@ -261,9 +407,7 @@ export const AppShell: React.FC = () => {
           >
             <div
               className={`p-1 rounded-full ${
-                activeTab === 'lexi'
-                  ? 'bg-[#BB86FC]/20 ring-1 ring-[#BB86FC]/40'
-                  : ''
+                activeTab === 'lexi' ? 'bg-[#BB86FC]/20 ring-1 ring-[#BB86FC]/40' : ''
               }`}
             >
               <Sparkles className="w-5 h-5" />
@@ -292,9 +436,7 @@ export const AppShell: React.FC = () => {
             }`}
           >
             <Flower2 className="w-5 h-5" />
-            <span className="text-[10px] font-medium tracking-wide">
-              Reflect
-            </span>
+            <span className="text-[10px] font-medium tracking-wide">Reflect</span>
           </button>
         </div>
       </nav>
@@ -311,6 +453,13 @@ export const AppShell: React.FC = () => {
       {/* Live Voice Screen (gemini-3.8-live) */}
       {activeOverlay === 'live_voice' && (
         <LiveVoiceScreen onClose={() => setActiveOverlay(null)} />
+      )}
+
+      {/* Google Drive Workspace Overlay */}
+      {activeOverlay === 'google_drive' && (
+        <div className="fixed inset-0 z-50 bg-[#0C0C0D] overflow-y-auto">
+          <GoogleDriveScreen onBack={() => setActiveOverlay(null)} />
+        </div>
       )}
 
       {/* Visual Clock Timer Modal Overlay (Time-Blindness Pomodoro) */}
@@ -336,12 +485,9 @@ export const AppShell: React.FC = () => {
           <SettingsScreen
             settings={storage.settings}
             onBack={() => setActiveOverlay(null)}
-            onOpenConnectedServices={() =>
-              setActiveOverlay('connected_services')
-            }
-            onOpenHealthIntegrations={() =>
-              setActiveOverlay('health_integrations')
-            }
+            onOpenConnectedServices={() => setActiveOverlay('connected_services')}
+            onOpenHealthIntegrations={() => setActiveOverlay('health_integrations')}
+            onOpenGoogleDrive={() => setActiveOverlay('google_drive')}
             refresh={storage.refresh}
           />
         </div>
@@ -352,6 +498,7 @@ export const AppShell: React.FC = () => {
         <div className="fixed inset-0 z-50 bg-[#0C0C0D] overflow-y-auto">
           <ConnectedServicesScreen
             onBack={() => setActiveOverlay('settings')}
+            onOpenGoogleDrive={() => setActiveOverlay('google_drive')}
           />
         </div>
       )}

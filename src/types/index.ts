@@ -8,6 +8,7 @@ export interface ReentryNote {
   lastCompletedStep?: string;
   nextAction?: string;
   returnAt?: string; // ISO date
+  leftOffAt?: string;
   updatedAt: string;
 }
 
@@ -64,6 +65,7 @@ export interface HabitCheckIn {
 export interface Habit {
   id: string;
   name: string;
+  icon?: string;
   notes?: string;
   frequency: HabitFrequency;
   isActive: boolean;
@@ -117,9 +119,10 @@ export interface Achievement {
   id: string;
   title: string;
   message: string;
-  type: 'reentry' | 'quickwin' | 'routine';
+  type: 'reentry' | 'quickwin' | 'routine' | 'backup';
   timestamp: number;
 }
+
 
 export interface HevySet {
   index: number;
