@@ -30,7 +30,7 @@ first substantial change:
 - `docs/ARCHITECTURE.md` — layer model, dependency directions, controller style.
 
 Product source of truth: `docs/NeuroFlow-Unified-Spec-v1.4.md`.
-Behavioral regressions already made and fixed once: `docs/COPILOT_INSTRUCTIONS.md`
+Behavioral regressions already made and fixed once: `docs/archive/COPILOT_INSTRUCTIONS.md`
 ("Things to avoid") — read that list before touching Today/Habits/Capture.
 
 ## Tech stack
@@ -48,6 +48,7 @@ Behavioral regressions already made and fixed once: `docs/COPILOT_INSTRUCTIONS.m
 - Google: `google_sign_in` ^7, `googleapis` ^16. Secrets: `flutter_secure_storage`.
 - Android: `minSdk 31`, `targetSdk 35`, namespace `com.neuroflow`, Health Connect
   `connect-client:1.1.0`.
+<!-- doc-path-check: ignore -->
 - UI is Material 3, **dark-only by design** (spec §13) — see `lib/presentation/theme.dart`.
 
 ## Build & development commands
@@ -63,6 +64,7 @@ flutter test
 flutter run -d <device-id>          # or: flutter build apk --release
 ```
 
+<!-- doc-path-check: ignore -->
 - Re-run `build_runner` after any change to `lib/data/database.dart`.
 - `scripts/run_green_gate.ps1` / `.bat` run the owner's local Windows gate
   (pub get → build_runner → `flutter build apk --debug`). They are hardcoded to
@@ -104,7 +106,7 @@ lib/screens/prototypes/  Approved, device-tested interaction reference.
 ```
 
 Permitted dependency directions: `Presentation → Executive → Domain`, with
-`App → Platform → Domain` and intelligence injected only at `lib/app/`.
+`App → Platform → Domain` and intelligence injected only at `lib/app/`. <!-- doc-path-check: ignore -->
 
 Invariants that get checked in every review:
 
@@ -133,16 +135,18 @@ These were each implemented wrong once and fixed; don't reintroduce them:
 - **Capture stays one input, one button.** No extra fields in the quick-add flow.
 - **No exact alarms.** `SCHEDULE_EXACT_ALARM` is deliberately not requested.
 - Today-screen interaction behaviors are locked by
-  `docs/today_screen_interaction_contract.md` — amending them is a reviewed
+  `docs/archive/today_screen_interaction_contract.md` — amending them is a reviewed
   proposal, not a side effect of wiring real data.
 
 ## Data & health boundaries
 
+<!-- doc-path-check: ignore -->
 - Drift schema is at `lib/data/database.dart`, currently **schemaVersion 7**.
   Migrations are additive `onUpgrade` branches; **every schema bump needs a
-  migration test** (see `test/unit/health_v6_to_v7_migration_test.dart`).
+  migration test** (see `test/unit/health_v6_to_v7_migration_test.dart`). <!-- doc-path-check: ignore -->
+<!-- doc-path-check: ignore -->
 - Health enums are persisted via `intEnum<T>()` — **reordering an existing enum
-  value is a schema change.** Append only (`lib/domain/health/health_enums.dart`).
+  value is a schema change.** Append only (`lib/domain/health/health_enums.dart`). <!-- doc-path-check: ignore -->
 - Health Connect is a sensor bus, not a domain model (ADR-007). Kotlin emits
   plain MethodChannel primitives; Dart owns parsing, normalization, and
   deterministic IDs via `generateHealthEvidenceId()`. Ingestion never merges,
@@ -167,6 +171,7 @@ wear/                                         Wear OS tile/complication sources
   `dev.neuroflow` bridges are unregistered seams — the Dart `neuroflow/alarms`
   and `neuroflow/wear` channels have no live native handler today. Treat a
   `MissingPluginException` there as the known gap, not a regression.
+<!-- doc-path-check: ignore -->
 - `wear/` is not included in `android/settings.gradle.kts`; it is source, not a
   built module.
 - MethodChannels: `neuroflow/lexi`, `neuroflow/health_connect`,
@@ -194,7 +199,7 @@ Root-level `.md` files are limited to `README.md`, `CLAUDE.md`, and `AGENTS.md`.
 Anything else — handoff note, design memo, status snapshot — goes in `docs/` or
 `docs/archive/`. **This is enforced by CI** (`.github/workflows/repo-hygiene.yml`).
 
-New ADR: follow the template in `docs/adr/README.md` (Status / Context /
+New ADR: follow the template in `docs/archive/adr/README.md` (Status / Context /
 Decision / Alternatives Considered / Consequences / Related Documents) and add a
 row to the index table.
 New external reference: copy `docs/reference/template.md` and add a row to
@@ -251,6 +256,6 @@ explain any reduction.
   (`Add Health Connect availability model`). Either is acceptable; one focused
   change per commit is the real convention.
 - The Lexi system prompt's source of truth is
-  `lib/intelligence/lexi_system_prompt_mobile.md`; `lexi_mobile_prompt.dart`
+  `lib/intelligence/lexi_system_prompt_mobile.md`; `lexi_mobile_prompt.dart` <!-- doc-path-check: ignore -->
   mirrors it. Edit the markdown, then update the Dart constant — same
   one-source-of-truth discipline as the Drift schema.

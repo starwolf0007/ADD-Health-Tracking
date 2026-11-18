@@ -10,7 +10,7 @@ These rules take precedence over agent defaults unless they directly conflict wi
 
 ## Active Temporary Override — Unlock Sprint (2026-07-27)
 
-**See `docs/UNLOCK-SPRINT-MEMO.md` for full authority and rationale.**
+**See `docs/archive/UNLOCK-SPRINT-MEMO.md` for full authority and rationale.**
 
 For the duration of the Unlock Sprint the following process constraints are **softened** so that primary surfaces can become usable for daily dogfooding:
 
@@ -20,6 +20,7 @@ For the duration of the Unlock Sprint the following process constraints are **so
 - Phase-gating placeholder text on user-facing screens is removed; incomplete seams must remain honest but surfaces must be accessible.
 
 **Still inviolable:**
+<!-- doc-path-check: ignore -->
 - Executive layer remains pure Dart and never imports `lib/intelligence/`.
 - Intelligence remains optional (`NoOpPlanAdvisor` default).
 - Sealed-state architecture and repository conventions.

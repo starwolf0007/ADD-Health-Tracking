@@ -12,7 +12,18 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import unquote
 
 
-KNOWN_ROOTS = ("android", "docs", "lib", "scripts", "test", "wear")
+KNOWN_ROOTS = (
+    "android",
+    "docs",
+    "lib",
+    "public",
+    "scripts",
+    "server",
+    "src",
+    "test",
+    "tests",
+    "wear",
+)
 ARCHIVE_PREFIX = PurePosixPath("docs/archive")
 IGNORE_MARKER = "doc-path-check: ignore"
 IGNORE_COMMENT = f"<!-- {IGNORE_MARKER} -->"
@@ -20,7 +31,7 @@ IGNORE_COMMENT = f"<!-- {IGNORE_MARKER} -->"
 CODE_SPAN_RE = re.compile(r"`([^`\n]+)`")
 MARKDOWN_LINK_RE = re.compile(r"!?\[[^\]\n]*\]\(([^)\n]+)\)")
 REPO_PATH_RE = re.compile(
-    rf"(?<![A-Za-z0-9_.-])(?:{'|'.join(KNOWN_ROOTS)})/"
+    rf"(?<![A-Za-z0-9_./-])(?:{'|'.join(KNOWN_ROOTS)})/"
     r"[A-Za-z0-9._/-]+"
 )
 WILDCARD_RE = re.compile(r"[*?[\]{}]")

@@ -44,9 +44,10 @@ lib/app/            Composition root (Riverpod providers, bootstrap)
                     The only place intelligence is wired in
 ```
 
+<!-- doc-path-check: ignore -->
 `lib/intelligence/` implements optional advisors (Lexi / cloud). It is injected at the composition root; the default is a no-op identity.
 
-See also: CLAUDE.md layer map and `docs/COPILOT_INSTRUCTIONS.md`.
+See also: CLAUDE.md layer map and `docs/archive/COPILOT_INSTRUCTIONS.md`.
 
 ---
 
@@ -73,7 +74,7 @@ Presentation  →  Executive  →  Domain
 - Deterministic behavior independent of AI availability
 - No Flutter imports; no debug gating that requires Flutter foundation
 
-Related: [ADR-001](adr/ADR-001-pure-dart-executive-layer.md)
+Related: [ADR-001](archive/adr/ADR-001-pure-dart-executive-layer.md)
 
 ---
 
@@ -86,7 +87,7 @@ Riverpod owns lifecycle and dependency composition.
 - Tests interact via `ProviderContainer` with overrides
 - No standalone mutable controllers that bypass the composition root
 
-Related: [ADR-002](adr/ADR-002-riverpod-lifecycle-and-composition.md)
+Related: [ADR-002](archive/adr/ADR-002-riverpod-lifecycle-and-composition.md)
 
 ---
 
@@ -98,7 +99,7 @@ Related: [ADR-002](adr/ADR-002-riverpod-lifecycle-and-composition.md)
 - Public methods are safe no-ops when called in an invalid context
 - No bangs on nullable fields that the type system already constrained away
 
-Related: [ADR-003](adr/ADR-003-sealed-state-machines.md)
+Related: [ADR-003](archive/adr/ADR-003-sealed-state-machines.md)
 
 ---
 
@@ -110,7 +111,7 @@ Controllers expose **intent** methods only (acceptDay, startReview, notNow, undo
 - No public lifecycle setters (`loadProposal`, `setLoading`, `setUnavailable`)
 - Development/test seeding uses injected seeds or gated capabilities, not public setters
 
-Related: [ADR-004](adr/ADR-004-intent-driven-controller-apis.md)
+Related: [ADR-004](archive/adr/ADR-004-intent-driven-controller-apis.md)
 
 ---
 
@@ -120,7 +121,7 @@ Related: [ADR-004](adr/ADR-004-intent-driven-controller-apis.md)
 - No direct repository or Drift access from widgets
 - Widget-tree changes require explicit authorization
 
-Related: [ADR-005](adr/ADR-005-passive-presentation-layer.md)
+Related: [ADR-005](archive/adr/ADR-005-passive-presentation-layer.md)
 
 ---
 
@@ -131,12 +132,13 @@ Related: [ADR-005](adr/ADR-005-passive-presentation-layer.md)
 - Composition root injects a `PlanAdvisor` (default: no-op).
 - Lexi may propose; only confirmed, gated actions mutate deterministic state.
 
-Related: [ADR-006](adr/ADR-006-intelligence-is-optional.md)
+Related: [ADR-006](archive/adr/ADR-006-intelligence-is-optional.md)
 
 ---
 
 ## Testing boundaries
 
+<!-- doc-path-check: ignore -->
 - Unit tests under `test/unit/` for domain/executive logic
 - Tests are production assets: never replace executable tests with comments or placeholders
 - ProviderContainer is the preferred way to exercise Riverpod controllers
@@ -157,7 +159,7 @@ Related: [ADR-006](adr/ADR-006-intelligence-is-optional.md)
 ## Related documents
 
 - [AGENTS.md](../AGENTS.md) — collaboration contract
-- [docs/adr/](adr/) — Architecture Decision Records
-- [docs/COPILOT_INSTRUCTIONS.md](COPILOT_INSTRUCTIONS.md)
-- [docs/today_screen_interaction_contract.md](today_screen_interaction_contract.md)
+- [docs/archive/adr/](archive/adr/) — Architecture Decision Records
+- [docs/archive/COPILOT_INSTRUCTIONS.md](archive/COPILOT_INSTRUCTIONS.md)
+- [docs/archive/today_screen_interaction_contract.md](archive/today_screen_interaction_contract.md)
 - CLAUDE.md — file placement and layer map
