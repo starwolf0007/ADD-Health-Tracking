@@ -25,10 +25,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Validate GCP credentials secret
+      - name: Validate required deployment secrets
         run: |
           if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then
             echo "::error::GCP_SA_KEY repository secret is missing. Bryan must add the service-account key secret before this workflow can deploy."
+            exit 1
+          fi
+          if [ -z "${{ secrets.PREVIEW_PASS }}" ]; then
+            echo "::error::PREVIEW_PASS repository secret is missing. Bryan must configure the PREVIEW_PASS secret before this workflow can deploy."
             exit 1
           fi
 
@@ -82,8 +86,8 @@ jobs:
             --project="${{ env.PROJECT_ID }}" \
             --platform="managed" \
             --port=8080 \
-            --no-allow-unauthenticated \
-            --set-env-vars="NODE_ENV=production,DEPLOY_COMMIT=${{ github.sha }}"
+            --allow-unauthenticated \
+            --set-env-vars="NODE_ENV=production,DEPLOY_COMMIT=${{ github.sha }},PREVIEW_USER=preview,PREVIEW_PASS=${{ secrets.PREVIEW_PASS }}"
 
       - name: Output preview URL and deployment verification
         run: |
@@ -96,5 +100,5 @@ jobs:
           echo "Cloud Run Preview Deployed Successfully!"
           echo "Preview URL: $URL"
           echo "Deployed SHA: ${{ github.sha }}"
-          echo "Access Control: --no-allow-unauthenticated (Cloud Run IAM)"
+          echo "Access Control: --allow-unauthenticated (GCP perimeter) with App-Layer HTTP Basic Auth (PREVIEW_USER=preview)"
           echo "=========================================================="

@@ -3,7 +3,7 @@ import {
   cloudRateLimit,
   preAuthRateLimit,
 } from './server/cloudAccess';
-import { randomUUID } from 'node:crypto';
+import crypto, { randomUUID } from 'node:crypto';
 import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -225,6 +225,67 @@ export function validateAndExtractChatOutput(
 
 const app = express();
 const server = http.createServer(app);
+
+/**
+ * App-layer HTTP Basic Auth gate for preview deployment.
+ * Applied to ALL routes (pages, static assets, PWA manifest, service worker fetches, API routes).
+ * Credentials sourced from environment: PREVIEW_USER (default "preview") and PREVIEW_PASS.
+ * Timing-safe comparison using crypto.timingSafeEqual on SHA-256 digests.
+ * Fails closed: if PREVIEW_PASS is unset or empty, all requests receive 401 Unauthorized.
+ */
+export function verifyBasicAuth(
+  authHeader: string | undefined,
+  expectedUser = process.env.PREVIEW_USER || 'preview',
+  expectedPass = process.env.PREVIEW_PASS || ''
+): boolean {
+  // Fail closed: if PREVIEW_PASS is unset or empty, deny EVERYTHING with 401
+  if (!expectedPass) {
+    return false;
+  }
+
+  if (!authHeader || !authHeader.startsWith('Basic ')) {
+    return false;
+  }
+
+  const encoded = authHeader.slice(6).trim();
+  let decoded = '';
+  try {
+    decoded = Buffer.from(encoded, 'base64').toString('utf8');
+  } catch {
+    return false;
+  }
+
+  const colonIdx = decoded.indexOf(':');
+  if (colonIdx === -1) {
+    return false;
+  }
+
+  const user = decoded.slice(0, colonIdx);
+  const pass = decoded.slice(colonIdx + 1);
+
+  // Compute SHA-256 digests so both buffers are strictly 32 bytes, preventing length leaks
+  // and ensuring crypto.timingSafeEqual never throws a RangeError on unequal lengths.
+  const userDigest = crypto.createHash('sha256').update(user).digest();
+  const expectedUserDigest = crypto.createHash('sha256').update(expectedUser).digest();
+  const passDigest = crypto.createHash('sha256').update(pass).digest();
+  const expectedPassDigest = crypto.createHash('sha256').update(expectedPass).digest();
+
+  const userMatches = crypto.timingSafeEqual(userDigest, expectedUserDigest);
+  const passMatches = crypto.timingSafeEqual(passDigest, expectedPassDigest);
+
+  return userMatches && passMatches;
+}
+
+// Preview Access Gate: HTTP Basic Authentication
+// Applied to ALL routes (pages, static assets, PWA manifest, service worker fetches, API routes).
+app.use((req, res, next) => {
+  if (verifyBasicAuth(req.headers.authorization)) {
+    return next();
+  }
+
+  res.setHeader('WWW-Authenticate', 'Basic realm="NeuroFlow Preview", charset="UTF-8"');
+  res.status(401).type('text/plain').send('Unauthorized');
+});
 
 // Pre-auth rate limiting protects public and unauthenticated requests
 app.use('/api', preAuthRateLimit);
