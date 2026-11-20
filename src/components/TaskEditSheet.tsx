@@ -37,7 +37,7 @@ interface FormProps {
 const TaskEditForm: React.FC<FormProps> = ({ task, onClose, onUpdated }) => {
   const [title, setTitle] = useState(task.title);
   const [notes, setNotes] = useState(task.notes || '');
-  const [energy, setEnergy] = useState<EnergyLevel>(task.energy);
+  const [energy, setEnergy] = useState<EnergyLevel>(task.energy || 'medium');
   const [hasTime, setHasTime] = useState(!!task.dueDate);
   const [timeStr, setTimeStr] = useState(() => {
     if (task.dueDate) {

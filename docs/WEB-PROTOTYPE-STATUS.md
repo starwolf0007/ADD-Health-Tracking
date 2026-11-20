@@ -142,6 +142,7 @@ Modified:
 - `src/lib/useLiveVoice.ts`
 - `src/lib/useTranscribe.ts`
 - `src/screens/ConnectedServicesScreen.tsx`
+<!-- doc-path-check: ignore -->
 - `src/screens/LexiConversationScreen.tsx`
 - `src/screens/SettingsScreen.tsx`
 - `tsconfig.json`

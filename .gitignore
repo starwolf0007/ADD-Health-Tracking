@@ -34,3 +34,5 @@ Thumbs.db
 # Build/session artifacts
 *.bundle
 green_gate_log.txt
+__pycache__/
+*.pyc

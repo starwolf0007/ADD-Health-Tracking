@@ -80,7 +80,7 @@ test('task completion, pause and note pinning are queued as real local edits', (
   taskStorage.complete('task-a');
   assert.equal(
     (readOutbox('a', 'tasks')['task-a'].value as Task).status,
-    'completed',
+    'finished',
   );
   taskStorage.pauseTask('task-a', 'Open document');
   assert.equal(

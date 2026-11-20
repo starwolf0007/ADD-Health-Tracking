@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Task,
+  TaskStatus,
   Routine,
   Habit,
   HabitCheckIn,
@@ -9,7 +10,10 @@ import {
   Note,
   HevyWorkout,
   RoutineStep,
+  ReentryNote,
+  MicroStepItem,
 } from '../types';
+import { AlertService } from './alerts';
 import {
   SEED_ROUTINES,
   SEED_HABITS,
@@ -331,12 +335,76 @@ export const offlineQueueStorage = {
 // ---------------------------------------------------------------------------
 // Storage Repositories
 // ---------------------------------------------------------------------------
-export const taskStorage = {
-  getAll: (scope?: string): Task[] =>
-    getFromStorage<Task[]>(STORAGE_KEYS.TASKS, SEED_TASKS, scope),
+export function migrateTask(raw: any): Task {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      id: crypto.randomUUID(),
+      title: '',
+      originalWording: '',
+      status: 'captured',
+      createdAt: new Date().toISOString(),
+      accumulatedActiveSeconds: 0,
+      activeSegmentStartedAt: null,
+      targetEndTime: null,
+      microSteps: [],
+      isQuickWin: false,
+    };
+  }
 
-  getAllForScope: (scope: string): Task[] =>
-    getFromStorage<Task[]>(STORAGE_KEYS.TASKS, SEED_TASKS, scope),
+  let status: TaskStatus = raw.status;
+  // Map legacy statuses: pending, inProgress, completed, skipped, blocked
+  if (status === 'pending' || !status) {
+    status = (raw.microSteps && raw.microSteps.length > 0) || raw.estimatedMinutes ? 'clarified' : 'captured';
+  } else if (status === 'inProgress') {
+    status = 'active';
+  } else if (status === 'completed') {
+    status = 'finished';
+  } else if (status === 'skipped' || status === 'blocked') {
+    status = 'captured';
+  }
+
+  const activeSegmentStartedAt =
+    raw.activeSegmentStartedAt !== undefined
+      ? raw.activeSegmentStartedAt
+      : (status === 'active' || status === 'resumed') && raw.activeStartedAt
+      ? raw.activeStartedAt
+      : null;
+
+  return {
+    ...raw,
+    title: raw.title || raw.originalWording || '',
+    originalWording: raw.originalWording || raw.title || '',
+    status,
+    accumulatedActiveSeconds:
+      typeof raw.accumulatedActiveSeconds === 'number' ? raw.accumulatedActiveSeconds : 0,
+    activeSegmentStartedAt,
+    targetEndTime: raw.targetEndTime ?? null,
+    microSteps: Array.isArray(raw.microSteps) ? raw.microSteps : [],
+    isQuickWin: Boolean(raw.isQuickWin),
+  };
+}
+
+export function getElapsedActiveSeconds(task: Task, now: number = Date.now()): number {
+  const accumulated = task.accumulatedActiveSeconds || 0;
+  if ((task.status === 'active' || task.status === 'resumed') && task.activeSegmentStartedAt) {
+    const startMs = new Date(task.activeSegmentStartedAt).getTime();
+    if (!isNaN(startMs)) {
+      return accumulated + Math.max(0, Math.floor((now - startMs) / 1000));
+    }
+  }
+  return accumulated;
+}
+
+export const taskStorage = {
+  getAll: (scope?: string): Task[] => {
+    const raw = getFromStorage<any[]>(STORAGE_KEYS.TASKS, [], scope);
+    return Array.isArray(raw) ? raw.map(migrateTask) : [];
+  },
+
+  getAllForScope: (scope: string): Task[] => {
+    const raw = getFromStorage<any[]>(STORAGE_KEYS.TASKS, [], scope);
+    return Array.isArray(raw) ? raw.map(migrateTask) : [];
+  },
 
   save: (task: Task, isRemote: boolean = false, scope?: string): void => {
     const tasks = taskStorage.getAll(scope);
@@ -359,6 +427,7 @@ export const taskStorage = {
   delete: (id: string, isRemote: boolean = false, scope?: string): void => {
     const tasks = taskStorage.getAll(scope).filter((t) => t.id !== id);
     setToStorage(STORAGE_KEYS.TASKS, tasks, scope);
+    AlertService.cancel(id);
     if (!isRemote) {
       const targetUser = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
       if (targetUser) {
@@ -368,58 +437,251 @@ export const taskStorage = {
     }
   },
 
-  complete: (id: string, scope?: string): Task | null => {
+  // 1. Capture: Saves straight to inbox with verbatim original wording, zero required forms
+  captureItem: (text: string, scope?: string): Task => {
+    const clean = text.trim();
+    const newTask: Task = {
+      id: crypto.randomUUID(),
+      title: clean,
+      originalWording: text,
+      status: 'captured',
+      createdAt: new Date().toISOString(),
+      accumulatedActiveSeconds: 0,
+      activeSegmentStartedAt: null,
+      targetEndTime: null,
+      microSteps: [],
+      isQuickWin: false,
+    };
+    taskStorage.save(newTask, false, scope);
+    return newTask;
+  },
+
+  // 2. Clarify: Enhances captured item with micro-steps, duration, or notes
+  clarifyTask: (id: string, updates: Partial<Task>, scope?: string): Task | null => {
     const tasks = taskStorage.getAll(scope);
-    const task = tasks.find((t) => t.id === id);
-    if (!task) return null;
+    const target = tasks.find((t) => t.id === id);
+    if (!target) return null;
     const updated: Task = {
-      ...task,
-      status: 'completed',
+      ...target,
+      ...updates,
+      status: 'clarified',
+    };
+    taskStorage.save(updated, false, scope);
+    return updated;
+  },
+
+  // 3. Pick: Designates the single next thing on the Now card
+  pickTask: (id: string, scope?: string): Task | null => {
+    const tasks = taskStorage.getAll(scope);
+    const target = tasks.find((t) => t.id === id);
+    if (!target) return null;
+
+    // Demote any other picked task back to clarified (or captured)
+    tasks.forEach((t) => {
+      if (t.id !== id && t.status === 'picked') {
+        const nextStatus: TaskStatus = t.microSteps?.length || t.estimatedMinutes ? 'clarified' : 'captured';
+        const demoted: Task = { ...t, status: nextStatus };
+        taskStorage.save(demoted, false, scope);
+      }
+    });
+
+    const updated: Task = {
+      ...target,
+      status: 'picked',
+    };
+    taskStorage.save(updated, false, scope);
+    return updated;
+  },
+
+  // 4. Start: Transitions to Active. Automatically pauses any other running task.
+  startTask: (id: string, scope?: string): Task | null => {
+    const tasks = taskStorage.getAll(scope);
+    const target = tasks.find((t) => t.id === id);
+    if (!target) return null;
+
+    // Rule: Only one task can be Active at a time.
+    tasks.forEach((t) => {
+      if (t.id !== id && (t.status === 'active' || t.status === 'resumed')) {
+        taskStorage.pauseTask(
+          t.id,
+          { lastCompletedStep: 'Auto-paused to start another task' },
+          scope
+        );
+      }
+    });
+
+    const now = new Date();
+    let targetEndTime = target.targetEndTime || null;
+    if (!targetEndTime && target.estimatedMinutes) {
+      targetEndTime = new Date(now.getTime() + target.estimatedMinutes * 60 * 1000).toISOString();
+    } else if (!targetEndTime && target.dueDate) {
+      targetEndTime = target.dueDate;
+    }
+
+    const updated: Task = {
+      ...target,
+      status: 'active',
+      activeSegmentStartedAt: now.toISOString(),
+      targetEndTime,
+    };
+    taskStorage.save(updated, false, scope);
+
+    // AlertService abstracted schedule trigger
+    if (targetEndTime) {
+      AlertService.schedule(updated.id, targetEndTime, updated.title);
+    }
+
+    return updated;
+  },
+
+  // 5. Pause: Preserves elapsed time and progress, cancels pending alert
+  pauseTask: (
+    id: string,
+    reentryOrNextAction?: Partial<ReentryNote> | string,
+    scope?: string
+  ): Task | null => {
+    const tasks = taskStorage.getAll(scope);
+    const target = tasks.find((t) => t.id === id);
+    if (!target) return null;
+
+    let segmentElapsed = 0;
+    if ((target.status === 'active' || target.status === 'resumed') && target.activeSegmentStartedAt) {
+      const startMs = new Date(target.activeSegmentStartedAt).getTime();
+      if (!isNaN(startMs)) {
+        segmentElapsed = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+      }
+    }
+
+    const updatedAccumulated = (target.accumulatedActiveSeconds || 0) + segmentElapsed;
+    AlertService.cancel(target.id);
+
+    const extraNote: Partial<ReentryNote> =
+      typeof reentryOrNextAction === 'string'
+        ? { nextAction: reentryOrNextAction }
+        : reentryOrNextAction || {};
+
+    const updatedReentry: ReentryNote = {
+      lastCompletedStep: target.reentryNote?.lastCompletedStep || 'Paused for context switch',
+      nextAction: 'Open task and take next step',
+      ...target.reentryNote,
+      ...extraNote,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const updated: Task = {
+      ...target,
+      status: 'paused',
+      accumulatedActiveSeconds: updatedAccumulated,
+      activeSegmentStartedAt: null,
+      targetEndTime: null,
+      reentryNote: updatedReentry,
+    };
+    taskStorage.save(updated, false, scope);
+    return updated;
+  },
+
+  // 6. Resume: Continues elapsed timer from paused total, re-schedules alert if needed
+  resumeTask: (id: string, scope?: string): Task | null => {
+    const tasks = taskStorage.getAll(scope);
+    const target = tasks.find((t) => t.id === id);
+    if (!target) return null;
+
+    // Only one task active
+    tasks.forEach((t) => {
+      if (t.id !== id && (t.status === 'active' || t.status === 'resumed')) {
+        taskStorage.pauseTask(
+          t.id,
+          { lastCompletedStep: 'Auto-paused to resume another task' },
+          scope
+        );
+      }
+    });
+
+    const now = new Date();
+    let targetEndTime = target.targetEndTime || null;
+    if (target.estimatedMinutes) {
+      const remainingSecs = Math.max(
+        0,
+        target.estimatedMinutes * 60 - (target.accumulatedActiveSeconds || 0)
+      );
+      if (remainingSecs > 0) {
+        targetEndTime = new Date(now.getTime() + remainingSecs * 1000).toISOString();
+      }
+    } else if (target.dueDate) {
+      targetEndTime = target.dueDate;
+    }
+
+    const updated: Task = {
+      ...target,
+      status: 'resumed',
+      activeSegmentStartedAt: now.toISOString(),
+      targetEndTime,
+    };
+    taskStorage.save(updated, false, scope);
+
+    if (targetEndTime) {
+      AlertService.schedule(updated.id, targetEndTime, updated.title);
+    }
+
+    return updated;
+  },
+
+  // 7. Finish: Completes task, finalizes elapsed time, cancels alert, records completedAt
+  finishTask: (id: string, scope?: string): Task | null => {
+    const tasks = taskStorage.getAll(scope);
+    const target = tasks.find((t) => t.id === id);
+    if (!target) return null;
+
+    let segmentElapsed = 0;
+    if ((target.status === 'active' || target.status === 'resumed') && target.activeSegmentStartedAt) {
+      const startMs = new Date(target.activeSegmentStartedAt).getTime();
+      if (!isNaN(startMs)) {
+        segmentElapsed = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+      }
+    }
+
+    const updatedAccumulated = (target.accumulatedActiveSeconds || 0) + segmentElapsed;
+    AlertService.cancel(target.id);
+
+    const updated: Task = {
+      ...target,
+      status: 'finished',
+      accumulatedActiveSeconds: updatedAccumulated,
+      activeSegmentStartedAt: null,
+      targetEndTime: null,
       completedAt: new Date().toISOString(),
     };
     taskStorage.save(updated, false, scope);
     return updated;
   },
 
+  complete: (id: string, scope?: string): Task | null => {
+    return taskStorage.finishTask(id, scope);
+  },
+
   toggleStatus: (id: string, scope?: string): Task | null => {
     const tasks = taskStorage.getAll(scope);
-    const task = tasks.find((t) => t.id === id);
-    if (!task) return null;
-    const isComp = task.status === 'completed';
-    const updated: Task = {
-      ...task,
-      status: isComp ? 'pending' : 'completed',
-      completedAt: isComp ? undefined : new Date().toISOString(),
-    };
-    taskStorage.save(updated, false, scope);
-    return updated;
+    const target = tasks.find((t) => t.id === id);
+    if (!target) return null;
+    if (target.status === 'finished') {
+      const reopened: Task = {
+        ...target,
+        status: target.microSteps?.length || target.estimatedMinutes ? 'clarified' : 'captured',
+        completedAt: undefined,
+      };
+      taskStorage.save(reopened, false, scope);
+      return reopened;
+    }
+    return taskStorage.finishTask(id, scope);
   },
 
-  startTask: (id: string, scope?: string): Task | null => {
+  updateMicroSteps: (id: string, microSteps: MicroStepItem[], scope?: string): Task | null => {
     const tasks = taskStorage.getAll(scope);
-    const task = tasks.find((t) => t.id === id);
-    if (!task) return null;
+    const target = tasks.find((t) => t.id === id);
+    if (!target) return null;
     const updated: Task = {
-      ...task,
-      status: 'inProgress',
-      activeStartedAt: new Date().toISOString(),
-    };
-    taskStorage.save(updated, false, scope);
-    return updated;
-  },
-
-  pauseTask: (id: string, nextAction?: string, scope?: string): Task | null => {
-    const tasks = taskStorage.getAll(scope);
-    const task = tasks.find((t) => t.id === id);
-    if (!task) return null;
-    const updated: Task = {
-      ...task,
-      status: 'paused',
-      reentryNote: {
-        lastCompletedStep: 'Paused for context switch',
-        nextAction: nextAction || 'Open task and take first physical step',
-        updatedAt: new Date().toISOString(),
-      },
+      ...target,
+      microSteps,
     };
     taskStorage.save(updated, false, scope);
     return updated;
