@@ -308,6 +308,7 @@ test("lifecycle guards & idempotency: repeated actions cannot corrupt timestamps
   // 6. Invalid transitions on finished task must be rejected
   assert.equal(taskStorage.startTask(task.id), null);
   assert.equal(taskStorage.resumeTask(task.id), null);
+  assert.equal(taskStorage.pauseTask(task.id), null);
   assert.equal(taskStorage.pickTask(task.id), null);
   assert.equal(taskStorage.clarifyTask(task.id, { title: "Changed" }), null);
 
@@ -368,4 +369,99 @@ test("alert-ready timer contract: reaching deadline does not finish task; pause 
   assert.ok(AlertService.getPending(task.id));
   taskStorage.finishTask(task.id);
   assert.equal(AlertService.getPending(task.id), undefined);
+});
+
+test("pauseTask guards: calling pauseTask on unstarted or finished tasks returns null without mutating state", () => {
+  // 1. Captured task cannot be paused
+  const captured = taskStorage.captureItem("Unstarted Task");
+  assert.equal(taskStorage.pauseTask(captured.id), null);
+  assert.equal(
+    taskStorage.getAll().find((t) => t.id === captured.id)?.status,
+    "captured",
+  );
+
+  // 2. Clarified task cannot be paused
+  const clarified = taskStorage.clarifyTask(captured.id, {
+    estimatedMinutes: 20,
+  })!;
+  assert.equal(taskStorage.pauseTask(clarified.id), null);
+  assert.equal(
+    taskStorage.getAll().find((t) => t.id === captured.id)?.status,
+    "clarified",
+  );
+
+  // 3. Picked task cannot be paused
+  const picked = taskStorage.pickTask(captured.id)!;
+  assert.equal(taskStorage.pauseTask(picked.id), null);
+  assert.equal(
+    taskStorage.getAll().find((t) => t.id === captured.id)?.status,
+    "picked",
+  );
+
+  // 4. Starting a task auto-pauses other active tasks smoothly without breaking on guards
+  const taskA = taskStorage.captureItem("Task A");
+  const taskB = taskStorage.captureItem("Task B");
+  taskStorage.startTask(taskA.id);
+  assert.equal(
+    taskStorage.getAll().find((t) => t.id === taskA.id)?.status,
+    "active",
+  );
+
+  taskStorage.startTask(taskB.id);
+  assert.equal(
+    taskStorage.getAll().find((t) => t.id === taskA.id)?.status,
+    "paused",
+  );
+  assert.equal(
+    taskStorage.getAll().find((t) => t.id === taskB.id)?.status,
+    "active",
+  );
+
+  // 5. Finished task cannot be paused
+  const finished = taskStorage.finishTask(taskB.id)!;
+  assert.equal(finished.status, "finished");
+  assert.equal(taskStorage.pauseTask(taskB.id), null);
+  assert.equal(
+    taskStorage.getAll().find((t) => t.id === taskB.id)?.status,
+    "finished",
+  );
+});
+
+test("startTask targetEndTime edge case: re-starting a demoted task subtracts prior accumulatedActiveSeconds", () => {
+  const task = taskStorage.captureItem("Demoted & Restarted Task");
+  taskStorage.clarifyTask(task.id, { estimatedMinutes: 20 }); // 20 minutes = 1200 seconds
+  taskStorage.pickTask(task.id);
+
+  // Start task
+  const started = taskStorage.startTask(task.id)!;
+  assert.ok(started.targetEndTime);
+
+  // Simulate task running for 5 minutes (300 seconds)
+  const fiveMinutesAgo = new Date(Date.now() - 300000).toISOString();
+  taskStorage.save({
+    ...started,
+    activeSegmentStartedAt: fiveMinutesAgo,
+  });
+
+  // Pick task again: demotes running task to picked, closing segment
+  taskStorage.pickTask(task.id);
+  const picked = taskStorage.getAll().find((t) => t.id === task.id)!;
+  assert.equal(picked.status, "picked");
+  assert.equal(picked.activeSegmentStartedAt, null);
+  assert.equal(picked.targetEndTime, null);
+  assert.ok((picked.accumulatedActiveSeconds || 0) >= 300);
+
+  // Now start task again via startTask: targetEndTime must be computed from remaining ~15 minutes, NOT full 20 minutes!
+  const nowMs = Date.now();
+  const restarted = taskStorage.startTask(task.id)!;
+  assert.equal(restarted.status, "active");
+  assert.ok(restarted.targetEndTime);
+
+  const targetMs = new Date(restarted.targetEndTime).getTime();
+  const diffSecs = Math.round((targetMs - nowMs) / 1000);
+  // Remaining seconds should be around 1200 - 300 = 900 seconds (allow ±5 seconds)
+  assert.ok(
+    diffSecs >= 895 && diffSecs <= 905,
+    `Remaining seconds (${diffSecs}) should be ~900s, not 1200s`,
+  );
 });

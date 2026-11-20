@@ -662,9 +662,15 @@ export const taskStorage = {
     const now = new Date();
     let targetEndTime = target.targetEndTime || null;
     if (!targetEndTime && target.estimatedMinutes) {
-      targetEndTime = new Date(
-        now.getTime() + target.estimatedMinutes * 60 * 1000,
-      ).toISOString();
+      const remainingSecs = Math.max(
+        0,
+        target.estimatedMinutes * 60 - (target.accumulatedActiveSeconds || 0),
+      );
+      if (remainingSecs > 0) {
+        targetEndTime = new Date(
+          now.getTime() + remainingSecs * 1000,
+        ).toISOString();
+      }
     } else if (!targetEndTime && target.dueDate) {
       targetEndTime = target.dueDate;
     }
@@ -718,11 +724,13 @@ export const taskStorage = {
       return target;
     }
 
+    // Guard: reject non-running states (finished, captured, clarified, picked)
+    if (target.status !== "active" && target.status !== "resumed") {
+      return null;
+    }
+
     let segmentElapsed = 0;
-    if (
-      (target.status === "active" || target.status === "resumed") &&
-      target.activeSegmentStartedAt
-    ) {
+    if (target.activeSegmentStartedAt) {
       const startMs = new Date(target.activeSegmentStartedAt).getTime();
       if (!isNaN(startMs)) {
         segmentElapsed = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
@@ -856,21 +864,7 @@ export const taskStorage = {
   },
 
   toggleStatus: (id: string, scope?: string): Task | null => {
-    const tasks = taskStorage.getAll(scope);
-    const target = tasks.find((t) => t.id === id);
-    if (!target) return null;
-    if (target.status === "finished") {
-      const reopened: Task = {
-        ...target,
-        status:
-          target.microSteps?.length || target.estimatedMinutes
-            ? "clarified"
-            : "captured",
-        completedAt: undefined,
-      };
-      taskStorage.save(reopened, false, scope);
-      return reopened;
-    }
+    // Deprecated legacy toggle. Finished tasks are strictly terminal in Slice 1.
     return taskStorage.finishTask(id, scope);
   },
 
