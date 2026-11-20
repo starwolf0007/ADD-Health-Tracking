@@ -1,3 +1,4 @@
+import { cloudFetch, requireCloudConsent } from '../lib/cloudClient';
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Send,
@@ -178,8 +179,13 @@ export const LexiChatInterface: React.FC<LexiChatInterfaceProps> = ({
   const abortControllerRef = useRef<AbortController | null>(null);
   const acceptedStepIdsRef = useRef<Set<string>>(new Set());
 
-  const { isRecording, isTranscribing, startRecording, stopAndTranscribe } =
-    useAudioTranscribe();
+  const {
+    isRecording,
+    isTranscribing,
+    startRecording,
+    stopAndTranscribe,
+    error: recordingError,
+  } = useAudioTranscribe();
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -265,6 +271,24 @@ export const LexiChatInterface: React.FC<LexiChatInterfaceProps> = ({
 
     // Check Cloud AI consent setting
     const currentSettings = settingsStorage.get();
+        try {
+      requireCloudConsent();
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `consent-${Date.now()}`,
+          sender: 'lexi',
+          text: err.message || 'Cloud AI is disabled in Settings.',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isError: true,
+          isConsentRequired: true,
+          failedPrompt: textToSend,
+        },
+      ]);
+      return;
+    }
+
     if (!currentSettings.cloudGemini) {
       setMessages((prev) => [
         ...prev,
@@ -327,7 +351,7 @@ export const LexiChatInterface: React.FC<LexiChatInterfaceProps> = ({
         dayMode,
       });
 
-      const res = await fetch('/api/gemini/chat', {
+      const res = await cloudFetch('/api/gemini/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -441,6 +465,24 @@ export const LexiChatInterface: React.FC<LexiChatInterfaceProps> = ({
     setMessages((prev) => [...prev, userMsg]);
 
     const currentSettings = settingsStorage.get();
+        try {
+      requireCloudConsent();
+    } catch (err: any) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `consent-maps-${Date.now()}`,
+          sender: 'lexi',
+          text: err.message || 'Cloud AI is disabled in Settings.',
+          timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          isError: true,
+          isConsentRequired: true,
+          failedPrompt: query,
+        },
+      ]);
+      return;
+    }
+
     if (!currentSettings.cloudGemini) {
       setMessages((prev) => [
         ...prev,
@@ -468,7 +510,7 @@ export const LexiChatInterface: React.FC<LexiChatInterfaceProps> = ({
     }, CLIENT_REQUEST_DEADLINE_MS);
 
     try {
-      const res = await fetch('/api/gemini/maps', {
+      const res = await cloudFetch('/api/gemini/maps', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -805,6 +847,12 @@ export const LexiChatInterface: React.FC<LexiChatInterfaceProps> = ({
 
         <div ref={bottomRef} />
       </div>
+
+      {recordingError && (
+        <p role="alert" className="px-4 py-2 text-xs text-red-300">
+          {recordingError}
+        </p>
+      )}
 
       {/* Bottom Input Composer */}
       <div className="pt-2 pb-4">

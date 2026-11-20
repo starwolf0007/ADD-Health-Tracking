@@ -23,6 +23,7 @@ Covers: the single most common case (weekday-only work routines) with zero integ
 **What it needs:**
 - `google_sign_in` + `googleapis` (both already in pubspec, unused so far).
 - OAuth consent flow — Bryan signs in once, grants **read-only** calendar scope (`calendar.readonly` or the narrower `calendar.events.readonly`).
+<!-- doc-path-check: ignore -->
 - A `CalendarService` in `lib/platform/` that fetches today's + upcoming events.
 - Logic: if a work-day has an all-day event matching a holiday/PTO pattern ("Vacation", "Day Off", "Holiday", OOO), suppress the Morning Launch alarm for that day.
 

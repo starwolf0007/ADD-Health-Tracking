@@ -8,6 +8,7 @@ export interface ReentryNote {
   lastCompletedStep?: string;
   nextAction?: string;
   returnAt?: string; // ISO date
+  leftOffAt?: string;
   updatedAt: string;
 }
 

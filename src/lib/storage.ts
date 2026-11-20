@@ -10,36 +10,127 @@ import {
   HevyWorkout,
   RoutineStep,
 } from '../types';
-import { SEED_ROUTINES, SEED_HABITS, SEED_TASKS, SEED_WORKOUTS } from './constants';
+import {
+  SEED_ROUTINES,
+  SEED_HABITS,
+  SEED_TASKS,
+  SEED_WORKOUTS,
+} from './constants';
 import { filterNonSensitiveHabits } from './privacyGate';
 
-// ---------------------------------------------------------------------------
-// Storage Scope Management
-// ---------------------------------------------------------------------------
-let currentScopeId = 'guest';
+export const STORAGE_KEYS = {
+  TASKS: 'neuroflow_tasks',
+  ROUTINES: 'neuroflow_routines',
+  HABITS: 'neuroflow_habits',
+  HABIT_CHECKINS: 'neuroflow_habit_checkins',
+  MOODS: 'neuroflow_moods',
+  NOTES: 'neuroflow_notes',
+  SETTINGS: 'neuroflow_settings',
+  HEVY_WORKOUTS: 'neuroflow_hevy_workouts',
+  HEVY_KEY: 'neuroflow_hevy_api_key',
+} as const;
 
-export function setStorageScope(userId: string | null | undefined): void {
-  const nextScope = userId && userId.trim() ? userId.trim() : 'guest';
-  if (currentScopeId !== nextScope) {
-    currentScopeId = nextScope;
+// ---------------------------------------------------------------------------
+// Account and Scoping Architecture
+// ---------------------------------------------------------------------------
+let storageUser: string | null = null;
+
+export const getStorageUser = () => storageUser;
+
+export function setStorageUser(uid: string | null) {
+  const next = uid && uid.trim() && uid !== 'guest' ? uid.trim() : null;
+  if (storageUser !== next) {
+    storageUser = next;
     notifyStorageChange();
   }
 }
 
+export function setStorageScope(userId: string | null | undefined): void {
+  setStorageUser(userId ?? null);
+}
+
 export function getStorageScope(): string {
-  return currentScopeId;
+  return storageUser || 'guest';
+}
+
+function scopedKey(key: string, user = storageUser) {
+  const normalizedKey = key.startsWith('neuroflow_') ? key : `neuroflow_${key}`;
+  const targetUser = user && user !== 'guest' ? user : null;
+  return targetUser ? `${normalizedKey}:user:${encodeURIComponent(targetUser)}` : normalizedKey;
 }
 
 export function getScopedKey(baseKey: string, scope?: string): string {
-  const s = scope || currentScopeId;
-  return `neuroflow_${s}_${baseKey}`;
+  const targetScope = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+  return scopedKey(baseKey, targetScope);
+}
+
+export function resetCurrentLocalData() {
+  Object.values(STORAGE_KEYS).forEach((key) =>
+    localStorage.removeItem(scopedKey(key)),
+  );
+  // Pending task/note writes are retained so a local reset cannot erase unsynced work.
+  notifyStorageChange();
+}
+
+// ---------------------------------------------------------------------------
+// Sync Outbox and Record Definitions
+// ---------------------------------------------------------------------------
+export type SyncCollection = 'tasks' | 'notes';
+export type SyncRecord = Task | Note;
+
+export interface PendingWrite {
+  revision: string;
+  value: SyncRecord | null;
+}
+
+export function readOutbox(
+  uid: string,
+  collection: SyncCollection,
+): Record<string, PendingWrite> {
+  return JSON.parse(
+    localStorage.getItem(
+      `neuroflow_outbox:${encodeURIComponent(uid)}:${collection}`,
+    ) || '{}',
+  );
+}
+
+export function acknowledgeWrite(
+  uid: string,
+  collection: SyncCollection,
+  id: string,
+  revision: string,
+) {
+  const pending = readOutbox(uid, collection);
+  if (pending[id]?.revision === revision) {
+    delete pending[id];
+    localStorage.setItem(
+      `neuroflow_outbox:${encodeURIComponent(uid)}:${collection}`,
+      JSON.stringify(pending),
+    );
+  }
+}
+
+function queueWrite(
+  collection: SyncCollection,
+  id: string,
+  value: SyncRecord | null,
+  user = storageUser,
+) {
+  if (!user) return;
+  const pending = readOutbox(user, collection);
+  pending[id] = { revision: crypto.randomUUID(), value };
+  localStorage.setItem(
+    `neuroflow_outbox:${encodeURIComponent(user)}:${collection}`,
+    JSON.stringify(pending),
+  );
 }
 
 export interface AppSettings {
   displayName: string;
   morningBriefing: boolean;
   cloudGemini: boolean;
-  autoDriveBackup: boolean;
+  autoDriveBackup?: boolean;
+  lastDriveBackupAt?: number;
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -49,9 +140,18 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoDriveBackup: true,
 };
 
-// Simple event dispatcher for in-app reactive updates
+// ---------------------------------------------------------------------------
+// Reactive Change Listeners & Mutation Hooks
+// ---------------------------------------------------------------------------
 type StorageListener = () => void;
 const listeners = new Set<StorageListener>();
+
+export function subscribeStorage(listener: StorageListener) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
 
 export function notifyStorageChange() {
   listeners.forEach((listener) => {
@@ -63,7 +163,6 @@ export function notifyStorageChange() {
   });
 }
 
-// Mutation notifications for Firestore sync engine
 export type StorageMutation =
   | { type: 'task_saved'; task: Task }
   | { type: 'task_deleted'; taskId: string }
@@ -80,12 +179,12 @@ export function registerMutationListener(fn: MutationListener): () => void {
   };
 }
 
-function notifyMutation(mutation: StorageMutation) {
+export function notifyMutation(mutation: StorageMutation): void {
   mutationListeners.forEach((listener) => {
     try {
       listener(mutation);
     } catch (e) {
-      console.error('Storage mutation listener error:', e);
+      console.warn('Storage mutation listener error:', e);
     }
   });
 }
@@ -93,25 +192,34 @@ function notifyMutation(mutation: StorageMutation) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function getFromStorage<T>(key: string, defaultValue: T): T {
+function getFromStorage<T>(key: string, defaultValue: T, scope?: string): T {
+  const user = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+  const k = scopedKey(key, user);
   try {
-    const raw = localStorage.getItem(key);
+    const raw = localStorage.getItem(k);
     if (!raw) {
-      localStorage.setItem(key, JSON.stringify(defaultValue));
-      return defaultValue;
+      localStorage.setItem(
+        k,
+        JSON.stringify(user && Array.isArray(defaultValue) ? [] : defaultValue),
+      );
+      return (user && Array.isArray(defaultValue) ? [] : defaultValue) as T;
     }
     return JSON.parse(raw) as T;
   } catch {
-    return defaultValue;
+    return (user && Array.isArray(defaultValue) ? [] : defaultValue) as T;
   }
 }
 
-function setToStorage<T>(key: string, value: T): void {
+function setToStorage<T>(key: string, value: T, scope?: string): void {
+  const user = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+  const k = scopedKey(key, user);
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    localStorage.setItem(k, JSON.stringify(value));
     notifyStorageChange();
-  } catch (err) {
-    console.error('Failed to save to localStorage:', err);
+  } catch {
+    throw new Error(
+      'Could not save on this device. Free storage space before continuing.',
+    );
   }
 }
 
@@ -130,71 +238,26 @@ export function isSameDay(d1: Date, d2: Date): boolean {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Automatic Pre-Migration Safety Backup & Legacy Key Migration
-// ---------------------------------------------------------------------------
-const LEGACY_KEYS = [
-  'neuroflow_tasks',
-  'neuroflow_routines',
-  'neuroflow_habits',
-  'neuroflow_habit_checkins',
-  'neuroflow_moods',
-  'neuroflow_notes',
-  'neuroflow_settings',
-  'neuroflow_hevy_workouts',
-  'neuroflow_hevy_api_key',
-];
-
-function runLegacyMigration() {
-  if (typeof window === 'undefined' || !window.localStorage) return;
-
-  try {
-    // 1. Create untouchable safety backup if not already present
-    const backupKey = 'neuroflow_pre_migration_backup';
-    if (!localStorage.getItem(backupKey)) {
-      const snapshot: Record<string, string | null> = {};
-      for (const k of LEGACY_KEYS) {
-        snapshot[k] = localStorage.getItem(k);
-      }
-      localStorage.setItem(
-        backupKey,
-        JSON.stringify({
-          createdAt: new Date().toISOString(),
-          version: '1.0.0-pre-scoped',
-          data: snapshot,
-        })
-      );
-    }
-
-    // 2. Migrate legacy keys to guest scope if guest scope does not exist yet
-    const keyMap: Record<string, string> = {
-      neuroflow_tasks: 'neuroflow_guest_tasks',
-      neuroflow_routines: 'neuroflow_guest_routines',
-      neuroflow_habits: 'neuroflow_guest_habits',
-      neuroflow_habit_checkins: 'neuroflow_guest_habit_checkins',
-      neuroflow_moods: 'neuroflow_guest_moods',
-      neuroflow_notes: 'neuroflow_guest_notes',
-      neuroflow_settings: 'neuroflow_guest_settings',
-      neuroflow_hevy_workouts: 'neuroflow_guest_hevy_workouts',
-      neuroflow_hevy_api_key: 'neuroflow_guest_hevy_api_key',
-    };
-
-    for (const [legacy, guest] of Object.entries(keyMap)) {
-      const val = localStorage.getItem(legacy);
-      if (val && !localStorage.getItem(guest)) {
-        localStorage.setItem(guest, val);
-      }
-    }
-  } catch (err) {
-    console.error('Safe legacy migration encountered error:', err);
+// Apply remote records without creating another outbound write. Pending edits win
+// until acknowledged; account checks prevent a late callback entering another cache.
+export function applyRemoteRecords(
+  uid: string,
+  collection: SyncCollection,
+  records: SyncRecord[],
+) {
+  if (storageUser !== uid) return;
+  const key = collection === 'tasks' ? STORAGE_KEYS.TASKS : STORAGE_KEYS.NOTES;
+  const pending = readOutbox(uid, collection);
+  const merged = new Map(records.map((record) => [record.id, record]));
+  for (const [id, write] of Object.entries(pending)) {
+    if (write.value) merged.set(id, write.value);
+    else merged.delete(id);
   }
+  setToStorage(key, [...merged.values()]);
 }
 
-// Run safely on initialization
-runLegacyMigration();
-
 // ---------------------------------------------------------------------------
-// Offline Firestore Sync Queue
+// Offline Queue Storage Adapter
 // ---------------------------------------------------------------------------
 export interface QueuedSyncOperation {
   id: string;
@@ -202,57 +265,78 @@ export interface QueuedSyncOperation {
   entityId: string;
   data?: any;
   timestamp: number;
-  retryCount: number;
 }
 
 export const offlineQueueStorage = {
-  getQueue: (scope?: string): QueuedSyncOperation[] =>
-    getFromStorage<QueuedSyncOperation[]>(getScopedKey('offline_queue', scope), []),
+  getQueue: (scope?: string): QueuedSyncOperation[] => {
+    const user = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+    if (!user) return [];
+    const taskOutbox = readOutbox(user, 'tasks');
+    const noteOutbox = readOutbox(user, 'notes');
+    const items: QueuedSyncOperation[] = [];
+    for (const [id, w] of Object.entries(taskOutbox)) {
+      items.push({
+        id,
+        type: w.value ? 'task' : 'delete_task',
+        entityId: id,
+        data: w.value,
+        timestamp: Date.now(),
+      });
+    }
+    for (const [id, w] of Object.entries(noteOutbox)) {
+      items.push({
+        id,
+        type: w.value ? 'note' : 'delete_note',
+        entityId: id,
+        data: w.value,
+        timestamp: Date.now(),
+      });
+    }
+    return items;
+  },
 
   enqueue: (
-    op: Omit<QueuedSyncOperation, 'id' | 'timestamp' | 'retryCount'>,
+    op: { type: 'task' | 'delete_task' | 'note' | 'delete_note'; entityId: string; data?: any },
     scope?: string
   ): void => {
-    const queue = offlineQueueStorage.getQueue(scope);
-    const existingIdx = queue.findIndex(
-      (item) => item.entityId === op.entityId && item.type === op.type
-    );
-    const newOp: QueuedSyncOperation = {
-      ...op,
-      id: `sync-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      timestamp: Date.now(),
-      retryCount: 0,
-    };
-    if (existingIdx >= 0) {
-      queue[existingIdx] = newOp;
-    } else {
-      queue.push(newOp);
+    const user = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+    if (!user) return;
+    if (op.type === 'task') {
+      queueWrite('tasks', op.entityId, op.data, user);
+    } else if (op.type === 'delete_task') {
+      queueWrite('tasks', op.entityId, null, user);
+    } else if (op.type === 'note') {
+      queueWrite('notes', op.entityId, op.data, user);
+    } else if (op.type === 'delete_note') {
+      queueWrite('notes', op.entityId, null, user);
     }
-    setToStorage(getScopedKey('offline_queue', scope), queue);
   },
 
   dequeue: (opId: string, scope?: string): void => {
-    const queue = offlineQueueStorage
-      .getQueue(scope)
-      .filter((item) => item.id !== opId);
-    setToStorage(getScopedKey('offline_queue', scope), queue);
+    const user = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+    if (!user) return;
+    const taskOutbox = readOutbox(user, 'tasks');
+    if (taskOutbox[opId]) {
+      acknowledgeWrite(user, 'tasks', opId, taskOutbox[opId].revision);
+    }
+    const noteOutbox = readOutbox(user, 'notes');
+    if (noteOutbox[opId]) {
+      acknowledgeWrite(user, 'notes', opId, noteOutbox[opId].revision);
+    }
   },
 
-  clearQueue: (scope?: string): void => {
-    setToStorage(getScopedKey('offline_queue', scope), []);
-  },
+  clearQueue: (_scope?: string): void => {},
 };
 
 // ---------------------------------------------------------------------------
-// Storage Repositories (User-Scoped)
+// Storage Repositories
 // ---------------------------------------------------------------------------
-
 export const taskStorage = {
   getAll: (scope?: string): Task[] =>
-    getFromStorage<Task[]>(getScopedKey('tasks', scope), SEED_TASKS),
+    getFromStorage<Task[]>(STORAGE_KEYS.TASKS, SEED_TASKS, scope),
 
   getAllForScope: (scope: string): Task[] =>
-    getFromStorage<Task[]>(getScopedKey('tasks', scope), SEED_TASKS),
+    getFromStorage<Task[]>(STORAGE_KEYS.TASKS, SEED_TASKS, scope),
 
   save: (task: Task, isRemote: boolean = false, scope?: string): void => {
     const tasks = taskStorage.getAll(scope);
@@ -262,16 +346,24 @@ export const taskStorage = {
     } else {
       tasks.unshift(task);
     }
-    setToStorage(getScopedKey('tasks', scope), tasks);
+    setToStorage(STORAGE_KEYS.TASKS, tasks, scope);
     if (!isRemote) {
+      const targetUser = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+      if (targetUser) {
+        queueWrite('tasks', task.id, task, targetUser);
+      }
       notifyMutation({ type: 'task_saved', task });
     }
   },
 
   delete: (id: string, isRemote: boolean = false, scope?: string): void => {
     const tasks = taskStorage.getAll(scope).filter((t) => t.id !== id);
-    setToStorage(getScopedKey('tasks', scope), tasks);
+    setToStorage(STORAGE_KEYS.TASKS, tasks, scope);
     if (!isRemote) {
+      const targetUser = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+      if (targetUser) {
+        queueWrite('tasks', id, null, targetUser);
+      }
       notifyMutation({ type: 'task_deleted', taskId: id });
     }
   },
@@ -336,10 +428,10 @@ export const taskStorage = {
 
 export const routineStorage = {
   getAll: (scope?: string): Routine[] =>
-    getFromStorage<Routine[]>(getScopedKey('routines', scope), SEED_ROUTINES),
+    getFromStorage<Routine[]>(STORAGE_KEYS.ROUTINES, SEED_ROUTINES, scope),
 
   getAllForScope: (scope: string): Routine[] =>
-    getFromStorage<Routine[]>(getScopedKey('routines', scope), SEED_ROUTINES),
+    getFromStorage<Routine[]>(STORAGE_KEYS.ROUTINES, SEED_ROUTINES, scope),
 
   save: (routine: Routine, scope?: string): void => {
     const routines = routineStorage.getAll(scope);
@@ -349,15 +441,19 @@ export const routineStorage = {
     } else {
       routines.push(routine);
     }
-    setToStorage(getScopedKey('routines', scope), routines);
+    setToStorage(STORAGE_KEYS.ROUTINES, routines, scope);
   },
 
   delete: (id: string, scope?: string): void => {
     const routines = routineStorage.getAll(scope).filter((r) => r.id !== id);
-    setToStorage(getScopedKey('routines', scope), routines);
+    setToStorage(STORAGE_KEYS.ROUTINES, routines, scope);
   },
 
-  updateStep: (routineId: string, updatedStep: RoutineStep, scope?: string): void => {
+  updateStep: (
+    routineId: string,
+    updatedStep: RoutineStep,
+    scope?: string,
+  ): void => {
     const routines = routineStorage.getAll(scope);
     const rIdx = routines.findIndex((r) => r.id === routineId);
     if (rIdx === -1) return;
@@ -366,7 +462,7 @@ export const routineStorage = {
     if (sIdx === -1) return;
     r.steps[sIdx] = updatedStep;
     routines[rIdx] = { ...r };
-    setToStorage(getScopedKey('routines', scope), routines);
+    setToStorage(STORAGE_KEYS.ROUTINES, routines, scope);
   },
 
   resetRoutineSteps: (routineId: string, scope?: string): void => {
@@ -380,10 +476,10 @@ export const routineStorage = {
 
 export const habitStorage = {
   getAll: (scope?: string): Habit[] =>
-    getFromStorage<Habit[]>(getScopedKey('habits', scope), SEED_HABITS),
+    getFromStorage<Habit[]>(STORAGE_KEYS.HABITS, SEED_HABITS, scope),
 
   getAllForScope: (scope: string): Habit[] =>
-    getFromStorage<Habit[]>(getScopedKey('habits', scope), SEED_HABITS),
+    getFromStorage<Habit[]>(STORAGE_KEYS.HABITS, SEED_HABITS, scope),
 
   save: (habit: Habit, scope?: string): void => {
     const habits = habitStorage.getAll(scope);
@@ -393,18 +489,19 @@ export const habitStorage = {
     } else {
       habits.push(habit);
     }
-    setToStorage(getScopedKey('habits', scope), habits);
+    setToStorage(STORAGE_KEYS.HABITS, habits, scope);
   },
 
   delete: (id: string, scope?: string): void => {
     const habits = habitStorage.getAll(scope).filter((h) => h.id !== id);
-    setToStorage(getScopedKey('habits', scope), habits);
+    setToStorage(STORAGE_KEYS.HABITS, habits, scope);
   },
 
   getCheckIns: (habitId?: string, scope?: string): HabitCheckIn[] => {
     const checkIns = getFromStorage<HabitCheckIn[]>(
-      getScopedKey('habit_checkins', scope),
-      []
+      STORAGE_KEYS.HABIT_CHECKINS,
+      [],
+      scope,
     );
     return habitId ? checkIns.filter((c) => c.habitId === habitId) : checkIns;
   },
@@ -412,26 +509,30 @@ export const habitStorage = {
   checkIn: (habitId: string, dateStr?: string, scope?: string): void => {
     const checkIns = habitStorage.getCheckIns(undefined, scope);
     const today = dateStr || formatDateKey(new Date());
-    const existing = checkIns.find((c) => c.habitId === habitId && c.date === today);
+    const existing = checkIns.find(
+      (c) => c.habitId === habitId && c.date === today,
+    );
     if (existing) {
       existing.completed = true;
     } else {
       checkIns.push({
-        id: `checkin-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        id: `checkin-${Date.now()}-${habitId}`,
         habitId,
         date: today,
         completed: true,
         createdAt: new Date().toISOString(),
       });
     }
-    setToStorage(getScopedKey('habit_checkins', scope), checkIns);
+    setToStorage(STORAGE_KEYS.HABIT_CHECKINS, checkIns, scope);
   },
 
   uncheck: (habitId: string, dateStr?: string, scope?: string): void => {
     const checkIns = habitStorage.getCheckIns(undefined, scope);
     const today = dateStr || formatDateKey(new Date());
-    const filtered = checkIns.filter((c) => !(c.habitId === habitId && c.date === today));
-    setToStorage(getScopedKey('habit_checkins', scope), filtered);
+    const filtered = checkIns.filter(
+      (c) => !(c.habitId === habitId && c.date === today),
+    );
+    setToStorage(STORAGE_KEYS.HABIT_CHECKINS, filtered, scope);
   },
 
   isCheckedToday: (habitId: string, dateStr?: string, scope?: string): boolean => {
@@ -440,79 +541,29 @@ export const habitStorage = {
       .getCheckIns(undefined, scope)
       .some((c) => c.habitId === habitId && c.date === today && c.completed);
   },
-
-  getCompletionRate30d: (habit: Habit, scope?: string): number => {
-    const checkIns = habitStorage.getCheckIns(habit.id, scope);
-    const now = new Date();
-    let applicable = 0;
-    let completed = 0;
-
-    for (let i = 0; i < 30; i++) {
-      const d = new Date(now.getTime() - i * 86400000);
-      const dayKey = formatDateKey(d);
-      const weekday = d.getDay();
-      const isWeekday = weekday >= 1 && weekday <= 5;
-      const isWeekend = weekday === 0 || weekday === 6;
-
-      let applies = true;
-      if (habit.frequency === 'weekdays' && !isWeekday) applies = false;
-      if (habit.frequency === 'weekends' && !isWeekend) applies = false;
-
-      if (applies) {
-        applicable++;
-        if (checkIns.some((c) => c.date === dayKey && c.completed)) {
-          completed++;
-        }
-      }
-    }
-
-    if (applicable === 0) return 0;
-    return completed / applicable;
-  },
-
-  getSkipsRemainingThisMonth: (habit: Habit, scope?: string): number => {
-    const checkIns = habitStorage.getCheckIns(habit.id, scope);
-    const now = new Date();
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-    let misses = 0;
-    const monthlyBudget = 5;
-
-    for (let d = new Date(startOfMonth); d <= now; d.setDate(d.getDate() + 1)) {
-      const dayKey = formatDateKey(d);
-      const weekday = d.getDay();
-      const isWeekday = weekday >= 1 && weekday <= 5;
-      const isWeekend = weekday === 0 || weekday === 6;
-
-      let applies = true;
-      if (habit.frequency === 'weekdays' && !isWeekday) applies = false;
-      if (habit.frequency === 'weekends' && !isWeekend) applies = false;
-
-      if (applies) {
-        const hit = checkIns.some((c) => c.date === dayKey && c.completed);
-        if (!hit) misses++;
-      }
-    }
-
-    const remaining = monthlyBudget - misses;
-    return remaining < 0 ? 0 : remaining;
-  },
 };
 
 export const moodStorage = {
   getAll: (scope?: string): MoodLog[] =>
-    getFromStorage<MoodLog[]>(getScopedKey('moods', scope), [
-      {
-        id: 'seed-mood-yesterday',
-        level: 'good',
-        note: 'Solid morning focus after good sleep',
-        loggedAt: new Date(Date.now() - 86400000).toISOString(),
-      },
-    ]),
+    getFromStorage<MoodLog[]>(
+      STORAGE_KEYS.MOODS,
+      [
+        {
+          id: 'seed-mood-yesterday',
+          level: 'good',
+          note: 'Focused on deep work after taking morning walk',
+          loggedAt: new Date(Date.now() - 86400000).toISOString(),
+        },
+      ],
+      scope,
+    ),
 
   getToday: (scope?: string): MoodLog | null => {
     const moods = moodStorage.getAll(scope);
     const today = formatDateKey(new Date());
-    return moods.find((m) => formatDateKey(new Date(m.loggedAt)) === today) || null;
+    return (
+      moods.find((m) => formatDateKey(new Date(m.loggedAt)) === today) || null
+    );
   },
 
   log: (level: MoodLevel, note?: string, scope?: string): MoodLog => {
@@ -524,32 +575,29 @@ export const moodStorage = {
       loggedAt: new Date().toISOString(),
     };
     moods.unshift(entry);
-    setToStorage(getScopedKey('moods', scope), moods);
+    setToStorage(STORAGE_KEYS.MOODS, moods, scope);
     return entry;
   },
 };
 
 export const noteStorage = {
   getAll: (scope?: string): Note[] =>
-    getFromStorage<Note[]>(getScopedKey('notes', scope), [
-      {
-        id: 'note-1',
-        body: 'Idea for evening shutdown: set timer for 8:45 PM to put phone in kitchen station.\nReduces blue light before sleep.',
-        pinned: true,
-        createdAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-        updatedAt: new Date(Date.now() - 3600000 * 5).toISOString(),
-      },
-      {
-        id: 'note-2',
-        body: 'Grocery list for weekend:\n- Greek yogurt\n- Bananas\n- Cold brew beans\n- Almond milk',
-        pinned: false,
-        createdAt: new Date(Date.now() - 86400000).toISOString(),
-        updatedAt: new Date(Date.now() - 86400000).toISOString(),
-      },
-    ]),
+    getFromStorage<Note[]>(
+      STORAGE_KEYS.NOTES,
+      [
+        {
+          id: 'note-1',
+          body: 'Idea for evening shutdown: set timer for 8:45 PM to put phone in kitchen station.\nReduces blue light before sleep.',
+          pinned: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+      scope,
+    ),
 
   getAllForScope: (scope: string): Note[] =>
-    getFromStorage<Note[]>(getScopedKey('notes', scope), []),
+    getFromStorage<Note[]>(STORAGE_KEYS.NOTES, [], scope),
 
   save: (note: Note, isRemote: boolean = false, scope?: string): void => {
     const notes = noteStorage.getAll(scope);
@@ -559,16 +607,24 @@ export const noteStorage = {
     } else {
       notes.unshift(note);
     }
-    setToStorage(getScopedKey('notes', scope), notes);
+    setToStorage(STORAGE_KEYS.NOTES, notes, scope);
     if (!isRemote) {
+      const targetUser = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+      if (targetUser) {
+        queueWrite('notes', note.id, note, targetUser);
+      }
       notifyMutation({ type: 'note_saved', note });
     }
   },
 
   delete: (id: string, isRemote: boolean = false, scope?: string): void => {
     const notes = noteStorage.getAll(scope).filter((n) => n.id !== id);
-    setToStorage(getScopedKey('notes', scope), notes);
+    setToStorage(STORAGE_KEYS.NOTES, notes, scope);
     if (!isRemote) {
+      const targetUser = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+      if (targetUser) {
+        queueWrite('notes', id, null, targetUser);
+      }
       notifyMutation({ type: 'note_deleted', noteId: id });
     }
   },
@@ -578,18 +634,27 @@ export const noteStorage = {
     const n = notes.find((item) => item.id === id);
     if (!n) return;
     n.pinned = !n.pinned;
-    setToStorage(getScopedKey('notes', scope), notes);
+    setToStorage(STORAGE_KEYS.NOTES, notes, scope);
+    const targetUser = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+    if (targetUser) {
+      queueWrite('notes', n.id, n, targetUser);
+    }
+    notifyMutation({ type: 'note_saved', note: n });
   },
 };
 
 export const settingsStorage = {
   get: (scope?: string): AppSettings =>
-    getFromStorage<AppSettings>(getScopedKey('settings', scope), DEFAULT_SETTINGS),
+    getFromStorage<AppSettings>(
+      STORAGE_KEYS.SETTINGS,
+      DEFAULT_SETTINGS,
+      scope,
+    ),
 
   save: (updates: Partial<AppSettings>, scope?: string): AppSettings => {
     const current = settingsStorage.get(scope);
     const next = { ...current, ...updates };
-    setToStorage(getScopedKey('settings', scope), next);
+    setToStorage(STORAGE_KEYS.SETTINGS, next, scope);
     return next;
   },
 };
@@ -597,20 +662,21 @@ export const settingsStorage = {
 export const hevyStorage = {
   getWorkouts: (scope?: string): HevyWorkout[] =>
     getFromStorage<HevyWorkout[]>(
-      getScopedKey('hevy_workouts', scope),
-      SEED_WORKOUTS
+      STORAGE_KEYS.HEVY_WORKOUTS,
+      SEED_WORKOUTS,
+      scope,
     ),
 
   saveWorkouts: (workouts: HevyWorkout[], scope?: string): void => {
-    setToStorage(getScopedKey('hevy_workouts', scope), workouts);
+    setToStorage(STORAGE_KEYS.HEVY_WORKOUTS, workouts, scope);
   },
 
   getApiKey: (scope?: string): string => {
-    return localStorage.getItem(getScopedKey('hevy_api_key', scope)) || '';
+    return localStorage.getItem(scopedKey(STORAGE_KEYS.HEVY_KEY, scope)) || '';
   },
 
   saveApiKey: (key: string, scope?: string): void => {
-    const k = getScopedKey('hevy_api_key', scope);
+    const k = scopedKey(STORAGE_KEYS.HEVY_KEY, scope);
     if (key) {
       localStorage.setItem(k, key);
     } else {
@@ -623,7 +689,6 @@ export const hevyStorage = {
 // ---------------------------------------------------------------------------
 // Guest Data Import & Non-Destructive Migration API
 // ---------------------------------------------------------------------------
-
 export interface GuestDataSummary {
   taskCount: number;
   routineCount: number;
@@ -680,7 +745,7 @@ export function importGuestDataToAccount(targetUserId: string): {
     return { importedTasks: 0, importedRoutines: 0, importedHabits: 0, importedNotes: 0 };
   }
 
-  // 1. Create a snapshot backup of current guest data before import
+  // 1. Snapshot backup of current guest data
   const guestBackupKey = `neuroflow_guest_backup_after_import_${Date.now()}`;
   const guestSnapshot = {
     exportedAt: new Date().toISOString(),
@@ -703,11 +768,11 @@ export function importGuestDataToAccount(targetUserId: string): {
     if (!existingTaskIds.has(t.id)) {
       accountTasks.unshift(t);
       importedTasks++;
-      // Notify mutation so it syncs to user's Firestore
+      queueWrite('tasks', t.id, t, targetUserId);
       notifyMutation({ type: 'task_saved', task: t });
     }
   }
-  setToStorage(getScopedKey('tasks', targetUserId), accountTasks);
+  setToStorage(STORAGE_KEYS.TASKS, accountTasks, targetUserId);
 
   // 3. Non-destructive merge of routines
   const guestRoutines = routineStorage.getAllForScope('guest');
@@ -721,7 +786,7 @@ export function importGuestDataToAccount(targetUserId: string): {
       importedRoutines++;
     }
   }
-  setToStorage(getScopedKey('routines', targetUserId), accountRoutines);
+  setToStorage(STORAGE_KEYS.ROUTINES, accountRoutines, targetUserId);
 
   // 4. Non-destructive merge of habits
   const guestHabits = habitStorage.getAllForScope('guest');
@@ -735,7 +800,7 @@ export function importGuestDataToAccount(targetUserId: string): {
       importedHabits++;
     }
   }
-  setToStorage(getScopedKey('habits', targetUserId), accountHabits);
+  setToStorage(STORAGE_KEYS.HABITS, accountHabits, targetUserId);
 
   // 5. Non-destructive merge of notes
   const guestNotes = noteStorage.getAllForScope('guest');
@@ -747,10 +812,11 @@ export function importGuestDataToAccount(targetUserId: string): {
     if (!existingNoteIds.has(n.id)) {
       accountNotes.unshift(n);
       importedNotes++;
+      queueWrite('notes', n.id, n, targetUserId);
       notifyMutation({ type: 'note_saved', note: n });
     }
   }
-  setToStorage(getScopedKey('notes', targetUserId), accountNotes);
+  setToStorage(STORAGE_KEYS.NOTES, accountNotes, targetUserId);
 
   // Mark import as resolved for this account
   setGuestImportResolved(targetUserId, true);

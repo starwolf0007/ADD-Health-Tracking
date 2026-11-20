@@ -14,7 +14,7 @@ Work proceeds one surface at a time. Hard architectural invariants remain in for
 The spine is complete and CI is green. Remaining process strictness is now the primary obstacle to real-world use. The owner is drifting to other apps because too many surfaces are still placeholders or gated. Usability for dogfooding is the current highest priority; process purity can be restored once a usable baseline exists.
 
 **Enforcement / Duration:**
-- Authority: `docs/UNLOCK-SPRINT-MEMO.md`
+- Authority: `docs/archive/UNLOCK-SPRINT-MEMO.md`
 - Softened rules are listed in that memo and mirrored in `AGENTS.md`.
 - Sprint ends when the owner declares a usable daily-driver state. Full process strictness is then restored and temporary shortcuts cleaned up.
 

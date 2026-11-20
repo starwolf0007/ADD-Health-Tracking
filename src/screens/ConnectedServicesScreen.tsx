@@ -3,17 +3,14 @@ import {
   ArrowLeft,
   CheckCircle2,
   Calendar,
-  Cloud,
-  Heart,
   Sparkles,
-  Mail,
   User,
-  Users,
   HardDrive,
   ChevronRight,
   AlertTriangle,
 } from 'lucide-react';
 import { useFirebaseAuth, useDriveBackupHealth } from '../lib/firebase';
+import { useNeuroStorage } from '../lib/storage';
 
 interface ConnectedServicesScreenProps {
   onBack: () => void;
@@ -24,8 +21,9 @@ export const ConnectedServicesScreen: React.FC<ConnectedServicesScreenProps> = (
   onBack,
   onOpenGoogleDrive,
 }) => {
-  const { user, accessToken, signInWithGoogle, signOut } = useFirebaseAuth();
+  const { user, accessToken, signInWithGoogle, signOut, authError } = useFirebaseAuth();
   const backupHealth = useDriveBackupHealth();
+  const { settings } = useNeuroStorage();
 
   return (
     <div className="pb-28 max-w-2xl mx-auto px-4 pt-3 space-y-5">
@@ -81,6 +79,12 @@ export const ConnectedServicesScreen: React.FC<ConnectedServicesScreenProps> = (
           )}
         </div>
       </div>
+
+      {authError && (
+        <p role="alert" className="text-red-300 text-sm">
+          {authError}
+        </p>
+      )}
 
       {/* Google Drive Primary Workspace Banner */}
       <div className="p-4 rounded-2xl bg-[#1C1C1F] border border-[#4285F4]/30 space-y-2 shadow-md">
@@ -204,7 +208,9 @@ export const ConnectedServicesScreen: React.FC<ConnectedServicesScreenProps> = (
                 </p>
               </div>
             </div>
-            <span className="text-[11px] font-mono text-[#BB86FC]">Active</span>
+            <span className="text-[11px] font-mono text-[#BB86FC]">
+              {settings.cloudGemini ? 'Active' : 'Off in Settings'}
+            </span>
           </div>
         </div>
       </div>

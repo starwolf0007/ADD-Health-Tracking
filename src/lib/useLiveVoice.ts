@@ -1,3 +1,4 @@
+import { cloudFetch, requireCloudConsent } from './cloudClient';
 import { useState, useRef, useEffect, useCallback } from 'react';
 
 // Converts Float32 [-1.0, 1.0] PCM from AudioContext to 16-bit little-endian Base64
@@ -54,6 +55,7 @@ export function useLiveVoice() {
   const [currentInputText, setCurrentInputText] = useState('');
   const [currentOutputText, setCurrentOutputText] = useState('');
 
+  const generationRef = useRef(0);
   const wsRef = useRef<WebSocket | null>(null);
   const inputCtxRef = useRef<AudioContext | null>(null);
   const outputCtxRef = useRef<AudioContext | null>(null);
@@ -79,7 +81,9 @@ export function useLiveVoice() {
   const playAudioChunk = useCallback((base64Audio: string) => {
     try {
       if (!outputCtxRef.current) {
-        outputCtxRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({
+        outputCtxRef.current = new (
+          window.AudioContext || (window as any).webkitAudioContext
+        )({
           sampleRate: 24000,
         });
       }
@@ -192,20 +196,53 @@ export function useLiveVoice() {
     }
   }, []);
 
+  const endSession = useCallback(() => {
+    generationRef.current++;
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
+      mediaStreamRef.current = null;
+    }
+    if (scriptProcessorRef.current) {
+      scriptProcessorRef.current.disconnect();
+      scriptProcessorRef.current = null;
+    }
+    if (inputCtxRef.current) {
+      inputCtxRef.current.close().catch(() => {});
+      inputCtxRef.current = null;
+    }
+    stopPlayback();
+    if (outputCtxRef.current) {
+      void outputCtxRef.current.close();
+      outputCtxRef.current = null;
+    }
+    setIsConnected(false);
+    setIsListening(false);
+    setIsSpeaking(false);
+    setMicStatus('idle');
+  }, [stopPlayback]);
+
   const startSession = useCallback(async () => {
+    const generation = ++generationRef.current;
     try {
       setConnectionError(null);
+      requireCloudConsent();
 
-      // Extract auth token from cookie or URL params to avoid iframe 302 redirects
+      const ticketResponse = await cloudFetch('/api/gemini/live-ticket', {
+        method: 'POST',
+        body: '{}',
+      });
+      const ticketData = await ticketResponse.json();
+      if (!ticketResponse.ok) {
+        throw new Error(ticketData.error || 'Voice is unavailable');
+      }
+      if (generation !== generationRef.current) return;
+
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const cookies = document.cookie.split(';').reduce((acc, c) => {
-        const [k, v] = c.trim().split('=');
-        if (k && v) acc[k] = decodeURIComponent(v);
-        return acc;
-      }, {} as Record<string, string>);
-      const urlParams = new URLSearchParams(window.location.search);
-      const authToken = cookies['___aistudio_auth_token'] || urlParams.get('___aistudio_auth_token');
-      const wsUrl = `${protocol}//${window.location.host}/api/live-ws${authToken ? `?___aistudio_auth_token=${encodeURIComponent(authToken)}` : ''}`;
+      const wsUrl = `${protocol}//${window.location.host}/api/live-ws?ticket=${encodeURIComponent(ticketData.ticket)}`;
 
       if (wsRef.current) {
         wsRef.current.close();
@@ -217,7 +254,6 @@ export function useLiveVoice() {
       ws.onopen = async () => {
         setIsConnected(true);
         setConnectionError(null);
-        // Automatically attempt microphone setup
         enableMicrophone();
       };
 
@@ -238,13 +274,18 @@ export function useLiveVoice() {
               { id: `in-${Date.now()}`, sender: 'user', text: msg.text },
             ]);
           } else if (msg.type === 'outputTranscript') {
-            setCurrentOutputText((prev) => (prev ? `${prev} ${msg.text}` : msg.text));
+            setCurrentOutputText((prev) =>
+              prev ? `${prev} ${msg.text}` : msg.text,
+            );
             setTranscriptHistory((prev) => [
               ...prev,
               { id: `out-${Date.now()}`, sender: 'lexi', text: msg.text },
             ]);
+          } else if (msg.type === 'sessionClosed') {
+            endSession();
           } else if (msg.type === 'error') {
             setConnectionError(msg.message);
+            endSession();
           }
         } catch (e) {
           console.warn('Error handling WebSocket message:', e);
@@ -252,13 +293,10 @@ export function useLiveVoice() {
       };
 
       ws.onclose = () => {
-        setIsConnected(false);
-        setIsListening(false);
-        setIsSpeaking(false);
+        endSession();
       };
 
       ws.onerror = (event: any) => {
-        // Prevent printing raw Event object {"isTrusted": true}
         console.warn('Live voice WebSocket status update:', event?.type || 'error');
         setConnectionError('Voice connection interrupted. Tap to reconnect.');
         setIsConnected(false);
@@ -266,31 +304,7 @@ export function useLiveVoice() {
     } catch (err: any) {
       setConnectionError(err.message || 'Failed to start Live Voice session');
     }
-  }, [enableMicrophone, playAudioChunk, stopPlayback]);
-
-  const endSession = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((t) => t.stop());
-      mediaStreamRef.current = null;
-    }
-    if (scriptProcessorRef.current) {
-      scriptProcessorRef.current.disconnect();
-      scriptProcessorRef.current = null;
-    }
-    if (inputCtxRef.current) {
-      inputCtxRef.current.close().catch(() => {});
-      inputCtxRef.current = null;
-    }
-    stopPlayback();
-    setIsConnected(false);
-    setIsListening(false);
-    setIsSpeaking(false);
-    setMicStatus('idle');
-  }, [stopPlayback]);
+  }, [enableMicrophone, endSession, playAudioChunk, stopPlayback]);
 
   useEffect(() => {
     return () => {
