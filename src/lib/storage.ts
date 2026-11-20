@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from "react";
 import {
   Task,
   TaskStatus,
+  LockedTaskStatus,
   Routine,
   Habit,
   HabitCheckIn,
@@ -12,26 +13,26 @@ import {
   RoutineStep,
   ReentryNote,
   MicroStepItem,
-} from '../types';
-import { AlertService } from './alerts';
+} from "../types";
+import { AlertService } from "./alerts";
 import {
   SEED_ROUTINES,
   SEED_HABITS,
   SEED_TASKS,
   SEED_WORKOUTS,
-} from './constants';
-import { filterNonSensitiveHabits } from './privacyGate';
+} from "./constants";
+import { filterNonSensitiveHabits } from "./privacyGate";
 
 export const STORAGE_KEYS = {
-  TASKS: 'neuroflow_tasks',
-  ROUTINES: 'neuroflow_routines',
-  HABITS: 'neuroflow_habits',
-  HABIT_CHECKINS: 'neuroflow_habit_checkins',
-  MOODS: 'neuroflow_moods',
-  NOTES: 'neuroflow_notes',
-  SETTINGS: 'neuroflow_settings',
-  HEVY_WORKOUTS: 'neuroflow_hevy_workouts',
-  HEVY_KEY: 'neuroflow_hevy_api_key',
+  TASKS: "neuroflow_tasks",
+  ROUTINES: "neuroflow_routines",
+  HABITS: "neuroflow_habits",
+  HABIT_CHECKINS: "neuroflow_habit_checkins",
+  MOODS: "neuroflow_moods",
+  NOTES: "neuroflow_notes",
+  SETTINGS: "neuroflow_settings",
+  HEVY_WORKOUTS: "neuroflow_hevy_workouts",
+  HEVY_KEY: "neuroflow_hevy_api_key",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -42,7 +43,7 @@ let storageUser: string | null = null;
 export const getStorageUser = () => storageUser;
 
 export function setStorageUser(uid: string | null) {
-  const next = uid && uid.trim() && uid !== 'guest' ? uid.trim() : null;
+  const next = uid && uid.trim() && uid !== "guest" ? uid.trim() : null;
   if (storageUser !== next) {
     storageUser = next;
     notifyStorageChange();
@@ -54,17 +55,24 @@ export function setStorageScope(userId: string | null | undefined): void {
 }
 
 export function getStorageScope(): string {
-  return storageUser || 'guest';
+  return storageUser || "guest";
 }
 
 function scopedKey(key: string, user = storageUser) {
-  const normalizedKey = key.startsWith('neuroflow_') ? key : `neuroflow_${key}`;
-  const targetUser = user && user !== 'guest' ? user : null;
-  return targetUser ? `${normalizedKey}:user:${encodeURIComponent(targetUser)}` : normalizedKey;
+  const normalizedKey = key.startsWith("neuroflow_") ? key : `neuroflow_${key}`;
+  const targetUser = user && user !== "guest" ? user : null;
+  return targetUser
+    ? `${normalizedKey}:user:${encodeURIComponent(targetUser)}`
+    : normalizedKey;
 }
 
 export function getScopedKey(baseKey: string, scope?: string): string {
-  const targetScope = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+  const targetScope =
+    scope !== undefined
+      ? scope && scope !== "guest"
+        ? scope
+        : null
+      : storageUser;
   return scopedKey(baseKey, targetScope);
 }
 
@@ -79,7 +87,7 @@ export function resetCurrentLocalData() {
 // ---------------------------------------------------------------------------
 // Sync Outbox and Record Definitions
 // ---------------------------------------------------------------------------
-export type SyncCollection = 'tasks' | 'notes';
+export type SyncCollection = "tasks" | "notes";
 export type SyncRecord = Task | Note;
 
 export interface PendingWrite {
@@ -94,7 +102,7 @@ export function readOutbox(
   return JSON.parse(
     localStorage.getItem(
       `neuroflow_outbox:${encodeURIComponent(uid)}:${collection}`,
-    ) || '{}',
+    ) || "{}",
   );
 }
 
@@ -138,7 +146,7 @@ export interface AppSettings {
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  displayName: 'Bryan',
+  displayName: "Bryan",
   morningBriefing: true,
   cloudGemini: false,
   autoDriveBackup: true,
@@ -168,10 +176,10 @@ export function notifyStorageChange() {
 }
 
 export type StorageMutation =
-  | { type: 'task_saved'; task: Task }
-  | { type: 'task_deleted'; taskId: string }
-  | { type: 'note_saved'; note: Note }
-  | { type: 'note_deleted'; noteId: string };
+  | { type: "task_saved"; task: Task }
+  | { type: "task_deleted"; taskId: string }
+  | { type: "note_saved"; note: Note }
+  | { type: "note_deleted"; noteId: string };
 
 type MutationListener = (mutation: StorageMutation) => void;
 const mutationListeners = new Set<MutationListener>();
@@ -188,7 +196,7 @@ export function notifyMutation(mutation: StorageMutation): void {
     try {
       listener(mutation);
     } catch (e) {
-      console.warn('Storage mutation listener error:', e);
+      console.warn("Storage mutation listener error:", e);
     }
   });
 }
@@ -197,7 +205,12 @@ export function notifyMutation(mutation: StorageMutation): void {
 // Helpers
 // ---------------------------------------------------------------------------
 function getFromStorage<T>(key: string, defaultValue: T, scope?: string): T {
-  const user = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+  const user =
+    scope !== undefined
+      ? scope && scope !== "guest"
+        ? scope
+        : null
+      : storageUser;
   const k = scopedKey(key, user);
   try {
     const raw = localStorage.getItem(k);
@@ -215,22 +228,27 @@ function getFromStorage<T>(key: string, defaultValue: T, scope?: string): T {
 }
 
 function setToStorage<T>(key: string, value: T, scope?: string): void {
-  const user = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+  const user =
+    scope !== undefined
+      ? scope && scope !== "guest"
+        ? scope
+        : null
+      : storageUser;
   const k = scopedKey(key, user);
   try {
     localStorage.setItem(k, JSON.stringify(value));
     notifyStorageChange();
   } catch {
     throw new Error(
-      'Could not save on this device. Free storage space before continuing.',
+      "Could not save on this device. Free storage space before continuing.",
     );
   }
 }
 
 export function formatDateKey(date: Date): string {
   const y = date.getFullYear();
-  const m = String(date.getMonth() + 1).padStart(2, '0');
-  const d = String(date.getDate()).padStart(2, '0');
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
 }
 
@@ -250,7 +268,7 @@ export function applyRemoteRecords(
   records: SyncRecord[],
 ) {
   if (storageUser !== uid) return;
-  const key = collection === 'tasks' ? STORAGE_KEYS.TASKS : STORAGE_KEYS.NOTES;
+  const key = collection === "tasks" ? STORAGE_KEYS.TASKS : STORAGE_KEYS.NOTES;
   const pending = readOutbox(uid, collection);
   const merged = new Map(records.map((record) => [record.id, record]));
   for (const [id, write] of Object.entries(pending)) {
@@ -265,7 +283,7 @@ export function applyRemoteRecords(
 // ---------------------------------------------------------------------------
 export interface QueuedSyncOperation {
   id: string;
-  type: 'task' | 'note' | 'delete_task' | 'delete_note';
+  type: "task" | "note" | "delete_task" | "delete_note";
   entityId: string;
   data?: any;
   timestamp: number;
@@ -273,15 +291,20 @@ export interface QueuedSyncOperation {
 
 export const offlineQueueStorage = {
   getQueue: (scope?: string): QueuedSyncOperation[] => {
-    const user = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+    const user =
+      scope !== undefined
+        ? scope && scope !== "guest"
+          ? scope
+          : null
+        : storageUser;
     if (!user) return [];
-    const taskOutbox = readOutbox(user, 'tasks');
-    const noteOutbox = readOutbox(user, 'notes');
+    const taskOutbox = readOutbox(user, "tasks");
+    const noteOutbox = readOutbox(user, "notes");
     const items: QueuedSyncOperation[] = [];
     for (const [id, w] of Object.entries(taskOutbox)) {
       items.push({
         id,
-        type: w.value ? 'task' : 'delete_task',
+        type: w.value ? "task" : "delete_task",
         entityId: id,
         data: w.value,
         timestamp: Date.now(),
@@ -290,7 +313,7 @@ export const offlineQueueStorage = {
     for (const [id, w] of Object.entries(noteOutbox)) {
       items.push({
         id,
-        type: w.value ? 'note' : 'delete_note',
+        type: w.value ? "note" : "delete_note",
         entityId: id,
         data: w.value,
         timestamp: Date.now(),
@@ -300,32 +323,46 @@ export const offlineQueueStorage = {
   },
 
   enqueue: (
-    op: { type: 'task' | 'delete_task' | 'note' | 'delete_note'; entityId: string; data?: any },
-    scope?: string
+    op: {
+      type: "task" | "delete_task" | "note" | "delete_note";
+      entityId: string;
+      data?: any;
+    },
+    scope?: string,
   ): void => {
-    const user = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+    const user =
+      scope !== undefined
+        ? scope && scope !== "guest"
+          ? scope
+          : null
+        : storageUser;
     if (!user) return;
-    if (op.type === 'task') {
-      queueWrite('tasks', op.entityId, op.data, user);
-    } else if (op.type === 'delete_task') {
-      queueWrite('tasks', op.entityId, null, user);
-    } else if (op.type === 'note') {
-      queueWrite('notes', op.entityId, op.data, user);
-    } else if (op.type === 'delete_note') {
-      queueWrite('notes', op.entityId, null, user);
+    if (op.type === "task") {
+      queueWrite("tasks", op.entityId, op.data, user);
+    } else if (op.type === "delete_task") {
+      queueWrite("tasks", op.entityId, null, user);
+    } else if (op.type === "note") {
+      queueWrite("notes", op.entityId, op.data, user);
+    } else if (op.type === "delete_note") {
+      queueWrite("notes", op.entityId, null, user);
     }
   },
 
   dequeue: (opId: string, scope?: string): void => {
-    const user = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+    const user =
+      scope !== undefined
+        ? scope && scope !== "guest"
+          ? scope
+          : null
+        : storageUser;
     if (!user) return;
-    const taskOutbox = readOutbox(user, 'tasks');
+    const taskOutbox = readOutbox(user, "tasks");
     if (taskOutbox[opId]) {
-      acknowledgeWrite(user, 'tasks', opId, taskOutbox[opId].revision);
+      acknowledgeWrite(user, "tasks", opId, taskOutbox[opId].revision);
     }
-    const noteOutbox = readOutbox(user, 'notes');
+    const noteOutbox = readOutbox(user, "notes");
     if (noteOutbox[opId]) {
-      acknowledgeWrite(user, 'notes', opId, noteOutbox[opId].revision);
+      acknowledgeWrite(user, "notes", opId, noteOutbox[opId].revision);
     }
   },
 
@@ -333,15 +370,37 @@ export const offlineQueueStorage = {
 };
 
 // ---------------------------------------------------------------------------
-// Storage Repositories
+// Storage Repositories & State Machine
 // ---------------------------------------------------------------------------
+export const LOCKED_TASK_STATUSES: readonly LockedTaskStatus[] = [
+  "captured",
+  "clarified",
+  "picked",
+  "active",
+  "paused",
+  "resumed",
+  "finished",
+] as const;
+
+export function isLockedTaskStatus(val: unknown): val is LockedTaskStatus {
+  return (
+    typeof val === "string" &&
+    (LOCKED_TASK_STATUSES as readonly string[]).includes(val)
+  );
+}
+
+/**
+ * Normalizes any incoming task record (legacy, pre-Slice-1, or raw external data)
+ * into the canonical 7-state architecture while preserving all existing domain fields.
+ * Migration is strictly idempotent: migrateTask(migrateTask(task)) === migrateTask(task).
+ */
 export function migrateTask(raw: any): Task {
-  if (!raw || typeof raw !== 'object') {
+  if (!raw || typeof raw !== "object") {
     return {
       id: crypto.randomUUID(),
-      title: '',
-      originalWording: '',
-      status: 'captured',
+      title: "",
+      originalWording: "",
+      status: "captured",
       createdAt: new Date().toISOString(),
       accumulatedActiveSeconds: 0,
       activeSegmentStartedAt: null,
@@ -351,32 +410,56 @@ export function migrateTask(raw: any): Task {
     };
   }
 
-  let status: TaskStatus = raw.status;
-  // Map legacy statuses: pending, inProgress, completed, skipped, blocked
-  if (status === 'pending' || !status) {
-    status = (raw.microSteps && raw.microSteps.length > 0) || raw.estimatedMinutes ? 'clarified' : 'captured';
-  } else if (status === 'inProgress') {
-    status = 'active';
-  } else if (status === 'completed') {
-    status = 'finished';
-  } else if (status === 'skipped' || status === 'blocked') {
-    status = 'captured';
+  let status: LockedTaskStatus;
+  if (isLockedTaskStatus(raw.status)) {
+    status = raw.status;
+  } else if (raw.status === "inProgress") {
+    status = "active";
+  } else if (raw.status === "completed") {
+    status = "finished";
+  } else if (
+    raw.status === "pending" ||
+    raw.status === "skipped" ||
+    raw.status === "blocked" ||
+    !raw.status
+  ) {
+    status =
+      (raw.microSteps && raw.microSteps.length > 0) ||
+      raw.estimatedMinutes ||
+      raw.dueDate
+        ? "clarified"
+        : "captured";
+  } else {
+    // Unknown or unrecognized status string: normalize safely without data loss
+    status =
+      (raw.microSteps && raw.microSteps.length > 0) ||
+      raw.estimatedMinutes ||
+      raw.dueDate
+        ? "clarified"
+        : "captured";
   }
 
   const activeSegmentStartedAt =
     raw.activeSegmentStartedAt !== undefined
       ? raw.activeSegmentStartedAt
-      : (status === 'active' || status === 'resumed') && raw.activeStartedAt
-      ? raw.activeStartedAt
-      : null;
+      : (status === "active" || status === "resumed") && raw.activeStartedAt
+        ? raw.activeStartedAt
+        : null;
+
+  const accumulatedActiveSeconds =
+    typeof raw.accumulatedActiveSeconds === "number" &&
+    !isNaN(raw.accumulatedActiveSeconds)
+      ? Math.max(0, raw.accumulatedActiveSeconds)
+      : 0;
 
   return {
     ...raw,
-    title: raw.title || raw.originalWording || '',
-    originalWording: raw.originalWording || raw.title || '',
+    id: typeof raw.id === "string" && raw.id ? raw.id : crypto.randomUUID(),
+    title: raw.title || raw.originalWording || "",
+    originalWording: raw.originalWording || raw.title || "",
     status,
-    accumulatedActiveSeconds:
-      typeof raw.accumulatedActiveSeconds === 'number' ? raw.accumulatedActiveSeconds : 0,
+    createdAt: raw.createdAt || new Date().toISOString(),
+    accumulatedActiveSeconds,
     activeSegmentStartedAt,
     targetEndTime: raw.targetEndTime ?? null,
     microSteps: Array.isArray(raw.microSteps) ? raw.microSteps : [],
@@ -384,9 +467,15 @@ export function migrateTask(raw: any): Task {
   };
 }
 
-export function getElapsedActiveSeconds(task: Task, now: number = Date.now()): number {
+export function getElapsedActiveSeconds(
+  task: Task,
+  now: number = Date.now(),
+): number {
   const accumulated = task.accumulatedActiveSeconds || 0;
-  if ((task.status === 'active' || task.status === 'resumed') && task.activeSegmentStartedAt) {
+  if (
+    (task.status === "active" || task.status === "resumed") &&
+    task.activeSegmentStartedAt
+  ) {
     const startMs = new Date(task.activeSegmentStartedAt).getTime();
     if (!isNaN(startMs)) {
       return accumulated + Math.max(0, Math.floor((now - startMs) / 1000));
@@ -407,20 +496,27 @@ export const taskStorage = {
   },
 
   save: (task: Task, isRemote: boolean = false, scope?: string): void => {
+    // Canonical migration ensures non-canonical or legacy statuses are never saved back to disk
+    const canonical = migrateTask(task);
     const tasks = taskStorage.getAll(scope);
-    const idx = tasks.findIndex((t) => t.id === task.id);
+    const idx = tasks.findIndex((t) => t.id === canonical.id);
     if (idx >= 0) {
-      tasks[idx] = task;
+      tasks[idx] = canonical;
     } else {
-      tasks.unshift(task);
+      tasks.unshift(canonical);
     }
     setToStorage(STORAGE_KEYS.TASKS, tasks, scope);
     if (!isRemote) {
-      const targetUser = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+      const targetUser =
+        scope !== undefined
+          ? scope && scope !== "guest"
+            ? scope
+            : null
+          : storageUser;
       if (targetUser) {
-        queueWrite('tasks', task.id, task, targetUser);
+        queueWrite("tasks", canonical.id, canonical, targetUser);
       }
-      notifyMutation({ type: 'task_saved', task });
+      notifyMutation({ type: "task_saved", task: canonical });
     }
   },
 
@@ -429,11 +525,16 @@ export const taskStorage = {
     setToStorage(STORAGE_KEYS.TASKS, tasks, scope);
     AlertService.cancel(id);
     if (!isRemote) {
-      const targetUser = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+      const targetUser =
+        scope !== undefined
+          ? scope && scope !== "guest"
+            ? scope
+            : null
+          : storageUser;
       if (targetUser) {
-        queueWrite('tasks', id, null, targetUser);
+        queueWrite("tasks", id, null, targetUser);
       }
-      notifyMutation({ type: 'task_deleted', taskId: id });
+      notifyMutation({ type: "task_deleted", taskId: id });
     }
   },
 
@@ -444,7 +545,7 @@ export const taskStorage = {
       id: crypto.randomUUID(),
       title: clean,
       originalWording: text,
-      status: 'captured',
+      status: "captured",
       createdAt: new Date().toISOString(),
       accumulatedActiveSeconds: 0,
       activeSegmentStartedAt: null,
@@ -456,30 +557,64 @@ export const taskStorage = {
     return newTask;
   },
 
-  // 2. Clarify: Enhances captured item with micro-steps, duration, or notes
-  clarifyTask: (id: string, updates: Partial<Task>, scope?: string): Task | null => {
+  // 2. Clarify: Enhances captured item with micro-steps, duration, or notes without disturbing active/resumed/paused state
+  clarifyTask: (
+    id: string,
+    updates: Partial<Task>,
+    scope?: string,
+  ): Task | null => {
     const tasks = taskStorage.getAll(scope);
     const target = tasks.find((t) => t.id === id);
     if (!target) return null;
+    if (target.status === "finished") return null; // Reject modifying finished task
+
+    // Retain status if already active, resumed, paused, or picked; otherwise transition captured -> clarified
+    const preservedStatus =
+      target.status === "active" ||
+      target.status === "resumed" ||
+      target.status === "paused" ||
+      target.status === "picked"
+        ? target.status
+        : "clarified";
+
     const updated: Task = {
       ...target,
       ...updates,
-      status: 'clarified',
+      status: preservedStatus,
     };
     taskStorage.save(updated, false, scope);
     return updated;
   },
 
-  // 3. Pick: Designates the single next thing on the Now card
+  // 3. Pick: Designates the single next thing on the Now card.
+  // Closes any running timer segment first, cancels alert, and demotes any previous picked task.
   pickTask: (id: string, scope?: string): Task | null => {
     const tasks = taskStorage.getAll(scope);
     const target = tasks.find((t) => t.id === id);
     if (!target) return null;
+    if (target.status === "finished") return null; // Reject picking finished task
+    if (target.status === "picked") return target; // Idempotent
+
+    // If currently running, close the active timer segment cleanly first
+    let accumulated = target.accumulatedActiveSeconds || 0;
+    if (
+      (target.status === "active" || target.status === "resumed") &&
+      target.activeSegmentStartedAt
+    ) {
+      const startMs = new Date(target.activeSegmentStartedAt).getTime();
+      if (!isNaN(startMs)) {
+        accumulated += Math.max(0, Math.floor((Date.now() - startMs) / 1000));
+      }
+      AlertService.cancel(target.id);
+    }
 
     // Demote any other picked task back to clarified (or captured)
     tasks.forEach((t) => {
-      if (t.id !== id && t.status === 'picked') {
-        const nextStatus: TaskStatus = t.microSteps?.length || t.estimatedMinutes ? 'clarified' : 'captured';
+      if (t.id !== id && t.status === "picked") {
+        const nextStatus: LockedTaskStatus =
+          t.microSteps?.length || t.estimatedMinutes || t.dueDate
+            ? "clarified"
+            : "captured";
         const demoted: Task = { ...t, status: nextStatus };
         taskStorage.save(demoted, false, scope);
       }
@@ -487,25 +622,39 @@ export const taskStorage = {
 
     const updated: Task = {
       ...target,
-      status: 'picked',
+      status: "picked",
+      accumulatedActiveSeconds: accumulated,
+      activeSegmentStartedAt: null,
+      targetEndTime: null,
     };
     taskStorage.save(updated, false, scope);
     return updated;
   },
 
-  // 4. Start: Transitions to Active. Automatically pauses any other running task.
+  // 4. Start: Transitions to Active. Idempotent if already active/resumed; delegates to resumeTask if paused.
   startTask: (id: string, scope?: string): Task | null => {
     const tasks = taskStorage.getAll(scope);
     const target = tasks.find((t) => t.id === id);
     if (!target) return null;
+    if (target.status === "finished") return null; // Reject starting finished task
 
-    // Rule: Only one task can be Active at a time.
+    // Idempotent: already running
+    if (target.status === "active" || target.status === "resumed") {
+      return target;
+    }
+
+    // If paused, delegate to resumeTask to maintain exact pause/resume semantics
+    if (target.status === "paused") {
+      return taskStorage.resumeTask(id, scope);
+    }
+
+    // Rule: Only one task can be Active at a time. Auto-pause others.
     tasks.forEach((t) => {
-      if (t.id !== id && (t.status === 'active' || t.status === 'resumed')) {
+      if (t.id !== id && (t.status === "active" || t.status === "resumed")) {
         taskStorage.pauseTask(
           t.id,
-          { lastCompletedStep: 'Auto-paused to start another task' },
-          scope
+          { lastCompletedStep: "Auto-paused to start another task" },
+          scope,
         );
       }
     });
@@ -513,14 +662,16 @@ export const taskStorage = {
     const now = new Date();
     let targetEndTime = target.targetEndTime || null;
     if (!targetEndTime && target.estimatedMinutes) {
-      targetEndTime = new Date(now.getTime() + target.estimatedMinutes * 60 * 1000).toISOString();
+      targetEndTime = new Date(
+        now.getTime() + target.estimatedMinutes * 60 * 1000,
+      ).toISOString();
     } else if (!targetEndTime && target.dueDate) {
       targetEndTime = target.dueDate;
     }
 
     const updated: Task = {
       ...target,
-      status: 'active',
+      status: "active",
       activeSegmentStartedAt: now.toISOString(),
       targetEndTime,
     };
@@ -534,35 +685,58 @@ export const taskStorage = {
     return updated;
   },
 
-  // 5. Pause: Preserves elapsed time and progress, cancels pending alert
+  // 5. Pause: Preserves elapsed time and progress, cancels pending alert. Idempotent if already paused.
   pauseTask: (
     id: string,
     reentryOrNextAction?: Partial<ReentryNote> | string,
-    scope?: string
+    scope?: string,
   ): Task | null => {
     const tasks = taskStorage.getAll(scope);
     const target = tasks.find((t) => t.id === id);
     if (!target) return null;
+    const extraNote: Partial<ReentryNote> =
+      typeof reentryOrNextAction === "string"
+        ? { nextAction: reentryOrNextAction }
+        : reentryOrNextAction || {};
+
+    // Idempotent: if already paused, update reentry note if provided without touching timer
+    if (target.status === "paused") {
+      if (Object.keys(extraNote).length > 0) {
+        const updatedReentry: ReentryNote = {
+          lastCompletedStep:
+            target.reentryNote?.lastCompletedStep ||
+            "Paused for context switch",
+          nextAction: "Open task and take next step",
+          ...target.reentryNote,
+          ...extraNote,
+          updatedAt: new Date().toISOString(),
+        };
+        const updated: Task = { ...target, reentryNote: updatedReentry };
+        taskStorage.save(updated, false, scope);
+        return updated;
+      }
+      return target;
+    }
 
     let segmentElapsed = 0;
-    if ((target.status === 'active' || target.status === 'resumed') && target.activeSegmentStartedAt) {
+    if (
+      (target.status === "active" || target.status === "resumed") &&
+      target.activeSegmentStartedAt
+    ) {
       const startMs = new Date(target.activeSegmentStartedAt).getTime();
       if (!isNaN(startMs)) {
         segmentElapsed = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
       }
     }
 
-    const updatedAccumulated = (target.accumulatedActiveSeconds || 0) + segmentElapsed;
+    const updatedAccumulated =
+      (target.accumulatedActiveSeconds || 0) + segmentElapsed;
     AlertService.cancel(target.id);
 
-    const extraNote: Partial<ReentryNote> =
-      typeof reentryOrNextAction === 'string'
-        ? { nextAction: reentryOrNextAction }
-        : reentryOrNextAction || {};
-
     const updatedReentry: ReentryNote = {
-      lastCompletedStep: target.reentryNote?.lastCompletedStep || 'Paused for context switch',
-      nextAction: 'Open task and take next step',
+      lastCompletedStep:
+        target.reentryNote?.lastCompletedStep || "Paused for context switch",
+      nextAction: "Open task and take next step",
       ...target.reentryNote,
       ...extraNote,
       updatedAt: new Date().toISOString(),
@@ -570,7 +744,7 @@ export const taskStorage = {
 
     const updated: Task = {
       ...target,
-      status: 'paused',
+      status: "paused",
       accumulatedActiveSeconds: updatedAccumulated,
       activeSegmentStartedAt: null,
       targetEndTime: null,
@@ -580,32 +754,45 @@ export const taskStorage = {
     return updated;
   },
 
-  // 6. Resume: Continues elapsed timer from paused total, re-schedules alert if needed
+  // 6. Resume: Continues elapsed timer from paused total, re-schedules alert. Idempotent if already active/resumed.
   resumeTask: (id: string, scope?: string): Task | null => {
     const tasks = taskStorage.getAll(scope);
     const target = tasks.find((t) => t.id === id);
     if (!target) return null;
+    if (target.status === "finished") return null; // Reject resuming finished task
 
-    // Only one task active
+    // Idempotent: already running
+    if (target.status === "resumed" || target.status === "active") {
+      return target;
+    }
+
+    // Only paused tasks can be resumed.
+    if (target.status !== "paused") {
+      return null;
+    }
+
+    // Only one task active at a time
     tasks.forEach((t) => {
-      if (t.id !== id && (t.status === 'active' || t.status === 'resumed')) {
+      if (t.id !== id && (t.status === "active" || t.status === "resumed")) {
         taskStorage.pauseTask(
           t.id,
-          { lastCompletedStep: 'Auto-paused to resume another task' },
-          scope
+          { lastCompletedStep: "Auto-paused to resume another task" },
+          scope,
         );
       }
     });
 
     const now = new Date();
-    let targetEndTime = target.targetEndTime || null;
+    let targetEndTime: string | null = null;
     if (target.estimatedMinutes) {
       const remainingSecs = Math.max(
         0,
-        target.estimatedMinutes * 60 - (target.accumulatedActiveSeconds || 0)
+        target.estimatedMinutes * 60 - (target.accumulatedActiveSeconds || 0),
       );
       if (remainingSecs > 0) {
-        targetEndTime = new Date(now.getTime() + remainingSecs * 1000).toISOString();
+        targetEndTime = new Date(
+          now.getTime() + remainingSecs * 1000,
+        ).toISOString();
       }
     } else if (target.dueDate) {
       targetEndTime = target.dueDate;
@@ -613,7 +800,7 @@ export const taskStorage = {
 
     const updated: Task = {
       ...target,
-      status: 'resumed',
+      status: "resumed",
       activeSegmentStartedAt: now.toISOString(),
       targetEndTime,
     };
@@ -626,26 +813,35 @@ export const taskStorage = {
     return updated;
   },
 
-  // 7. Finish: Completes task, finalizes elapsed time, cancels alert, records completedAt
+  // 7. Finish: Completes task, finalizes elapsed time, cancels alert, records completedAt. Idempotent if already finished.
   finishTask: (id: string, scope?: string): Task | null => {
     const tasks = taskStorage.getAll(scope);
     const target = tasks.find((t) => t.id === id);
     if (!target) return null;
 
+    // Idempotent: already finished
+    if (target.status === "finished") {
+      return target;
+    }
+
     let segmentElapsed = 0;
-    if ((target.status === 'active' || target.status === 'resumed') && target.activeSegmentStartedAt) {
+    if (
+      (target.status === "active" || target.status === "resumed") &&
+      target.activeSegmentStartedAt
+    ) {
       const startMs = new Date(target.activeSegmentStartedAt).getTime();
       if (!isNaN(startMs)) {
         segmentElapsed = Math.max(0, Math.floor((Date.now() - startMs) / 1000));
       }
     }
 
-    const updatedAccumulated = (target.accumulatedActiveSeconds || 0) + segmentElapsed;
+    const updatedAccumulated =
+      (target.accumulatedActiveSeconds || 0) + segmentElapsed;
     AlertService.cancel(target.id);
 
     const updated: Task = {
       ...target,
-      status: 'finished',
+      status: "finished",
       accumulatedActiveSeconds: updatedAccumulated,
       activeSegmentStartedAt: null,
       targetEndTime: null,
@@ -663,10 +859,13 @@ export const taskStorage = {
     const tasks = taskStorage.getAll(scope);
     const target = tasks.find((t) => t.id === id);
     if (!target) return null;
-    if (target.status === 'finished') {
+    if (target.status === "finished") {
       const reopened: Task = {
         ...target,
-        status: target.microSteps?.length || target.estimatedMinutes ? 'clarified' : 'captured',
+        status:
+          target.microSteps?.length || target.estimatedMinutes
+            ? "clarified"
+            : "captured",
         completedAt: undefined,
       };
       taskStorage.save(reopened, false, scope);
@@ -675,7 +874,11 @@ export const taskStorage = {
     return taskStorage.finishTask(id, scope);
   },
 
-  updateMicroSteps: (id: string, microSteps: MicroStepItem[], scope?: string): Task | null => {
+  updateMicroSteps: (
+    id: string,
+    microSteps: MicroStepItem[],
+    scope?: string,
+  ): Task | null => {
     const tasks = taskStorage.getAll(scope);
     const target = tasks.find((t) => t.id === id);
     if (!target) return null;
@@ -797,7 +1000,11 @@ export const habitStorage = {
     setToStorage(STORAGE_KEYS.HABIT_CHECKINS, filtered, scope);
   },
 
-  isCheckedToday: (habitId: string, dateStr?: string, scope?: string): boolean => {
+  isCheckedToday: (
+    habitId: string,
+    dateStr?: string,
+    scope?: string,
+  ): boolean => {
     const today = dateStr || formatDateKey(new Date());
     return habitStorage
       .getCheckIns(undefined, scope)
@@ -811,9 +1018,9 @@ export const moodStorage = {
       STORAGE_KEYS.MOODS,
       [
         {
-          id: 'seed-mood-yesterday',
-          level: 'good',
-          note: 'Focused on deep work after taking morning walk',
+          id: "seed-mood-yesterday",
+          level: "good",
+          note: "Focused on deep work after taking morning walk",
           loggedAt: new Date(Date.now() - 86400000).toISOString(),
         },
       ],
@@ -848,8 +1055,8 @@ export const noteStorage = {
       STORAGE_KEYS.NOTES,
       [
         {
-          id: 'note-1',
-          body: 'Idea for evening shutdown: set timer for 8:45 PM to put phone in kitchen station.\nReduces blue light before sleep.',
+          id: "note-1",
+          body: "Idea for evening shutdown: set timer for 8:45 PM to put phone in kitchen station.\nReduces blue light before sleep.",
           pinned: true,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
@@ -871,11 +1078,16 @@ export const noteStorage = {
     }
     setToStorage(STORAGE_KEYS.NOTES, notes, scope);
     if (!isRemote) {
-      const targetUser = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+      const targetUser =
+        scope !== undefined
+          ? scope && scope !== "guest"
+            ? scope
+            : null
+          : storageUser;
       if (targetUser) {
-        queueWrite('notes', note.id, note, targetUser);
+        queueWrite("notes", note.id, note, targetUser);
       }
-      notifyMutation({ type: 'note_saved', note });
+      notifyMutation({ type: "note_saved", note });
     }
   },
 
@@ -883,11 +1095,16 @@ export const noteStorage = {
     const notes = noteStorage.getAll(scope).filter((n) => n.id !== id);
     setToStorage(STORAGE_KEYS.NOTES, notes, scope);
     if (!isRemote) {
-      const targetUser = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+      const targetUser =
+        scope !== undefined
+          ? scope && scope !== "guest"
+            ? scope
+            : null
+          : storageUser;
       if (targetUser) {
-        queueWrite('notes', id, null, targetUser);
+        queueWrite("notes", id, null, targetUser);
       }
-      notifyMutation({ type: 'note_deleted', noteId: id });
+      notifyMutation({ type: "note_deleted", noteId: id });
     }
   },
 
@@ -897,21 +1114,22 @@ export const noteStorage = {
     if (!n) return;
     n.pinned = !n.pinned;
     setToStorage(STORAGE_KEYS.NOTES, notes, scope);
-    const targetUser = scope !== undefined ? (scope && scope !== 'guest' ? scope : null) : storageUser;
+    const targetUser =
+      scope !== undefined
+        ? scope && scope !== "guest"
+          ? scope
+          : null
+        : storageUser;
     if (targetUser) {
-      queueWrite('notes', n.id, n, targetUser);
+      queueWrite("notes", n.id, n, targetUser);
     }
-    notifyMutation({ type: 'note_saved', note: n });
+    notifyMutation({ type: "note_saved", note: n });
   },
 };
 
 export const settingsStorage = {
   get: (scope?: string): AppSettings =>
-    getFromStorage<AppSettings>(
-      STORAGE_KEYS.SETTINGS,
-      DEFAULT_SETTINGS,
-      scope,
-    ),
+    getFromStorage<AppSettings>(STORAGE_KEYS.SETTINGS, DEFAULT_SETTINGS, scope),
 
   save: (updates: Partial<AppSettings>, scope?: string): AppSettings => {
     const current = settingsStorage.get(scope);
@@ -934,7 +1152,7 @@ export const hevyStorage = {
   },
 
   getApiKey: (scope?: string): string => {
-    return localStorage.getItem(scopedKey(STORAGE_KEYS.HEVY_KEY, scope)) || '';
+    return localStorage.getItem(scopedKey(STORAGE_KEYS.HEVY_KEY, scope)) || "";
   },
 
   saveApiKey: (key: string, scope?: string): void => {
@@ -961,10 +1179,10 @@ export interface GuestDataSummary {
 
 export function getGuestDataSummary(): GuestDataSummary {
   try {
-    const tasks = taskStorage.getAllForScope('guest');
-    const routines = routineStorage.getAllForScope('guest');
-    const habits = habitStorage.getAllForScope('guest');
-    const notes = noteStorage.getAllForScope('guest');
+    const tasks = taskStorage.getAllForScope("guest");
+    const routines = routineStorage.getAllForScope("guest");
+    const habits = habitStorage.getAllForScope("guest");
+    const notes = noteStorage.getAllForScope("guest");
 
     const taskCount = tasks.length;
     const routineCount = routines.length;
@@ -976,22 +1194,34 @@ export function getGuestDataSummary(): GuestDataSummary {
       routineCount,
       habitCount,
       noteCount,
-      hasData: taskCount > 0 || routineCount > 0 || habitCount > 0 || noteCount > 0,
+      hasData:
+        taskCount > 0 || routineCount > 0 || habitCount > 0 || noteCount > 0,
     };
   } catch {
-    return { taskCount: 0, routineCount: 0, habitCount: 0, noteCount: 0, hasData: false };
+    return {
+      taskCount: 0,
+      routineCount: 0,
+      habitCount: 0,
+      noteCount: 0,
+      hasData: false,
+    };
   }
 }
 
 export function isGuestImportResolved(userId: string): boolean {
   if (!userId) return true;
-  return localStorage.getItem(`neuroflow_${userId}_guest_import_resolved`) === 'true';
+  return (
+    localStorage.getItem(`neuroflow_${userId}_guest_import_resolved`) === "true"
+  );
 }
 
-export function setGuestImportResolved(userId: string, resolved: boolean): void {
+export function setGuestImportResolved(
+  userId: string,
+  resolved: boolean,
+): void {
   if (!userId) return;
   if (resolved) {
-    localStorage.setItem(`neuroflow_${userId}_guest_import_resolved`, 'true');
+    localStorage.setItem(`neuroflow_${userId}_guest_import_resolved`, "true");
   } else {
     localStorage.removeItem(`neuroflow_${userId}_guest_import_resolved`);
   }
@@ -1003,25 +1233,30 @@ export function importGuestDataToAccount(targetUserId: string): {
   importedHabits: number;
   importedNotes: number;
 } {
-  if (!targetUserId || targetUserId === 'guest') {
-    return { importedTasks: 0, importedRoutines: 0, importedHabits: 0, importedNotes: 0 };
+  if (!targetUserId || targetUserId === "guest") {
+    return {
+      importedTasks: 0,
+      importedRoutines: 0,
+      importedHabits: 0,
+      importedNotes: 0,
+    };
   }
 
   // 1. Snapshot backup of current guest data
   const guestBackupKey = `neuroflow_guest_backup_after_import_${Date.now()}`;
   const guestSnapshot = {
     exportedAt: new Date().toISOString(),
-    tasks: taskStorage.getAllForScope('guest'),
-    routines: routineStorage.getAllForScope('guest'),
-    habits: habitStorage.getAllForScope('guest'),
-    habitCheckIns: habitStorage.getCheckIns(undefined, 'guest'),
-    moods: moodStorage.getAll('guest'),
-    notes: noteStorage.getAllForScope('guest'),
+    tasks: taskStorage.getAllForScope("guest"),
+    routines: routineStorage.getAllForScope("guest"),
+    habits: habitStorage.getAllForScope("guest"),
+    habitCheckIns: habitStorage.getCheckIns(undefined, "guest"),
+    moods: moodStorage.getAll("guest"),
+    notes: noteStorage.getAllForScope("guest"),
   };
   localStorage.setItem(guestBackupKey, JSON.stringify(guestSnapshot));
 
   // 2. Non-destructive merge of tasks
-  const guestTasks = taskStorage.getAllForScope('guest');
+  const guestTasks = taskStorage.getAllForScope("guest");
   const accountTasks = taskStorage.getAll(targetUserId);
   const existingTaskIds = new Set(accountTasks.map((t) => t.id));
   let importedTasks = 0;
@@ -1030,14 +1265,14 @@ export function importGuestDataToAccount(targetUserId: string): {
     if (!existingTaskIds.has(t.id)) {
       accountTasks.unshift(t);
       importedTasks++;
-      queueWrite('tasks', t.id, t, targetUserId);
-      notifyMutation({ type: 'task_saved', task: t });
+      queueWrite("tasks", t.id, t, targetUserId);
+      notifyMutation({ type: "task_saved", task: t });
     }
   }
   setToStorage(STORAGE_KEYS.TASKS, accountTasks, targetUserId);
 
   // 3. Non-destructive merge of routines
-  const guestRoutines = routineStorage.getAllForScope('guest');
+  const guestRoutines = routineStorage.getAllForScope("guest");
   const accountRoutines = routineStorage.getAll(targetUserId);
   const existingRoutineIds = new Set(accountRoutines.map((r) => r.id));
   let importedRoutines = 0;
@@ -1051,7 +1286,7 @@ export function importGuestDataToAccount(targetUserId: string): {
   setToStorage(STORAGE_KEYS.ROUTINES, accountRoutines, targetUserId);
 
   // 4. Non-destructive merge of habits
-  const guestHabits = habitStorage.getAllForScope('guest');
+  const guestHabits = habitStorage.getAllForScope("guest");
   const accountHabits = habitStorage.getAll(targetUserId);
   const existingHabitIds = new Set(accountHabits.map((h) => h.id));
   let importedHabits = 0;
@@ -1065,7 +1300,7 @@ export function importGuestDataToAccount(targetUserId: string): {
   setToStorage(STORAGE_KEYS.HABITS, accountHabits, targetUserId);
 
   // 5. Non-destructive merge of notes
-  const guestNotes = noteStorage.getAllForScope('guest');
+  const guestNotes = noteStorage.getAllForScope("guest");
   const accountNotes = noteStorage.getAll(targetUserId);
   const existingNoteIds = new Set(accountNotes.map((n) => n.id));
   let importedNotes = 0;
@@ -1074,8 +1309,8 @@ export function importGuestDataToAccount(targetUserId: string): {
     if (!existingNoteIds.has(n.id)) {
       accountNotes.unshift(n);
       importedNotes++;
-      queueWrite('notes', n.id, n, targetUserId);
-      notifyMutation({ type: 'note_saved', note: n });
+      queueWrite("notes", n.id, n, targetUserId);
+      notifyMutation({ type: "note_saved", note: n });
     }
   }
   setToStorage(STORAGE_KEYS.NOTES, accountNotes, targetUserId);
@@ -1131,12 +1366,16 @@ export interface ExportOptions {
 export function exportAllData(options?: ExportOptions) {
   const includeSensitive = options?.includeSensitive === true;
   const allHabits = habitStorage.getAll();
-  const exportedHabits = includeSensitive ? allHabits : filterNonSensitiveHabits(allHabits);
+  const exportedHabits = includeSensitive
+    ? allHabits
+    : filterNonSensitiveHabits(allHabits);
 
   return {
     version: 2,
     scope: getStorageScope(),
-    privacyTier: includeSensitive ? 'full-including-sensitive' : 'standard-non-sensitive',
+    privacyTier: includeSensitive
+      ? "full-including-sensitive"
+      : "standard-non-sensitive",
     exportedAt: new Date().toISOString(),
     tasks: taskStorage.getAll(),
     routines: routineStorage.getAll(),

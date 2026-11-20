@@ -369,7 +369,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({
             </div>
             <div>
               <h4 className="text-xs font-medium text-[#F0F0F0]">Health Integrations</h4>
-              <p className="text-[11px] text-[#8A8A8E]">Deferred in Slice 1 (Local-first only)</p>
+              <p className="text-[11px] text-[#8A8A8E]">Hevy API Key & Workout Ingestion</p>
             </div>
           </div>
           <ChevronRight className="w-4 h-4 text-[#8A8A8E]" />

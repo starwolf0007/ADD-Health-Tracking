@@ -1,16 +1,19 @@
-import { beforeEach, test } from 'node:test';
-import assert from 'node:assert/strict';
+import { beforeEach, test } from "node:test";
+import assert from "node:assert/strict";
 import {
   migrateTask,
   taskStorage,
   setStorageUser,
   getElapsedActiveSeconds,
-} from '../src/lib/storage';
-import { AlertService } from '../src/lib/alerts';
-import type { Task } from '../src/types';
+  LOCKED_TASK_STATUSES,
+  isLockedTaskStatus,
+} from "../src/lib/storage";
+import { AlertService } from "../src/lib/alerts";
+import { SEED_TASKS } from "../src/lib/constants";
+import type { Task } from "../src/types";
 
 const values = new Map<string, string>();
-Object.defineProperty(globalThis, 'localStorage', {
+Object.defineProperty(globalThis, "localStorage", {
   value: {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => {
@@ -29,86 +32,152 @@ beforeEach(() => {
   AlertService.clearAll();
 });
 
-test('migration: legacy task records (pending, inProgress, completed, skipped, blocked) map cleanly to 7 states', () => {
+test("migration: legacy task records (pending, inProgress, completed, skipped, blocked) map cleanly to 7 states", () => {
   // Legacy pending with no details -> captured
   const legacyPending = migrateTask({
-    id: 'leg-1',
-    title: 'Buy milk',
-    status: 'pending',
-    createdAt: '2026-10-01T10:00:00Z',
+    id: "leg-1",
+    title: "Buy milk",
+    status: "pending",
+    createdAt: "2026-10-01T10:00:00Z",
   });
-  assert.equal(legacyPending.status, 'captured');
-  assert.equal(legacyPending.originalWording, 'Buy milk');
+  assert.equal(legacyPending.status, "captured");
+  assert.equal(legacyPending.originalWording, "Buy milk");
   assert.equal(legacyPending.accumulatedActiveSeconds, 0);
 
   // Legacy pending with micro-steps or duration -> clarified
   const legacyClarified = migrateTask({
-    id: 'leg-2',
-    title: 'Clean garage',
-    status: 'pending',
+    id: "leg-2",
+    title: "Clean garage",
+    status: "pending",
     estimatedMinutes: 30,
-    microSteps: [{ id: 's1', title: 'Sweep floor', completed: false }],
+    microSteps: [{ id: "s1", title: "Sweep floor", completed: false }],
   });
-  assert.equal(legacyClarified.status, 'clarified');
+  assert.equal(legacyClarified.status, "clarified");
 
   // Legacy inProgress -> active with activeSegmentStartedAt populated
   const legacyInProgress = migrateTask({
-    id: 'leg-3',
-    title: 'Draft email',
-    status: 'inProgress',
-    activeStartedAt: '2026-10-01T12:00:00Z',
+    id: "leg-3",
+    title: "Draft email",
+    status: "inProgress",
+    activeStartedAt: "2026-10-01T12:00:00Z",
   });
-  assert.equal(legacyInProgress.status, 'active');
-  assert.equal(legacyInProgress.activeSegmentStartedAt, '2026-10-01T12:00:00Z');
+  assert.equal(legacyInProgress.status, "active");
+  assert.equal(legacyInProgress.activeSegmentStartedAt, "2026-10-01T12:00:00Z");
 
   // Legacy completed -> finished
   const legacyCompleted = migrateTask({
-    id: 'leg-4',
-    title: 'Pay utility bill',
-    status: 'completed',
-    completedAt: '2026-10-01T14:00:00Z',
+    id: "leg-4",
+    title: "Pay utility bill",
+    status: "completed",
+    completedAt: "2026-10-01T14:00:00Z",
   });
-  assert.equal(legacyCompleted.status, 'finished');
+  assert.equal(legacyCompleted.status, "finished");
 
   // Legacy skipped or blocked -> captured
   const legacySkipped = migrateTask({
-    id: 'leg-5',
-    title: 'Read book',
-    status: 'skipped',
+    id: "leg-5",
+    title: "Read book",
+    status: "skipped",
   });
-  assert.equal(legacySkipped.status, 'captured');
+  assert.equal(legacySkipped.status, "captured");
 });
 
-test('7-state transitions: Capture → Clarify → Pick → Start → Pause → Resume → Finish', () => {
+test("migration: SEED_TASKS and complex pre-Slice-1 records retain all fields and normalize unknown statuses", () => {
+  // 1. Verify SEED_TASKS migration preserves energy, notes, dueDate, isQuickWin, etc.
+  for (const seed of SEED_TASKS) {
+    const migrated = migrateTask(seed);
+    assert.ok(isLockedTaskStatus(migrated.status));
+    assert.equal(migrated.id, seed.id);
+    assert.equal(migrated.title, seed.title);
+    assert.equal(migrated.notes, seed.notes);
+    assert.equal(migrated.energy, seed.energy);
+    assert.equal(migrated.isQuickWin, seed.isQuickWin);
+    assert.equal(migrated.dueDate, seed.dueDate);
+    assert.equal(migrated.estimatedMinutes, seed.estimatedMinutes);
+    // Since seed tasks have estimatedMinutes or dueDate, they map to 'clarified'
+    assert.equal(migrated.status, "clarified");
+  }
+
+  // 2. Complex record with Google Task ID, notes, and unknown status 'archived'
+  const complexRecord = {
+    id: "complex-99",
+    title: "Sync quarterly tax returns",
+    originalWording: "Tax returns Q3",
+    notes: "Include 1099-NEC and receipt ledger",
+    energy: "high" as const,
+    status: "archived", // Unknown legacy status
+    createdAt: "2026-08-15T09:00:00Z",
+    dueDate: "2026-09-15T17:00:00Z",
+    googleTaskId: "gtask-xyz-889",
+    isQuickWin: false,
+    estimatedMinutes: 60,
+    microSteps: [
+      { id: "ms-1", title: "Export Stripe transactions", completed: true },
+      { id: "ms-2", title: "Upload to CPA portal", completed: false },
+    ],
+  };
+
+  const migratedComplex = migrateTask(complexRecord);
+  assert.equal(migratedComplex.status, "clarified"); // Has microSteps and duration
+  assert.equal(migratedComplex.googleTaskId, "gtask-xyz-889");
+  assert.equal(migratedComplex.notes, "Include 1099-NEC and receipt ledger");
+  assert.equal(migratedComplex.energy, "high");
+  assert.equal(migratedComplex.microSteps?.length, 2);
+  assert.equal(migratedComplex.isQuickWin, false);
+
+  // 3. Repeated migration is strictly idempotent
+  const twiceMigrated = migrateTask(migratedComplex);
+  assert.deepEqual(twiceMigrated, migratedComplex);
+
+  // 4. taskStorage.save prevents saving legacy or non-canonical statuses back to disk
+  taskStorage.save({
+    ...complexRecord,
+    status: "pending" as any,
+  });
+
+  const rawSavedJson = values.get("neuroflow_tasks");
+  assert.ok(rawSavedJson);
+  const parsed = JSON.parse(rawSavedJson);
+  const persisted = parsed.find((t: any) => t.id === "complex-99");
+  assert.ok(persisted);
+  assert.equal(persisted.status, "clarified"); // Normalized before saving
+  assert.equal(persisted.googleTaskId, "gtask-xyz-889");
+});
+
+test("7-state transitions: Capture → Clarify → Pick → Start → Pause → Resume → Finish", () => {
   // 1. Capture: raw verbatim capture, zero required fields
-  const captured = taskStorage.captureItem('Fix leaking bathroom tap tonight');
-  assert.equal(captured.status, 'captured');
-  assert.equal(captured.originalWording, 'Fix leaking bathroom tap tonight');
-  assert.equal(captured.title, 'Fix leaking bathroom tap tonight');
+  const captured = taskStorage.captureItem("Fix leaking bathroom tap tonight");
+  assert.equal(captured.status, "captured");
+  assert.equal(captured.originalWording, "Fix leaking bathroom tap tonight");
+  assert.equal(captured.title, "Fix leaking bathroom tap tonight");
   assert.equal(captured.accumulatedActiveSeconds, 0);
 
   // 2. Clarify: breakdown micro-steps and duration
   const clarified = taskStorage.clarifyTask(captured.id, {
     estimatedMinutes: 20,
     microSteps: [
-      { id: 'm1', title: 'Turn off water valve under sink', completed: false },
-      { id: 'm2', title: 'Unscrew aerator and replace rubber washer', completed: false },
+      { id: "m1", title: "Turn off water valve under sink", completed: false },
+      {
+        id: "m2",
+        title: "Unscrew aerator and replace rubber washer",
+        completed: false,
+      },
     ],
   });
   assert.ok(clarified);
-  assert.equal(clarified.status, 'clarified');
+  assert.equal(clarified.status, "clarified");
   assert.equal(clarified.estimatedMinutes, 20);
   assert.equal(clarified.microSteps?.length, 2);
 
   // 3. Pick: designate as the single next thing
   const picked = taskStorage.pickTask(captured.id);
   assert.ok(picked);
-  assert.equal(picked.status, 'picked');
+  assert.equal(picked.status, "picked");
 
   // 4. Start: transitions to Active, records start timestamp, schedules alert
   const active = taskStorage.startTask(captured.id);
   assert.ok(active);
-  assert.equal(active.status, 'active');
+  assert.equal(active.status, "active");
   assert.ok(active.activeSegmentStartedAt);
   assert.ok(active.targetEndTime);
   // AlertService abstracted contract: schedule was called
@@ -122,23 +191,23 @@ test('7-state transitions: Capture → Clarify → Pick → Start → Pause → 
   taskStorage.save({ ...active, activeSegmentStartedAt: startedAt });
 
   const paused = taskStorage.pauseTask(captured.id, {
-    lastCompletedStep: 'Turned off water valve',
-    nextAction: 'Unscrew aerator',
+    lastCompletedStep: "Turned off water valve",
+    nextAction: "Unscrew aerator",
   });
   assert.ok(paused);
-  assert.equal(paused.status, 'paused');
+  assert.equal(paused.status, "paused");
   assert.equal(paused.activeSegmentStartedAt, null);
   assert.equal(paused.targetEndTime, null);
   assert.ok((paused.accumulatedActiveSeconds || 0) >= 10);
-  assert.equal(paused.reentryNote?.lastCompletedStep, 'Turned off water valve');
-  assert.equal(paused.reentryNote?.nextAction, 'Unscrew aerator');
+  assert.equal(paused.reentryNote?.lastCompletedStep, "Turned off water valve");
+  assert.equal(paused.reentryNote?.nextAction, "Unscrew aerator");
   // Alert cancelled on pause
   assert.equal(AlertService.getPending(captured.id), undefined);
 
   // 6. Resume: restarts timer from accumulated total, re-schedules alert
   const resumed = taskStorage.resumeTask(captured.id);
   assert.ok(resumed);
-  assert.equal(resumed.status, 'resumed');
+  assert.equal(resumed.status, "resumed");
   assert.ok(resumed.activeSegmentStartedAt);
   assert.ok(AlertService.getPending(captured.id));
 
@@ -149,7 +218,7 @@ test('7-state transitions: Capture → Clarify → Pick → Start → Pause → 
 
   const finished = taskStorage.finishTask(captured.id);
   assert.ok(finished);
-  assert.equal(finished.status, 'finished');
+  assert.equal(finished.status, "finished");
   assert.ok((finished.accumulatedActiveSeconds || 0) >= 15);
   assert.ok(finished.completedAt);
   assert.equal(finished.activeSegmentStartedAt, null);
@@ -158,13 +227,102 @@ test('7-state transitions: Capture → Clarify → Pick → Start → Pause → 
   assert.equal(AlertService.getPending(captured.id), undefined);
 });
 
-test('rule: only one task may be active at a time; starting a second task pauses the first', () => {
-  const task1 = taskStorage.captureItem('Task 1');
-  const task2 = taskStorage.captureItem('Task 2');
+test("lifecycle guards & idempotency: repeated actions cannot corrupt timestamps or accumulate duplicate time", () => {
+  const task = taskStorage.captureItem("Idempotency Guard Test");
+  taskStorage.clarifyTask(task.id, { estimatedMinutes: 15 });
+
+  // 1. Initial start
+  const started1 = taskStorage.startTask(task.id)!;
+  assert.equal(started1.status, "active");
+  const segment1StartedAt = started1.activeSegmentStartedAt;
+  assert.ok(segment1StartedAt);
+
+  // Duplicate Start: must be idempotent and NEVER overwrite activeSegmentStartedAt
+  const duplicateStart = taskStorage.startTask(task.id)!;
+  assert.equal(duplicateStart.status, "active");
+  assert.equal(duplicateStart.activeSegmentStartedAt, segment1StartedAt);
+
+  // Simulate 20 seconds elapsed
+  const running20s = new Date(Date.now() - 20000).toISOString();
+  taskStorage.save({ ...started1, activeSegmentStartedAt: running20s });
+
+  // 2. Pause
+  const paused1 = taskStorage.pauseTask(task.id, "Next: Review diffs")!;
+  assert.equal(paused1.status, "paused");
+  const accumulatedAfterPause1 = paused1.accumulatedActiveSeconds!;
+  assert.ok(accumulatedAfterPause1 >= 20);
+
+  // Duplicate Pause: must be idempotent and NOT accumulate extra time
+  const duplicatePause = taskStorage.pauseTask(
+    task.id,
+    "Next: Review diffs updated",
+  )!;
+  assert.equal(duplicatePause.status, "paused");
+  assert.equal(duplicatePause.accumulatedActiveSeconds, accumulatedAfterPause1);
+  assert.equal(
+    duplicatePause.reentryNote?.nextAction,
+    "Next: Review diffs updated",
+  );
+
+  // 3. Resume
+  const resumed1 = taskStorage.resumeTask(task.id)!;
+  assert.equal(resumed1.status, "resumed");
+  const resumedSegmentStartedAt = resumed1.activeSegmentStartedAt;
+  assert.ok(resumedSegmentStartedAt);
+
+  // Duplicate Resume: must be idempotent and NOT overwrite activeSegmentStartedAt
+  const duplicateResume = taskStorage.resumeTask(task.id)!;
+  assert.equal(duplicateResume.status, "resumed");
+  assert.equal(duplicateResume.activeSegmentStartedAt, resumedSegmentStartedAt);
+
+  // 4. Pick running task: must close running timer segment cleanly before setting picked
+  const runningBeforePick = new Date(Date.now() - 15000).toISOString();
+  taskStorage.save({ ...resumed1, activeSegmentStartedAt: runningBeforePick });
+
+  const pickedFromRunning = taskStorage.pickTask(task.id)!;
+  assert.equal(pickedFromRunning.status, "picked");
+  assert.equal(pickedFromRunning.activeSegmentStartedAt, null);
+  assert.ok(
+    pickedFromRunning.accumulatedActiveSeconds! >= accumulatedAfterPause1 + 15,
+  );
+  // Alert cancelled on pick
+  assert.equal(AlertService.getPending(task.id), undefined);
+
+  // Duplicate Pick: idempotent
+  const duplicatePick = taskStorage.pickTask(task.id)!;
+  assert.equal(duplicatePick.status, "picked");
+
+  // 5. Finish
+  const finished = taskStorage.finishTask(task.id)!;
+  assert.equal(finished.status, "finished");
+  const finalAccumulated = finished.accumulatedActiveSeconds!;
+  const completedAt = finished.completedAt!;
+  assert.ok(completedAt);
+
+  // Duplicate Finish: idempotent
+  const duplicateFinish = taskStorage.finishTask(task.id)!;
+  assert.equal(duplicateFinish.status, "finished");
+  assert.equal(duplicateFinish.accumulatedActiveSeconds, finalAccumulated);
+  assert.equal(duplicateFinish.completedAt, completedAt);
+
+  // 6. Invalid transitions on finished task must be rejected
+  assert.equal(taskStorage.startTask(task.id), null);
+  assert.equal(taskStorage.resumeTask(task.id), null);
+  assert.equal(taskStorage.pickTask(task.id), null);
+  assert.equal(taskStorage.clarifyTask(task.id, { title: "Changed" }), null);
+
+  // Confirm task is still finished
+  const taskAfterInvalid = taskStorage.getAll().find((t) => t.id === task.id)!;
+  assert.equal(taskAfterInvalid.status, "finished");
+});
+
+test("rule: only one task may be active at a time; starting a second task pauses the first", () => {
+  const task1 = taskStorage.captureItem("Task 1");
+  const task2 = taskStorage.captureItem("Task 2");
 
   taskStorage.startTask(task1.id);
   const running1 = taskStorage.getAll().find((t) => t.id === task1.id);
-  assert.equal(running1?.status, 'active');
+  assert.equal(running1?.status, "active");
 
   // Start second task
   taskStorage.startTask(task2.id);
@@ -173,12 +331,12 @@ test('rule: only one task may be active at a time; starting a second task pauses
   const t1 = updatedTasks.find((t) => t.id === task1.id);
   const t2 = updatedTasks.find((t) => t.id === task2.id);
 
-  assert.equal(t1?.status, 'paused');
-  assert.equal(t2?.status, 'active');
+  assert.equal(t1?.status, "paused");
+  assert.equal(t2?.status, "active");
 });
 
-test('alert-ready timer contract: reaching deadline does not finish task; pause and finish cancel alert', () => {
-  const task = taskStorage.captureItem('Deadline Task');
+test("alert-ready timer contract: reaching deadline does not finish task; pause and finish cancel alert", () => {
+  const task = taskStorage.captureItem("Deadline Task");
   taskStorage.clarifyTask(task.id, { estimatedMinutes: 10 });
   const started = taskStorage.startTask(task.id);
   assert.ok(started?.targetEndTime);
@@ -197,7 +355,7 @@ test('alert-ready timer contract: reaching deadline does not finish task; pause 
 
   // Task is still active! Reaching deadline does NOT finish task.
   const reloaded = taskStorage.getAll().find((t) => t.id === task.id);
-  assert.equal(reloaded?.status, 'active');
+  assert.equal(reloaded?.status, "active");
   const elapsed = getElapsedActiveSeconds(reloaded!);
   assert.ok(elapsed >= 65);
 
