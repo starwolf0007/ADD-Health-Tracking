@@ -2,7 +2,7 @@
   "id": "/",
   "name": "NeuroFlow — Executive Companion",
   "short_name": "NeuroFlow",
-  "description": "Local-first ADHD executive companion with one-tap Focus Pod, inline micro-step slicing, visual timeline river, and Lexi AI.",
+  "description": "Local-first executive function doorway: one calm Now card, fast capture, and quiet tracking.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -26,22 +26,22 @@
   ],
   "shortcuts": [
     {
-      "name": "Today Focus Pod",
-      "short_name": "Focus",
-      "description": "Jump straight to your active task or checkpoint",
+      "name": "Now Card",
+      "short_name": "Now",
+      "description": "Jump straight to your one picked thing",
       "url": "/?tab=today"
     },
     {
-      "name": "Talk with Lexi",
-      "short_name": "Lexi",
-      "description": "Slice a task or start Live Voice with Lexi",
-      "url": "/?tab=lexi"
+      "name": "Recall & Inbox",
+      "short_name": "Recall",
+      "description": "View captured thoughts and recall in order",
+      "url": "/?tab=recall"
     },
     {
-      "name": "Run a Routine",
-      "short_name": "Routines",
-      "description": "Launch a guided timed routine",
-      "url": "/?tab=routines"
+      "name": "Quiet History",
+      "short_name": "History",
+      "description": "View quiet completed task history",
+      "url": "/?tab=history"
     }
   ]
 }

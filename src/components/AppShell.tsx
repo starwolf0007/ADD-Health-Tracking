@@ -18,8 +18,10 @@ import {
   RefreshCw,
   AlertCircle,
   Download,
+  Inbox,
+  History as HistoryIcon,
 } from 'lucide-react';
-import { Routine, Achievement, Task } from '../types';
+import { Routine, Task } from '../types';
 import {
   useNeuroStorage,
   exportAllData,
@@ -27,6 +29,8 @@ import {
 import { useFirebaseAuth, useFirestoreSync } from '../lib/firebase';
 import { googleDriveService } from '../lib/googleDrive';
 import { TodayScreen } from '../screens/TodayScreen';
+import { RecallScreen } from '../screens/RecallScreen';
+import { HistoryScreen } from '../screens/HistoryScreen';
 import { NotesScreen } from '../screens/NotesScreen';
 import { RoutinesListScreen } from '../screens/RoutinesListScreen';
 import { ReflectScreen } from '../screens/ReflectScreen';
@@ -39,14 +43,17 @@ import { LexiChatInterface } from './LexiChatInterface';
 import { LiveVoiceScreen } from '../screens/LiveVoiceScreen';
 import { VisualClockTimer } from './VisualClockTimer';
 import { CaptureSheet } from './CaptureSheet';
-import { AchievementToast } from './AchievementToast';
 
 export const AppShell: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'today' | 'routines' | 'lexi' | 'notes' | 'reflect'>(() => {
+  const [activeTab, setActiveTab] = useState<
+    'today' | 'recall' | 'history' | 'routines' | 'lexi' | 'notes' | 'reflect'
+  >(() => {
     if (typeof window !== 'undefined') {
       const tabParam = new URLSearchParams(window.location.search).get('tab');
       if (
         tabParam === 'today' ||
+        tabParam === 'recall' ||
+        tabParam === 'history' ||
         tabParam === 'routines' ||
         tabParam === 'lexi' ||
         tabParam === 'notes' ||
@@ -62,7 +69,6 @@ export const AppShell: React.FC = () => {
   >(null);
   const [runningRoutine, setRunningRoutine] = useState<Routine | null>(null);
   const [isCaptureOpen, setIsCaptureOpen] = useState(false);
-  const [currentAchievement, setCurrentAchievement] = useState<Achievement | null>(null);
   const [deferredInstallPrompt, setDeferredInstallPrompt] = useState<any>(null);
   const [isStandalone, setIsStandalone] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
@@ -137,17 +143,7 @@ export const AppShell: React.FC = () => {
       .checkAndRunAutoBackup(accessToken, payload, {
         refreshToken: signInWithGoogle,
       })
-      .then((res) => {
-        if (res.executed) {
-          setCurrentAchievement({
-            id: `backup-${Date.now()}`,
-            title: 'GOOGLE DRIVE SYNCED',
-            message: `Automatic daily snapshot created (${res.fileName})`,
-            type: 'backup',
-            timestamp: Date.now(),
-          });
-        }
-      })
+      .then(() => {})
       .catch((err) => {
         console.warn('[DriveSync] Auto backup check encountered error:', err);
       });
@@ -166,12 +162,6 @@ export const AppShell: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#0C0C0D] text-[#F0F0F0] flex flex-col selection:bg-[#2FB083]/30">
-      {/* Achievement Toast Host */}
-      <AchievementToast
-        achievement={currentAchievement}
-        onDismiss={() => setCurrentAchievement(null)}
-      />
-
       {/* Top Header */}
       <header className="sticky top-0 z-30 bg-[#0C0C0D]/90 backdrop-blur-md border-b border-[#232326] px-4 py-2.5 flex items-center justify-between max-w-2xl mx-auto w-full">
         <div className="flex items-center gap-2.5">
@@ -309,20 +299,23 @@ export const AppShell: React.FC = () => {
         {activeTab === 'today' && (
           <TodayScreen
             tasks={storage.tasks}
-            routines={storage.routines}
-            habits={storage.habits}
-            todayMood={storage.todayMood}
-            onOpenLexi={() => setActiveTab('lexi')}
-            onOpenSettings={() => setActiveOverlay('settings')}
-            onLaunchRoutine={(routine) => setRunningRoutine(routine)}
-            onTriggerAchievement={(ach) => setCurrentAchievement(ach)}
-            onOpenVisualTimer={(task, mins) =>
-              setVisualTimerState({
-                isOpen: true,
-                task: task || null,
-                initialMinutes: mins || 25,
-              })
-            }
+            onOpenRecall={() => setActiveTab('recall')}
+            onOpenCapture={() => setIsCaptureOpen(true)}
+            refresh={storage.refresh}
+          />
+        )}
+
+        {activeTab === 'recall' && (
+          <RecallScreen
+            tasks={storage.tasks}
+            onPickAndGoToNow={() => setActiveTab('today')}
+            refresh={storage.refresh}
+          />
+        )}
+
+        {activeTab === 'history' && (
+          <HistoryScreen
+            tasks={storage.tasks}
             refresh={storage.refresh}
           />
         )}
@@ -362,8 +355,8 @@ export const AppShell: React.FC = () => {
         <button
           onClick={() => setIsCaptureOpen(true)}
           className="fixed bottom-20 right-5 z-40 w-13 h-13 rounded-2xl bg-[#2FB083] hover:bg-[#2FB083]/90 text-[#0C0C0D] flex items-center justify-center shadow-xl shadow-[#2FB083]/20 active:scale-95 transition-all"
-          title="Add task or thought"
-          aria-label="Add task"
+          title="Fast capture thought or task"
+          aria-label="Fast capture"
         >
           <Plus className="w-6 h-6 stroke-[2.5]" />
         </button>
@@ -381,7 +374,31 @@ export const AppShell: React.FC = () => {
             }`}
           >
             <Sun className="w-5 h-5" />
-            <span className="text-[10px] font-medium tracking-wide">Today</span>
+            <span className="text-[10px] font-medium tracking-wide">Now</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('recall')}
+            className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
+              activeTab === 'recall'
+                ? 'text-[#2FB083]'
+                : 'text-[#8A8A8E] hover:text-[#F0F0F0]'
+            }`}
+          >
+            <Inbox className="w-5 h-5" />
+            <span className="text-[10px] font-medium tracking-wide">Recall</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('history')}
+            className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
+              activeTab === 'history'
+                ? 'text-[#2FB083]'
+                : 'text-[#8A8A8E] hover:text-[#F0F0F0]'
+            }`}
+          >
+            <HistoryIcon className="w-5 h-5" />
+            <span className="text-[10px] font-medium tracking-wide">History</span>
           </button>
 
           <button
@@ -396,25 +413,6 @@ export const AppShell: React.FC = () => {
             <span className="text-[10px] font-medium tracking-wide">Routines</span>
           </button>
 
-          {/* Lexi AI Dedicated Tab */}
-          <button
-            onClick={() => setActiveTab('lexi')}
-            className={`flex flex-col items-center gap-1 py-1 px-3.5 rounded-xl transition-all relative ${
-              activeTab === 'lexi'
-                ? 'text-[#BB86FC] font-semibold'
-                : 'text-[#8A8A8E] hover:text-[#BB86FC]'
-            }`}
-          >
-            <div
-              className={`p-1 rounded-full ${
-                activeTab === 'lexi' ? 'bg-[#BB86FC]/20 ring-1 ring-[#BB86FC]/40' : ''
-              }`}
-            >
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <span className="text-[10px] tracking-wide">Lexi AI</span>
-          </button>
-
           <button
             onClick={() => setActiveTab('notes')}
             className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
@@ -425,18 +423,6 @@ export const AppShell: React.FC = () => {
           >
             <StickyNote className="w-5 h-5" />
             <span className="text-[10px] font-medium tracking-wide">Notes</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('reflect')}
-            className={`flex flex-col items-center gap-1 py-1 px-3 rounded-xl transition-all ${
-              activeTab === 'reflect'
-                ? 'text-[#2FB083]'
-                : 'text-[#8A8A8E] hover:text-[#F0F0F0]'
-            }`}
-          >
-            <Flower2 className="w-5 h-5" />
-            <span className="text-[10px] font-medium tracking-wide">Reflect</span>
           </button>
         </div>
       </nav>

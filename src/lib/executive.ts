@@ -54,7 +54,7 @@ export class Executive {
       if (swDiff !== 0) return swDiff;
 
       const energyOrder: Record<string, number> = { low: 0, medium: 1, high: 2 };
-      return energyOrder[a.energy] - energyOrder[b.energy];
+      return energyOrder[a.energy || 'medium'] - energyOrder[b.energy || 'medium'];
     });
 
     return {

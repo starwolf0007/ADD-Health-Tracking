@@ -2,7 +2,26 @@
 
 export type EnergyLevel = 'low' | 'medium' | 'high';
 
-export type TaskStatus = 'pending' | 'inProgress' | 'completed' | 'skipped' | 'paused' | 'blocked';
+export type LockedTaskStatus =
+  | 'captured'
+  | 'clarified'
+  | 'picked'
+  | 'active'
+  | 'paused'
+  | 'resumed'
+  | 'finished';
+
+// Legacy statuses preserved for migration backwards-compatibility
+export type LegacyTaskStatus = 'pending' | 'inProgress' | 'completed' | 'skipped' | 'blocked';
+
+export type TaskStatus = LockedTaskStatus | LegacyTaskStatus;
+
+export interface MicroStepItem {
+  id: string;
+  title: string;
+  completed: boolean;
+  completedAt?: string;
+}
 
 export interface ReentryNote {
   lastCompletedStep?: string;
@@ -15,16 +34,22 @@ export interface ReentryNote {
 export interface Task {
   id: string;
   title: string;
+  originalWording?: string; // Verbatim capture text
   notes?: string;
-  energy: EnergyLevel;
+  energy?: EnergyLevel;
   status: TaskStatus;
   createdAt: string; // ISO date
   dueDate?: string; // ISO date
   completedAt?: string;
-  activeStartedAt?: string;
+  activeStartedAt?: string; // Legacy support
+  // Persisted Timestamps & Timer Accounting
+  accumulatedActiveSeconds?: number; // Cumulative count-up time across sessions, pauses excluded
+  activeSegmentStartedAt?: string | null; // ISO timestamp when current active/resumed segment started
+  targetEndTime?: string | null; // ISO timestamp for scheduled alert deadline
   estimatedMinutes?: number;
+  microSteps?: MicroStepItem[];
   reentryNote?: ReentryNote;
-  isQuickWin: boolean;
+  isQuickWin?: boolean;
   googleTaskId?: string;
 }
 

@@ -1,0 +1,104 @@
+name: Deploy Preview to Cloud Run
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/slice-1-now-card-fast-capture
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: neuroflow-1e7cd
+  REGION: us-central1
+  SERVICE_NAME: neuroflow-pwa-preview
+  REPOSITORY_NAME: neuroflow-docker
+
+jobs:
+  deploy-preview:
+    name: Build & Deploy PWA Preview to Cloud Run
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate required deployment secrets
+        run: |
+          if [ -z "${{ secrets.GCP_SA_KEY }}" ]; then
+            echo "::error::GCP_SA_KEY repository secret is missing. Bryan must add the service-account key secret before this workflow can deploy."
+            exit 1
+          fi
+          if [ -z "${{ secrets.PREVIEW_PASS }}" ]; then
+            echo "::error::PREVIEW_PASS repository secret is missing. Bryan must configure the PREVIEW_PASS secret before this workflow can deploy."
+            exit 1
+          fi
+
+      - id: auth
+        name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      - name: Configure Docker authentication for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      - name: Ensure Artifact Registry repository exists
+        run: |
+          gcloud artifacts repositories describe ${{ env.REPOSITORY_NAME }} \
+            --location=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} || \
+          gcloud artifacts repositories create ${{ env.REPOSITORY_NAME }} \
+            --repository-format=docker \
+            --location=${{ env.REGION }} \
+            --description="NeuroFlow Docker container images" \
+            --project=${{ env.PROJECT_ID }}
+
+      - name: Build and Push Docker image
+        run: |
+          IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/preview:${{ github.sha }}"
+          IMAGE_LATEST="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/preview:latest"
+          
+          docker build \
+            --file Dockerfile \
+            --tag "$IMAGE_TAG" \
+            --tag "$IMAGE_LATEST" \
+            .
+            
+          docker push "$IMAGE_TAG"
+          docker push "$IMAGE_LATEST"
+
+      - name: Deploy container to Cloud Run
+        run: |
+          IMAGE_TAG="${{ env.REGION }}-docker.pkg.dev/${{ env.PROJECT_ID }}/${{ env.REPOSITORY_NAME }}/preview:${{ github.sha }}"
+          
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image="$IMAGE_TAG" \
+            --region="${{ env.REGION }}" \
+            --project="${{ env.PROJECT_ID }}" \
+            --platform="managed" \
+            --port=8080 \
+            --allow-unauthenticated \
+            --set-env-vars="NODE_ENV=production,DEPLOY_COMMIT=${{ github.sha }},PREVIEW_USER=preview,PREVIEW_PASS=${{ secrets.PREVIEW_PASS }}"
+
+      - name: Output preview URL and deployment verification
+        run: |
+          URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region="${{ env.REGION }}" \
+            --project="${{ env.PROJECT_ID }}" \
+            --format='value(status.url)')
+            
+          echo "=========================================================="
+          echo "Cloud Run Preview Deployed Successfully!"
+          echo "Preview URL: $URL"
+          echo "Deployed SHA: ${{ github.sha }}"
+          echo "Access Control: --allow-unauthenticated (GCP perimeter) with App-Layer HTTP Basic Auth (PREVIEW_USER=preview)"
+          echo "=========================================================="
